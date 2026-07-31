@@ -1,6 +1,6 @@
 plugins {
     id("haven.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
 
@@ -57,11 +57,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.navigation)
+    implementation(libs.hilt.navigation)
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.work.runtime)
-    implementation(libs.hilt.navigation)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)

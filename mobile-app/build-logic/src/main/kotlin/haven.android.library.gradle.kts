@@ -4,7 +4,6 @@ plugins {
 }
 
 android {
-    namespace = "haven.mobile.core.domain"
     compileSdk = 34
 
     defaultConfig {

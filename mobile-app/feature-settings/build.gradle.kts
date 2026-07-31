@@ -1,26 +1,9 @@
 plugins {
     id("haven.android.compose")
-    id("org.jetbrains.kotlin.android")
-    id("com.google.dagger.hilt.android")
 }
 
 android {
     namespace = "haven.mobile.feature.settings"
-    compileSdk = 34
-
-    defaultConfig {
-        minSdk = 26
-        targetSdk = 34
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
-
-    buildFeatures {
-        compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.6.11"
-    }
 }
 
 dependencies {
