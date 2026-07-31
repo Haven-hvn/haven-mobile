@@ -2,6 +2,7 @@ package haven.mobile.feature.community
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -20,8 +23,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import haven.mobile.core.domain.Attestation
+import haven.mobile.core.domain.MediaItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,21 +102,65 @@ fun CommunityScreen(
 }
 
 @Composable
-private fun CommunityListItem(item: haven.mobile.core.domain.MediaItem) {
-    val attestationBadge = if (item.attestation != null) {
-        "Verified"
-    } else {
-        "Unverified"
-    }
+private fun CommunityListItem(item: MediaItem) {
+    Card(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
 
-    Column {
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = "${item.kind} â€¢ $attestationBadge",
-            style = MaterialTheme.typography.bodySmall,
-        )
+                // Attestation badge
+                val attestationBadge = if (item.attestation != null) {
+                    androidx.compose.material3.AssistChip(
+                        onClick = { },
+                        label = { Text("Verified", fontSize = 10.sp) },
+                        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                            containerColor = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                            labelColor = Color(0xFF4CAF50),
+                        ),
+                    )
+                } else {
+                    androidx.compose.material3.AssistChip(
+                        onClick = { },
+                        label = { Text("Unverified", fontSize = 10.sp) },
+                        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                            containerColor = Color(0xFFF44336).copy(alpha = 0.15f),
+                            labelColor = Color(0xFFF44336),
+                        ),
+                    )
+                }
+                attestationBadge
+            }
+
+            Spacer(modifier = Modifier.padding(2.dp))
+
+            Text(
+                text = "${item.kind} • ${item.description ?: ""}",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+            )
+
+            // Gate info
+            item.gate?.let { gate ->
+                Spacer(modifier = Modifier.padding(2.dp))
+                Text(
+                    text = "Gate: ${gate.chain} / ${gate.tokenStandard.name} (threshold: ${gate.threshold})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                )
+            }
+        }
     }
 }
