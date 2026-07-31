@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../haven-dapp"
+		},
+		{
+			"path": "../ic-kotlin"
+		},
+		{
+			"path": "../foc-local-first-android"
+		},
+		{
+			"path": "../haven-cli"
+		}
+	],
+	"settings": {}
+}
