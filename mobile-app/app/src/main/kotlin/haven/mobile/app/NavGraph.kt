@@ -10,13 +10,17 @@ import haven.mobile.feature.onboarding.onboardingRoute
 fun AppNavGraph(
     navController: NavHostController,
     startRoute: AppRoute = AppRoute.Onboarding,
+    onNavigate: () -> Unit = {},
 ) {
     NavHost(
         navController = navController,
         startDestination = startRoute.route(),
     ) {
         composable(AppRoute.Onboarding.route()) {
-            onboardingRoute(navController)
+            onboardingRoute(
+                navController = navController,
+                onNavigate = onNavigate,
+            )
         }
         if (BuildConfig.DEBUG) {
             composable(AppRoute.Debug.route()) {
