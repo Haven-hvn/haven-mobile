@@ -1,5 +1,6 @@
 plugins {
     id("haven.android.library")
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
 }
 
 android {
@@ -17,6 +18,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation("com.google.dagger:hilt-android:2.60.1")
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.4")
     testImplementation("io.mockk:mockk:1.14.11")
     testImplementation("app.cash.turbine:turbine:1.2.1")
