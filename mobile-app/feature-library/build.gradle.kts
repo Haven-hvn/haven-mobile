@@ -1,5 +1,6 @@
 plugins {
     id("haven.android.compose")
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }

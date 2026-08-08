@@ -9,7 +9,6 @@ pluginManagement {
         id("com.android.library") version "9.3.1"
         id("org.jetbrains.kotlin.android") version "2.3.21"
         id("org.jetbrains.kotlin.jvm") version "2.3.21"
-        id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
     }
 }
 dependencyResolutionManagement {
