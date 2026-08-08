@@ -24,6 +24,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.dagger:hilt-android:2.60.1")
     implementation(project(":ic-kotlin"))
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)
