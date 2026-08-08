@@ -15,14 +15,16 @@ abstract class CacheDiModule {
     @Binds
     @Singleton
     abstract fun bindHavenCache(impl: HavenCacheImpl): HavenCache
+}
 
-    @Binds
+@Module
+@InstallIn(SingletonComponent::class)
+object CacheConfigModule {
+    @Provides
     @Singleton
-    abstract fun bindPieceCidVerifier(impl: NoOpPieceCidVerifier): PieceCidVerifier
+    fun provideCacheConfig(): CacheConfig = CacheConfig()
 
     @Provides
     @Singleton
-    fun provideCacheConfig(): CacheConfig {
-        return CacheConfig()
-    }
+    fun providePieceCidVerifier(): PieceCidVerifier = NoOpPieceCidVerifier()
 }

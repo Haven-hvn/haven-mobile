@@ -7,7 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.security.PublicKey
-import java.security.spec.Ed25519PublicKeySpec
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.X509EncodedKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -65,12 +67,21 @@ class AttestationVerifierImpl @Inject constructor(
     }
 
     private fun decodeEd25519PublicKey(bytes: ByteArray): PublicKey {
-        val keySpec = Ed25519PublicKeySpec(bytes)
-        return java.security.KeyFactory.getInstance("EdDSA").generatePublic(keySpec)
+        // Raw 32-byte Ed25519 key — wrap in X.509 SubjectPublicKeyInfo for KeyFactory.
+        // If bytes already look like X.509 (starts with 0x30), use directly.
+        if (bytes.isNotEmpty() && bytes[0] == 0x30.toByte()) {
+            return KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(bytes))
+        }
+        // Build minimal X.509 header for raw 32-byte key: OID 1.3.101.112
+        val header = byteArrayOf(
+            0x30.toByte(), 0x2A.toByte(), 0x30.toByte(), 0x05.toByte(), 0x06.toByte(), 0x03.toByte(), 0x2B.toByte(), 0x65.toByte(), 0x70.toByte(), 0x03.toByte(), 0x21.toByte(), 0x00.toByte()
+        )
+        val x509 = header + bytes
+        return KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(x509))
     }
 
     private fun verifySignature(publicKey: PublicKey, signature: ByteArray, message: ByteArray) {
-        val sig = java.security.Signature.getInstance("Ed25519")
+        val sig = Signature.getInstance("Ed25519")
         sig.initVerify(publicKey)
         sig.update(message)
         if (!sig.verify(signature)) {

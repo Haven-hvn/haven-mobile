@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "haven.mobile.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "haven.mobile"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -29,10 +29,6 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.6.11"
     }
 
     packaging {

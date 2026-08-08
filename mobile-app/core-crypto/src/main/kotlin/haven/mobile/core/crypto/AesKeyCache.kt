@@ -1,5 +1,6 @@
 package haven.mobile.core.crypto
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -8,7 +9,32 @@ class AesKeyCache(private val capacity: Int = 256) {
     private val mutex = Mutex()
 
     fun put(pieceCid: String, key: ByteArray) {
-        mutex.runBlocking {
+        runBlocking {
+            mutex.withLock {
+                if (cache.size >= capacity) {
+                    val eldest = cache.entries.first()
+                    zeroize(eldest.value)
+                    cache.remove(eldest.key)
+                }
+                cache[pieceCid] = key.copyOf()
+            }
+        }
+    }
+
+    fun get(pieceCid: String): ByteArray? {
+        return runBlocking {
+            mutex.withLock {
+                cache[pieceCid]?.copyOf()
+            }
+        }
+    }
+
+    suspend fun getSuspend(pieceCid: String): ByteArray? {
+        return mutex.withLock { cache[pieceCid]?.copyOf() }
+    }
+
+    suspend fun putSuspend(pieceCid: String, key: ByteArray) {
+        mutex.withLock {
             if (cache.size >= capacity) {
                 val eldest = cache.entries.first()
                 zeroize(eldest.value)
@@ -18,14 +44,19 @@ class AesKeyCache(private val capacity: Int = 256) {
         }
     }
 
-    fun get(pieceCid: String): ByteArray? {
-        return mutex.runBlocking {
-            cache[pieceCid]?.copyOf()
+    fun clearAll() {
+        runBlocking {
+            mutex.withLock {
+                for (entry in cache.entries) {
+                    zeroize(entry.value)
+                }
+                cache.clear()
+            }
         }
     }
 
-    fun clearAll() {
-        mutex.runBlocking {
+    suspend fun clearAllSuspend() {
+        mutex.withLock {
             for (entry in cache.entries) {
                 zeroize(entry.value)
             }

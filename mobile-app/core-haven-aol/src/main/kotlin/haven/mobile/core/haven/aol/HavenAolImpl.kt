@@ -7,9 +7,7 @@ import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.wallet.WalletSession
 import dev.ic.kotlin.agent.Agent
 import dev.ic.kotlin.agent.AnonymousIdentity
-import dev.ic.kotlin.agent.HttpTransport
 import dev.ic.kotlin.agent.OkHttpTransport
-import dev.ic.kotlin.candid.CandidCodecs
 import dev.ic.kotlin.candid.CandidDecoder
 import dev.ic.kotlin.candid.CandidEncoder
 import dev.ic.kotlin.candid.CandidValue
@@ -18,8 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class HavenAolImpl(
+@Singleton
+class HavenAolImpl @Inject constructor(
     private val config: HavenAolConfig,
     private val walletSession: WalletSession,
     private val aesKeyCache: AesKeyCache,
@@ -27,19 +28,21 @@ class HavenAolImpl(
     private val gateRequestBuilder: GateRequestBuilder
 ) : HavenAol {
 
-    private val agent: Agent = Agent(
-        OkHttpTransport(
-            config.icHost,
-            OkHttpClient.Builder()
-                .connectTimeout(config.requestTimeoutMillis, TimeUnit.MILLISECONDS)
-                .readTimeout(config.requestTimeoutMillis, TimeUnit.MILLISECONDS)
-                .build()
-        ),
-        AnonymousIdentity.INSTANCE,
-        10_000L,
-        1_000L,
-        30_000L
-    )
+    private val agent: Agent by lazy {
+        Agent(
+            OkHttpTransport(
+                config.icHost.ifBlank { "https://ic0.app" },
+                OkHttpClient.Builder()
+                    .connectTimeout(config.requestTimeoutMillis, TimeUnit.MILLISECONDS)
+                    .readTimeout(config.requestTimeoutMillis, TimeUnit.MILLISECONDS)
+                    .build()
+            ),
+            AnonymousIdentity.INSTANCE,
+            10_000L,
+            1_000L,
+            30_000L
+        )
+    }
 
     private val verificationKeyCache = mutableMapOf<String, ByteArray>()
 
@@ -48,8 +51,9 @@ class HavenAolImpl(
             try {
                 when (item.encryptionMetadata) {
                     is GateMetadata.V1 -> decryptV1(item, session)
-                    is GateMetadata.V3 -> decryptAll(listOf(item), session)[0]
-                    else -> Result.failure(HavenError.UnsupportedGateMetadata)
+                    is GateMetadata.V3 -> decryptAll(listOf(item), session).first()
+                    null -> Result.failure(HavenError.UnsupportedGateMetadata("Missing encryptionMetadata"))
+                    else -> Result.failure(HavenError.UnsupportedGateMetadata("Unknown metadata type"))
                 }
             } catch (e: HavenError) {
                 Result.failure(e)
@@ -63,10 +67,13 @@ class HavenAolImpl(
         return withContext(Dispatchers.IO) {
             try {
                 val walletAddress = walletSession.address.value
-                    ?: return@withContext Result.failure(HavenError.WalletNotConnected)
+                    ?: return@withContext Result.failure(HavenError.WalletNotConnected("No wallet connected"))
                 val cached = verificationKeyCache[walletAddress]
                 if (cached != null) {
                     return@withContext Result.success(cached)
+                }
+                if (config.canisterId.isBlank()) {
+                    return@withContext Result.failure(HavenError.CanisterCallFailed("Haven-AOL canisterId not configured"))
                 }
                 val principal = Principal.fromText(config.canisterId)
                 val args = CandidEncoder.INSTANCE.encode(listOf(CandidValue.CandidEmpty))
@@ -86,19 +93,30 @@ class HavenAolImpl(
     override suspend fun decryptAll(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>> {
         return withContext(Dispatchers.IO) {
             try {
-                val grouped = items.groupBy {
-                    val gate = it.gate!!
-                    gate.chain + ":" + gate.tokenAddress + ":" + gate.threshold + ":" + gate.tokenStandard.name
+                if (items.isEmpty()) return@withContext emptyList()
+                val grouped = items.groupBy { item ->
+                    val gate = item.gate
+                    if (gate != null) "${gate.chain}:${gate.tokenAddress}:${gate.threshold}:${gate.tokenStandard.name}"
+                    else "no-gate:${item.id}"
                 }
                 val groupResults = mutableMapOf<String, List<Result<ByteArray>>>()
+                val groupItemsByKey = mutableMapOf<String, List<MediaItem>>()
                 for ((groupKey, groupItems) in grouped) {
-                    groupResults[groupKey] = decryptV3Group(groupItems, session)
+                    groupItemsByKey[groupKey] = groupItems
+                    // Check if any item in group is V3; otherwise treat as V1 per-item
+                    val hasV3 = groupItems.any { it.encryptionMetadata is GateMetadata.V3 }
+                    groupResults[groupKey] = if (hasV3) {
+                        decryptV3Group(groupItems, session)
+                    } else {
+                        groupItems.map { decryptV1(it, session) }
+                    }
                 }
                 items.map { item ->
-                    val gate = item.gate!!
-                    val groupKey = gate.chain + ":" + gate.tokenAddress + ":" + gate.threshold + ":" + gate.tokenStandard.name
+                    val gate = item.gate
+                    val groupKey = if (gate != null) "${gate.chain}:${gate.tokenAddress}:${gate.threshold}:${gate.tokenStandard.name}" else "no-gate:${item.id}"
                     val groupResult = groupResults[groupKey]!!
-                    val indexInGroup = groupItems.indexOf(item)
+                    val itemsInGroup = groupItemsByKey[groupKey]!!
+                    val indexInGroup = itemsInGroup.indexOf(item)
                     groupResult[indexInGroup]
                 }
             } catch (e: HavenError) {
@@ -109,19 +127,27 @@ class HavenAolImpl(
         }
     }
 
-    override fun clearFor(walletAddress: String) {
+    override suspend fun clearFor(walletAddress: String) {
         aesKeyCache.clearAll()
         nonceManager.clearFor(walletAddress, config.canisterId)
         verificationKeyCache.remove(walletAddress)
     }
 
     private suspend fun decryptV1(item: MediaItem, session: WalletSession): Result<ByteArray> {
-        val walletAddress = session.address.value!!
+        val walletAddress = session.address.value
+            ?: return Result.failure(HavenError.WalletNotConnected("No wallet connected"))
         val nonce = nonceManager.getNonce(walletAddress, config.canisterId)
         val payload = gateRequestBuilder.buildV1Request(item, nonce, walletAddress)
-        val signature = session.signTypedDataV4(payload)
-            ?: return Result.failure(HavenError.SigningFailed)
+        val sigResult = session.signTypedDataV4(payload)
+        if (sigResult.isFailure) {
+            val ex = sigResult.exceptionOrNull()
+            return Result.failure(HavenError.SigningFailed(ex?.message ?: "Signing failed"))
+        }
+        val signature = sigResult.getOrNull()!!
 
+        if (config.canisterId.isBlank()) {
+            return Result.failure(HavenError.CanisterCallFailed("Haven-AOL canisterId not configured"))
+        }
         val principal = Principal.fromText(config.canisterId)
         val args = CandidEncoder.INSTANCE.encode(listOf(
             CandidValue.CandidText(item.id),
@@ -132,18 +158,27 @@ class HavenAolImpl(
         val reply = agent.call(principal, "decrypt", args, 0L, ByteArray(0))
         val decoded = CandidDecoder.INSTANCE.decode(reply)
         val aesKey = (decoded.first() as CandidValue.CandidBlob).bytes
-        aesKeyCache.put(item.pieceRef!!.pieceCid, aesKey)
+        val pieceCid = item.pieceRef?.pieceCid
+        if (pieceCid != null) aesKeyCache.put(pieceCid, aesKey)
         return Result.success(aesKey)
     }
 
     private suspend fun decryptV3Group(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>> {
-        val walletAddress = session.address.value!!
+        val walletAddress = session.address.value
+            ?: return items.map { Result.failure(HavenError.WalletNotConnected("No wallet connected")) }
         val nonce = nonceManager.getNonce(walletAddress, config.canisterId)
         val firstItem = items.first()
         val payload = gateRequestBuilder.buildV3Request(firstItem, nonce, walletAddress)
-        val signature = session.signTypedDataV4(payload)
-            ?: return items.map { Result.failure(HavenError.SigningFailed) }
+        val sigResult = session.signTypedDataV4(payload)
+        if (sigResult.isFailure) {
+            val ex = sigResult.exceptionOrNull()
+            return items.map { Result.failure(HavenError.SigningFailed(ex?.message ?: "Signing failed")) }
+        }
+        val signature = sigResult.getOrNull()!!
 
+        if (config.canisterId.isBlank()) {
+            return items.map { Result.failure(HavenError.CanisterCallFailed("Haven-AOL canisterId not configured")) }
+        }
         val principal = Principal.fromText(config.canisterId)
         val itemIdsCandid = items.map { CandidValue.CandidText(it.id) }
         val args = CandidEncoder.INSTANCE.encode(listOf(
@@ -160,10 +195,11 @@ class HavenAolImpl(
 
         return items.mapIndexed { index, item ->
             if (index < keys.size) {
-                aesKeyCache.put(item.pieceRef!!.pieceCid, keys[index])
+                val pieceCid = item.pieceRef?.pieceCid
+                if (pieceCid != null) aesKeyCache.put(pieceCid, keys[index])
                 Result.success(keys[index])
             } else {
-                Result.failure(HavenError.CanisterCallFailed("Missing key for item " + item.id))
+                Result.failure(HavenError.CanisterCallFailed("Missing key for item ${item.id}"))
             }
         }
     }

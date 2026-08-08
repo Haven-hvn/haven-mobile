@@ -30,7 +30,7 @@ class HavenCipherImpl : HavenCipher {
             val plaintext = cipher.doFinal(extractCiphertext(ciphertext))
             Result.success(plaintext)
         } catch (e: Exception) {
-            Result.failure(HavenError.DecryptFailed(e.message ?: "Unknown error"))
+            Result.failure(HavenError.PlaybackDecryptFailed(e.message ?: "Unknown error"))
         }
     }
 

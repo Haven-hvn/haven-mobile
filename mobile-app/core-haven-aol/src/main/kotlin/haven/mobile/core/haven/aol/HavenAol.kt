@@ -22,5 +22,5 @@ interface HavenAol {
     suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray>
     suspend fun verificationKey(): Result<ByteArray>
     suspend fun decryptAll(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>>
-    fun clearFor(walletAddress: String)
+    suspend fun clearFor(walletAddress: String)
 }

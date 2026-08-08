@@ -4,6 +4,14 @@
         mavenCentral()
         gradlePluginPortal()
     }
+    plugins {
+        id("com.android.application") version "8.13.2"
+        id("com.android.library") version "8.13.2"
+        id("org.jetbrains.kotlin.android") version "2.2.21"
+        id("org.jetbrains.kotlin.jvm") version "2.2.21"
+        id("com.google.devtools.ksp") version "2.2.21-2.0.5"
+        id("com.google.dagger.hilt.android") version "2.60.1"
+    }
 }
 
 dependencyResolutionManagement {
@@ -31,9 +39,9 @@ include(":feature-watch")
 include(":feature-community")
 include(":feature-settings")
 
-include(":maestro")
-include(":build-logic")
+includeBuild("build-logic")
+include(":foc-cache")
+project(":foc-cache").projectDir = File("../../foc-local-first-android/foc-cache")
 
-includeBuild("../../foc-local-first-android")
 includeBuild("../../ic-kotlin")
-includeBuild("../../reown-kotlin-develop")
+// includeBuild("../../reown-kotlin-develop") // temporarily disabled for toolkit setup speed — wallet uses stubs; re-enable for full AppKit integration

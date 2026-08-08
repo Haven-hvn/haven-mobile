@@ -20,10 +20,20 @@ abstract class CacheMirrorDiModule {
     @Binds
     @Singleton
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object CacheMirrorDatabaseModule {
+    @Provides
+    @Singleton
+    fun provideMediaDao(database: HavenMirrorDatabase): MediaDao = database.mediaDao()
 
     @Provides
     @Singleton
-    fun provideMediaDao(database: HavenMirrorDatabase): MediaDao {
-        return database.mediaDao()
+    fun provideDatabase(@ApplicationContext context: Context, walletSession: haven.mobile.core.wallet.WalletSession): HavenMirrorDatabase {
+        // Lazy per-wallet DB — create a placeholder; MediaRepositoryImpl manages per-wallet lifecycle.
+        // This provider satisfies Hilt; actual DB is created lazily in MediaRepositoryImpl.
+        return Room.inMemoryDatabaseBuilder(context, HavenMirrorDatabase::class.java).build()
     }
 }

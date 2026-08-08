@@ -15,10 +15,22 @@ abstract class WalletDiModule {
     @Binds
     @Singleton
     abstract fun bindWalletSession(impl: WalletSessionImpl): WalletSession
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object WalletDataStoreModule {
+    @Provides
+    @Singleton
+    fun provideWalletDataStore(@ApplicationContext context: Context): WalletDataStore = WalletDataStore(context)
 
     @Provides
     @Singleton
-    fun provideWalletDataStore(@ApplicationContext context: Context): WalletDataStore {
-        return WalletDataStore(context)
-    }
+    fun provideWalletConfig(): WalletConfig = WalletConfig(
+        projectId = "",
+        appName = "Haven",
+        appDescription = "Haven — gated media",
+        appIconUrl = "",
+        redirectUrl = "haven://connect",
+    )
 }

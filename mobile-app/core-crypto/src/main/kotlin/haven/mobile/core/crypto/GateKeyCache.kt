@@ -1,5 +1,6 @@
 package haven.mobile.core.crypto
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -8,28 +9,34 @@ class GateKeyCache(private val capacity: Int = 64) {
     private val mutex = Mutex()
 
     fun put(gateKey: String, key: ByteArray) {
-        mutex.runBlocking {
-            if (cache.size >= capacity) {
-                val eldest = cache.entries.first()
-                zeroize(eldest.value)
-                cache.remove(eldest.key)
+        runBlocking {
+            mutex.withLock {
+                if (cache.size >= capacity) {
+                    val eldest = cache.entries.first()
+                    zeroize(eldest.value)
+                    cache.remove(eldest.key)
+                }
+                cache[gateKey] = key.copyOf()
             }
-            cache[gateKey] = key.copyOf()
         }
     }
 
     fun get(gateKey: String): ByteArray? {
-        return mutex.runBlocking {
-            cache[gateKey]?.copyOf()
+        return runBlocking {
+            mutex.withLock {
+                cache[gateKey]?.copyOf()
+            }
         }
     }
 
     fun clearAll() {
-        mutex.runBlocking {
-            for (entry in cache.entries) {
-                zeroize(entry.value)
+        runBlocking {
+            mutex.withLock {
+                for (entry in cache.entries) {
+                    zeroize(entry.value)
+                }
+                cache.clear()
             }
-            cache.clear()
         }
     }
 

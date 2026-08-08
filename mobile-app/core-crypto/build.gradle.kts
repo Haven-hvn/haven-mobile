@@ -6,11 +6,11 @@ plugins {
 
 android {
     namespace = "haven.mobile.core.crypto"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

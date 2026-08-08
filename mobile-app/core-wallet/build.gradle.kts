@@ -7,5 +7,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":reown-kotlin-develop"))
+    implementation(project(":foc-cache"))
+    // Reown is temporarily stubbed — see com.reown.appkit.AppKitStubs
 }
