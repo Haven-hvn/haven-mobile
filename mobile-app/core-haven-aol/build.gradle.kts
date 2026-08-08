@@ -1,6 +1,5 @@
 ﻿plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
     id("com.google.dagger.hilt.android")
 }
 
@@ -10,7 +9,6 @@ android {
 
     defaultConfig {
         minSdk = 26
-        targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
