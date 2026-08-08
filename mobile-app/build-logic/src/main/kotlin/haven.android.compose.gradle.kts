@@ -1,6 +1,6 @@
 plugins {
     id("haven.android.library")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
