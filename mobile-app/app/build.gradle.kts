@@ -1,5 +1,6 @@
 plugins {
     id("haven.android.application")
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
@@ -57,6 +58,8 @@ dependencies {
     implementation(libs.hilt.navigation)
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.work.runtime)
+    implementation("com.google.dagger:hilt-android:2.60.1")
+    ksp("com.google.dagger:hilt-compiler:2.60.1")
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
