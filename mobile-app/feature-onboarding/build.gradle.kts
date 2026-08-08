@@ -10,6 +10,7 @@ android {
 }
 
 dependencies {
+    ksp("com.google.dagger:hilt-compiler:2.60.1")
     implementation(project(":core-wallet"))
     implementation(project(":core-domain"))
     implementation(libs.androidx.compose.navigation)
