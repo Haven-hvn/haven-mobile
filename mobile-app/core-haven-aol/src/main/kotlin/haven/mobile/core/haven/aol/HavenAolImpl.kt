@@ -155,12 +155,46 @@ class HavenAolImpl @Inject constructor(
             CandidValue.CandidText(signature)
         ))
 
-        val reply = agent.call(principal, "decrypt", args, 0L, ByteArray(0))
-        val decoded = CandidDecoder.INSTANCE.decode(reply)
-        val aesKey = (decoded.first() as CandidValue.CandidBlob).bytes
-        val pieceCid = item.pieceRef?.pieceCid
-        if (pieceCid != null) aesKeyCache.put(pieceCid, aesKey)
-        return Result.success(aesKey)
+        return try {
+            val reply = agent.call(principal, "decrypt", args, 0L, ByteArray(0))
+            val decoded = CandidDecoder.INSTANCE.decode(reply)
+            val aesKey = (decoded.first() as CandidValue.CandidBlob).bytes
+            val pieceCid = item.pieceRef?.pieceCid
+            if (pieceCid != null) aesKeyCache.put(pieceCid, aesKey)
+            Result.success(aesKey)
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            val isNonceMismatch = msg.contains("Nonce mismatch", ignoreCase = true) ||
+                msg.contains("nonce", ignoreCase = true) && msg.contains("mismatch", ignoreCase = true)
+            if (isNonceMismatch) {
+                nonceManager.refreshNonce(walletAddress, config.canisterId)
+                val retryNonce = nonceManager.getNonce(walletAddress, config.canisterId)
+                val retryPayload = gateRequestBuilder.buildV1Request(item, retryNonce, walletAddress)
+                val retrySig = session.signTypedDataV4(retryPayload)
+                if (retrySig.isFailure) {
+                    val ex = retrySig.exceptionOrNull()
+                    return Result.failure(HavenError.SigningFailed(ex?.message ?: "Signing failed on retry"))
+                }
+                val retrySignature = retrySig.getOrNull()!!
+                val retryArgs = CandidEncoder.INSTANCE.encode(listOf(
+                    CandidValue.CandidText(item.id),
+                    CandidValue.CandidText(retryPayload),
+                    CandidValue.CandidText(retrySignature)
+                ))
+                try {
+                    val retryReply = agent.call(principal, "decrypt", retryArgs, 0L, ByteArray(0))
+                    val retryDecoded = CandidDecoder.INSTANCE.decode(retryReply)
+                    val retryKey = (retryDecoded.first() as CandidValue.CandidBlob).bytes
+                    val pieceCid = item.pieceRef?.pieceCid
+                    if (pieceCid != null) aesKeyCache.put(pieceCid, retryKey)
+                    Result.success(retryKey)
+                } catch (retryEx: Exception) {
+                    Result.failure(HavenError.CanisterCallFailed(retryEx.message ?: "Nonce retry failed"))
+                }
+            } else {
+                throw e
+            }
+        }
     }
 
     private suspend fun decryptV3Group(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>> {
