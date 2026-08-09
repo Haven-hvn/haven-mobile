@@ -39,7 +39,7 @@ class HavenAolBatchGroupingTest {
         createdAt = Instant.parse("2024-01-01T00:00:00Z"), createdAtBlock = 100, expiresAtBlock = null,
         pieceRef = null, filecoinCid = "cid$id", encryptedCid = "enc$id", cidHash = null,
         gate = null, isEncrypted = true, encryptionMetadata = meta, cidEncryptionMetadata = null,
-        attestation = null, arkivStatus = ArkivStatus.ACTIVE, contentCacheStatus = ContentCacheStatus.CACHED,
+        attestation = null, arkivStatus = ArkivStatus.FRESH, contentCacheStatus = ContentCacheStatus.CACHED,
         lastAccessedAt = null
     )
 }

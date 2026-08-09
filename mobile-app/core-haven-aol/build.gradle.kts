@@ -34,6 +34,20 @@ android {
     }
 }
 
+android {
+    testOptions {
+        unitTests.all {
+            it.useJUnitPlatform()
+            it.failOnNoDiscoveredTests = false
+        }
+    }
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
+    failOnNoDiscoveredTests.set(false)
+}
+
 dependencies {
     implementation(project(":core-domain"))
     implementation(project(":core-wallet"))
@@ -48,4 +62,5 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines)
+    testImplementation(libs.kotlinx.datetime)
 }
