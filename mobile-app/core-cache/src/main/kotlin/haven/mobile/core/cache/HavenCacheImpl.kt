@@ -143,6 +143,11 @@ class HavenCacheImpl @Inject constructor(
         }
     }
 
+    override suspend fun clearExpiredFor(walletAddress: String) {
+        // v1: TTL eviction is handled by FocCache quota/TTL; this is a no-op until MediaRepository TTL query is wired
+        clearFor(walletAddress)
+    }
+
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
             try {

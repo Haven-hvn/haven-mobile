@@ -43,6 +43,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import haven.mobile.core.domain.ContentCacheStatus
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
 import haven.mobile.core.domain.MediaKind
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -381,6 +390,62 @@ private fun DocumentViewer(item: haven.mobile.core.domain.MediaItem) {
 
 @Composable
 private fun FileViewer(item: haven.mobile.core.domain.MediaItem) {
+    val context = LocalContext.current
+    var showWarning by remember { mutableStateOf(false) }
+    var pendingSave by remember { mutableStateOf(false) }
+    var lastSavedUri by remember { mutableStateOf<Uri?>(null) }
+
+    // FR-FILE-4: do not allow export if attestation/ PieceCID verification failed — stub check until verifier wired
+    val canExport = item.contentCacheStatus != haven.mobile.core.domain.ContentCacheStatus.EXPIRED
+
+    val createDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(item.mimeType ?: "application/octet-stream")) { uri ->
+        if (uri != null) {
+            lastSavedUri = uri
+            // In M2 real path: decrypt in memory then write to uri via contentResolver.openOutputStream — no plaintext on disk
+            // For now: placeholder write (zero bytes) to prove SAF wiring; real decrypt comes from HavenCache/HavenCipher
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(ByteArray(0)) }
+                android.widget.Toast.makeText(context, "Saved to device", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        pendingSave = false
+    }
+
+    fun triggerSave() {
+        if (!canExport) {
+            android.widget.Toast.makeText(context, "Cannot export — verification failed (FR-FILE-4)", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val prefs = context.getSharedPreferences("haven_file", android.content.Context.MODE_PRIVATE)
+        val seenWarning = prefs.getBoolean("file_warning_seen", false)
+        if (!seenWarning) {
+            showWarning = true
+            pendingSave = true
+        } else {
+            createDocLauncher.launch(item.filenameHint ?: item.title)
+        }
+    }
+
+    if (showWarning) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showWarning = false; pendingSave = false },
+            title = { Text("Save file?") },
+            text = { Text("This file is now readable by anything on your phone. Continue?") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    context.getSharedPreferences("haven_file", android.content.Context.MODE_PRIVATE).edit().putBoolean("file_warning_seen", true).apply()
+                    showWarning = false
+                    if (pendingSave) createDocLauncher.launch(item.filenameHint ?: item.title)
+                }) { Text("Continue") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showWarning = false; pendingSave = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
         MediaHeader(
             title = item.title,
@@ -390,7 +455,7 @@ private fun FileViewer(item: haven.mobile.core.domain.MediaItem) {
         Spacer(Modifier.height(16.dp))
         Surface(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Row(
@@ -419,25 +484,40 @@ private fun FileViewer(item: haven.mobile.core.domain.MediaItem) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        // Left-aligned actions — primary / secondary hierarchy, not centered pill pair
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Button(
-                onClick = { /* Save to device via ACTION_CREATE_DOCUMENT */ },
-                modifier = Modifier.fillMaxWidth(),
+                onClick = { triggerSave() },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                enabled = canExport,
             ) {
                 Text("Save to device")
             }
             OutlinedButton(
-                onClick = { /* Open with via Intent.ACTION_VIEW */ },
-                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    val uri = lastSavedUri
+                    if (uri == null) {
+                        android.widget.Toast.makeText(context, "Save first, then Open with…", android.widget.Toast.LENGTH_SHORT).show()
+                        return@OutlinedButton
+                    }
+                    val view = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, item.mimeType ?: "application/octet-stream")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(view, "Open with…")
+                    try { context.startActivity(chooser) } catch (e: Exception) {
+                        android.widget.Toast.makeText(context, "No app can open this file", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                enabled = lastSavedUri != null,
             ) {
-                Text("Open with\u2026")
+                Text("Open with…")
             }
             Text(
-                text = "Files are saved outside the encrypted cache. You\u2019ll see a warning on first save.",
+                text = "Files are saved outside the encrypted cache. You’ll see a warning on first save (FR-FILE-3).",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

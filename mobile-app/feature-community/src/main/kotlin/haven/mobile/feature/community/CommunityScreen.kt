@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -103,7 +105,7 @@ fun CommunityScreen(
 @Composable
 private fun CommunityListItem(item: MediaItem) {
     Card(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -120,33 +122,34 @@ private fun CommunityListItem(item: MediaItem) {
                     modifier = Modifier.weight(1f),
                 )
 
-                // Attestation badge
-                val attestationBadge = if (item.attestation != null) {
-                    androidx.compose.material3.AssistChip(
-                        onClick = { },
-                        label = { Text("Verified", fontSize = 10.sp) },
-                        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
-                            containerColor = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                            labelColor = Color(0xFF4CAF50),
-                        ),
-                    )
-                } else {
-                    androidx.compose.material3.AssistChip(
-                        onClick = { },
-                        label = { Text("Unverified", fontSize = 10.sp) },
-                        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
-                            containerColor = Color(0xFFF44336).copy(alpha = 0.15f),
-                            labelColor = Color(0xFFF44336),
-                        ),
-                    )
+                // Attestation badge â€” 3 distinct states per design/components.md (never collapse latter two)
+                // Tokens: Verified #2E7D32 / Unverified #616161 / Failed #C62828 ; 8dp chips, 32dp height
+                val badgeColor = when {
+                    item.attestation == null -> Color(0xFF616161) // Unverified
+                    // TODO: wire AttestationVerifier result; Until then Verified if attestation present
+                    // FailedVerification will be Color(0xFFC62828) when verifier returns false
+                    else -> Color(0xFF2E7D32) // Verified
                 }
-                attestationBadge
+                val badgeLabel = when {
+                    item.attestation == null -> "Unverified"
+                    else -> "Verified"
+                }
+                androidx.compose.material3.AssistChip(
+                    onClick = {},
+                    label = { Text(badgeLabel, fontSize = 10.sp) },
+                    colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                        containerColor = badgeColor.copy(alpha = 0.12f),
+                        labelColor = badgeColor,
+                    ),
+                    border = null,
+                    modifier = Modifier.height(32.dp),
+                )
             }
 
             Spacer(modifier = Modifier.padding(2.dp))
 
             Text(
-                text = "${item.kind} • ${item.description ?: ""}",
+                text = "${item.kind}  ${item.description ?: ""}",
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
             )

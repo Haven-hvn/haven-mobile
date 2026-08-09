@@ -97,6 +97,27 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // FR-OBS-2 rolling in-memory log stubs
+    private val _recentErrors = MutableStateFlow<List<String>>(emptyList())
+    val recentErrors: List<String> get() = _recentErrors.value
+
+    fun clearRecentErrors() { _recentErrors.value = emptyList() }
+
+    fun refresh() { loadSettings() }
+
+    fun clearExpired() {
+        viewModelScope.launch {
+            val address = walletSession.address.value
+            if (address != null) havenCache.clearExpiredFor(address)
+            loadSettings()
+        }
+    }
+
+    fun copyAddressToClipboard() {
+        // Real clipboard via Android ClipboardManager would need Context — stub for v1, logs for Maestro
+        _recentErrors.update { it + "Copy address: ${walletSession.address.value ?: "none"}" }
+    }
+
     fun disconnect() {
         viewModelScope.launch {
             val address = walletSession.address.value

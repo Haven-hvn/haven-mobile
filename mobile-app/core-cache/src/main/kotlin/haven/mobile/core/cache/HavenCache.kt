@@ -11,4 +11,5 @@ interface HavenCache {
     suspend fun remove(pieceCid: String)
     suspend fun space(): CacheSpace
     suspend fun clearFor(walletAddress: String)
+    suspend fun clearExpiredFor(walletAddress: String)
 }

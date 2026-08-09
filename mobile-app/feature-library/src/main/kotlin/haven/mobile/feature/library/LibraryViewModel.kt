@@ -133,15 +133,60 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    enum class LibraryCategory(val label: String) {
+        ALL("All"),
+        VIDEO("Video"),
+        AUDIO("Audio"),
+        DOCUMENT("Document"),
+        IMAGE("Image"),
+        FILE("File"),
+    }
+
+    private val _selectedCategory = MutableStateFlow(LibraryCategory.ALL)
+    val selectedCategory: LibraryCategory get() = _selectedCategory.value
+
+    fun selectCategory(category: LibraryCategory) {
+        _selectedCategory.value = category
+        _uiState.update { it } // trigger recomposition via state flow read in composable
+    }
+
+    val categoryCounts: Map<LibraryCategory, Int>
+        get() {
+            val items = (_uiState.value as? LibraryUiState.Ready)?.items ?: emptyList()
+            return mapOf(
+                LibraryCategory.ALL to items.size,
+                LibraryCategory.VIDEO to items.count { it.kind == haven.mobile.core.domain.MediaKind.VIDEO },
+                LibraryCategory.AUDIO to items.count { it.kind == haven.mobile.core.domain.MediaKind.AUDIO },
+                LibraryCategory.DOCUMENT to items.count { it.kind == haven.mobile.core.domain.MediaKind.DOCUMENT },
+                LibraryCategory.IMAGE to items.count { it.kind == haven.mobile.core.domain.MediaKind.IMAGE },
+                LibraryCategory.FILE to items.count { it.kind == haven.mobile.core.domain.MediaKind.FILE },
+            )
+        }
+
     val filteredItems: List<haven.mobile.core.domain.MediaItem>
         get() {
             val current = _uiState.value
             if (current !is LibraryUiState.Ready) return emptyList()
-            if (current.searchQuery.isBlank()) return current.items
-            val query = current.searchQuery.lowercase()
-            return current.items.filter {
-                it.title.lowercase().contains(query) ||
-                    (it.description?.lowercase()?.contains(query) ?: false)
+            val bySearch = if (current.searchQuery.isBlank()) {
+                current.items
+            } else {
+                val query = current.searchQuery.lowercase()
+                current.items.filter {
+                    it.title.lowercase().contains(query) ||
+                        (it.description?.lowercase()?.contains(query) ?: false)
+                }
+            }
+            val cat = _selectedCategory.value
+            if (cat == LibraryCategory.ALL) return bySearch
+            return bySearch.filter {
+                when (cat) {
+                    LibraryCategory.VIDEO -> it.kind == haven.mobile.core.domain.MediaKind.VIDEO
+                    LibraryCategory.AUDIO -> it.kind == haven.mobile.core.domain.MediaKind.AUDIO
+                    LibraryCategory.DOCUMENT -> it.kind == haven.mobile.core.domain.MediaKind.DOCUMENT
+                    LibraryCategory.IMAGE -> it.kind == haven.mobile.core.domain.MediaKind.IMAGE
+                    LibraryCategory.FILE -> it.kind == haven.mobile.core.domain.MediaKind.FILE
+                    LibraryCategory.ALL -> true
+                }
             }
         }
 }
