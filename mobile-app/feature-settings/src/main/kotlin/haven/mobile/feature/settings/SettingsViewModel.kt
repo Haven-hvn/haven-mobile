@@ -10,6 +10,7 @@ import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -44,9 +45,9 @@ class SettingsViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             try {
-                val quota = kotlinx.coroutines.flow.first(settingsRepository.cacheQuotaBytes)
-                val ttl = kotlinx.coroutines.flow.first(settingsRepository.cacheTtlDays)
-                val clearOnDisconnect = kotlinx.coroutines.flow.first(settingsRepository.clearOnDisconnect)
+                val quota = settingsRepository.cacheQuotaBytes.first()
+                val ttl = settingsRepository.cacheTtlDays.first()
+                val clearOnDisconnect = settingsRepository.clearOnDisconnect.first()
                 val address = walletSession.address.value
                 val space = havenCache.space().let { it.usedBytes }
 

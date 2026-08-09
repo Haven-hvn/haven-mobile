@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":core-crypto"))
     implementation(project(":core-cache"))
     implementation(project(":core-cache-mirror"))
+    implementation(project(":core-wallet"))
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)
     implementation(libs.androidx.media3)

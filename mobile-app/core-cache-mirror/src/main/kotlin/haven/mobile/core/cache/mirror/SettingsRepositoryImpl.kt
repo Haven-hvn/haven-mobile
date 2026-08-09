@@ -13,7 +13,7 @@ private val Context.settingsDataStore by preferencesDataStore(name = "haven-sett
 
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
-    private val context: Context,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
 ) : SettingsRepository {
 
     companion object {

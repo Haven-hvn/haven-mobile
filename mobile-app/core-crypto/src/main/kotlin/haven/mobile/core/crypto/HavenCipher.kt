@@ -21,7 +21,7 @@ interface HavenCipher {
     ): Flow<ByteArray>
 }
 
-class HavenCipherImpl : HavenCipher {
+class HavenCipherImpl @javax.inject.Inject constructor() : HavenCipher {
 
     companion object {
         private const val BASE_IV_SIZE = 12

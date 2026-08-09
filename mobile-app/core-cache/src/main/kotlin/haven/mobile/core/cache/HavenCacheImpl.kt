@@ -19,7 +19,7 @@ import javax.inject.Singleton
 
 @Singleton
 class HavenCacheImpl @Inject constructor(
-    private val context: Context,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
     private val walletSession: WalletSession,
     private val config: CacheConfig,
     private val pieceCidVerifier: PieceCidVerifier,

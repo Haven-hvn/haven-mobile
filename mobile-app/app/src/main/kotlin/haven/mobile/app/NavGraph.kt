@@ -41,10 +41,8 @@ fun AppNavGraph(
                 onNavigateBack = { navController.popBackStack() },
             )
         }
-        if (BuildConfig.DEBUG) {
-            composable(AppRoute.Debug.route()) {
-                DebugRoute()
-            }
+        composable(AppRoute.Debug.route()) {
+            DebugRoute()
         }
     }
 }

@@ -28,11 +28,7 @@ class DebugViewModel @Inject constructor(
         viewModelScope.launch {
             _log.update { it + "Ping canister: called" }
             try {
-                val havenAol = try {
-                    // Resolve via Hilt if available; fallback to direct check
-                    haven.mobile.core.haven.aol.HavenAol::class.java
-                } catch (_: Exception) { null }
-                _log.update { it + "Ping canister: havenAol=${havenAol?.simpleName ?: "unavailable"} — no canisterId configured (stub mode)" }
+                _log.update { it + "Ping canister: havenAol=HavenAol — no canisterId configured (stub mode)" }
             } catch (e: Exception) {
                 _log.update { it + "Ping canister: failed — ${e.message}" }
             }
@@ -46,6 +42,7 @@ class DebugViewModel @Inject constructor(
                 val ref = cloud.filecoin.foc.cache.PieceRef(
                     pieceCid = "baga6ea4seaqfixture",
                     size = 1024,
+                    providerServiceUrls = emptyList(),
                 )
                 _log.update { it + "Fetch fixture PieceRef: created ${ref.pieceCid} (${ref.size} bytes, stub cache)" }
             } catch (e: Exception) {

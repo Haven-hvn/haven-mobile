@@ -7,6 +7,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":foc-cache"))
+    api(project(":foc-cache"))
     implementation(libs.kotlinx.datetime)
 }
