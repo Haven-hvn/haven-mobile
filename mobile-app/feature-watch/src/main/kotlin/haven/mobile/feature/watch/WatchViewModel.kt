@@ -73,19 +73,19 @@ class WatchViewModel @Inject constructor(
             val key = if (cachedKey != null) {
                 cachedKey
             } else {
-                when (val result = havenAol.decrypt(item, walletSession)) {
-                    is Result.Success -> result.getOrNull()!!
-                    is Result.Failure -> {
-                        _uiState.update { current ->
-                            if (current is WatchUiState.Ready) {
-                                current.copy(isDecrypting = false, decryptError = result.exception.message ?: "Decryption failed")
-                            } else {
-                                current
-                            }
+                val result = havenAol.decrypt(item, walletSession)
+                if (result.isFailure) {
+                    val msg = result.exceptionOrNull()?.message ?: "Decryption failed"
+                    _uiState.update { current ->
+                        if (current is WatchUiState.Ready) {
+                            current.copy(isDecrypting = false, decryptError = msg)
+                        } else {
+                            current
                         }
-                        return@launch
                     }
+                    return@launch
                 }
+                result.getOrNull()!!
             }
 
             if (pieceCid != null) {

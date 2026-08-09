@@ -58,7 +58,7 @@ class HavenCacheImpl @Inject constructor(
                 val verified = pieceCidVerifier.verify(ref.pieceCid, bytes)
                 if (!verified) {
                     getFocCache().remove(ref.pieceCid)
-                    return@withContext Result.failure(HavenError.CachePieceVerifyFailed)
+                    return@withContext Result.failure(HavenError.CachePieceVerifyFailed("PieceCID verification failed for ${ref.pieceCid}"))
                 }
                 Result.success(bytes)
             } catch (e: HavenError) {

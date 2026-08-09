@@ -64,7 +64,7 @@ class MediaRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val walletAddress = walletSession.address.value
-                    ?: return@withContext Result.failure(HavenError.WalletNotConnected)
+                    ?: return@withContext Result.failure(HavenError.WalletNotConnected("No wallet connected"))
                 val result = arkivClient.listMediaForOwner(owner)
                 val items = result.getOrElse { return@withContext Result.failure(it) }
                 val entities = items.items.map { item ->
@@ -92,7 +92,7 @@ class MediaRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val walletAddress = walletSession.address.value
-                    ?: return@withContext Result.failure(HavenError.WalletNotConnected)
+                    ?: return@withContext Result.failure(HavenError.WalletNotConnected("No wallet connected"))
                 val result = arkivClient.getMedia(id)
                 val item = result.getOrElse { return@withContext Result.failure(it) }
                     ?: return@withContext Result.success(Unit)
@@ -125,9 +125,13 @@ class MediaRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun resolveCacheStatus(item: MediaItem): ContentCacheStatus {
+    private suspend fun resolveCacheStatus(item: MediaItem): ContentCacheStatus {
         val pieceCid = item.pieceRef?.pieceCid ?: return ContentCacheStatus.UNCACHED
-        return if (havenCache.exists(pieceCid)) ContentCacheStatus.CACHED else ContentCacheStatus.UNCACHED
+        return try {
+            if (havenCache.exists(pieceCid)) ContentCacheStatus.CACHED else ContentCacheStatus.UNCACHED
+        } catch (_: Exception) {
+            ContentCacheStatus.UNCACHED
+        }
     }
 
     private fun MediaItem.toMirrorEntity(walletAddress: String): MediaMirrorEntity {
@@ -184,8 +188,8 @@ class MediaRepositoryImpl @Inject constructor(
             createdAt = kotlinx.datetime.Instant.parse(createdAt),
             createdAtBlock = createdAtBlock,
             expiresAtBlock = expiresAtBlock,
-            pieceRef = cloud.filecoin.foc.cache.PieceRef(
-                pieceCid = pieceCid ?: "",
+            pieceRef = if (pieceCid != null) cloud.filecoin.foc.cache.PieceRef(
+                pieceCid = pieceCid,
                 size = pieceSize ?: 0,
                 providerServiceUrls = parseJsonStringList(providerServiceUrls),
                 walletAddress = walletAddress,
@@ -194,7 +198,7 @@ class MediaRepositoryImpl @Inject constructor(
                 ipfsIndexed = ipfsIndexed,
                 unixFsRoot = unixFsRoot,
                 trustlessGateways = parseJsonStringList(trustlessGateways),
-            ),
+            ) else null,
             filecoinCid = filecoinCid,
             encryptedCid = encryptedCid,
             cidHash = cidHash,
@@ -281,7 +285,7 @@ class MediaRepositoryImpl @Inject constructor(
         val obj = JSONObject(json)
         val proofArr = obj.optJSONArray("merkleProof")
         val merkleProof = if (proofArr != null) {
-            (0 until proofArr.length()).map { proofArr.getString(it) }
+            (0 until proofArr.length()).map { proofArr.getString(it).toByteArray(Charsets.UTF_8) }
         } else {
             null
         }

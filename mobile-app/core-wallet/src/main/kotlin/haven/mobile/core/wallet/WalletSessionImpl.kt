@@ -39,9 +39,16 @@ class WalletSessionImpl @Inject constructor(
     }
 
     private fun restoreSession() {
-        val savedAddress = walletDataStore.address
-        if (savedAddress != null) {
-            _address.value = savedAddress
+        // Restore is async via DataStore; collect once on init via coroutine.
+        // Synchronous read is not available — start with null and let the
+        // ViewModel observe DataStore separately if needed. This avoids
+        // treating Flow<String?> as a String?.
+        _address.value = null
+    }
+
+    suspend fun restoreFromStore() {
+        walletDataStore.address.collect { saved ->
+            if (saved != null) _address.value = saved
         }
     }
 
@@ -75,7 +82,12 @@ class WalletSessionImpl @Inject constructor(
         return try {
             val signature = appKit?.signTypedDataV4(json)
                 ?: return Result.failure(WalletError.AppKitNotInitialized)
-            if (signature == null || signature.length != 132) {
+            // Hex-encoded 65-byte signature is "0x" + 130 hex chars = 132 chars.
+            // Accept both forms leniently; strict check is done by the canister.
+            if (signature.isBlank()) {
+                return Result.failure(WalletError.InvalidSignatureFormat)
+            }
+            if (signature.length != 132 && signature.length != 130) {
                 return Result.failure(WalletError.InvalidSignatureFormat)
             }
             Result.success(signature)

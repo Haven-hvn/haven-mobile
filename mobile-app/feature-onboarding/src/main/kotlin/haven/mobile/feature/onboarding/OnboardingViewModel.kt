@@ -47,15 +47,13 @@ class OnboardingViewModel @Inject constructor(
     fun connect() {
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Connecting
-            when (val result = walletSession.connect()) {
-                is Result.Success -> {
-                    _uiState.value = OnboardingUiState.Connected(result.getOrNull()!!)
-                }
-                is Result.Failure -> {
-                    _uiState.value = OnboardingUiState.Error(
-                        result.exception.message ?: "Unknown error"
-                    )
-                }
+            val result = walletSession.connect()
+            if (result.isSuccess) {
+                _uiState.value = OnboardingUiState.Connected(result.getOrNull()!!)
+            } else {
+                _uiState.value = OnboardingUiState.Error(
+                    result.exceptionOrNull()?.message ?: "Unknown error"
+                )
             }
         }
     }

@@ -1,5 +1,6 @@
 plugins {
     id("haven.android.library")
+    id("com.google.devtools.ksp")
 }
 
 android {

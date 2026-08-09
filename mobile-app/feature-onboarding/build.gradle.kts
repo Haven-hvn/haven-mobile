@@ -1,5 +1,6 @@
 plugins {
     id("haven.android.compose")
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.21"
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
@@ -9,6 +10,7 @@ android {
 }
 
 dependencies {
+    ksp("com.google.dagger:hilt-compiler:2.60.1")
     implementation(project(":core-wallet"))
     implementation(project(":core-domain"))
     implementation(libs.androidx.compose.navigation)

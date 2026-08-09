@@ -12,12 +12,20 @@ abstract class CryptoDiModule {
     @Binds
     @Singleton
     abstract fun bindHavenCipher(impl: HavenCipherImpl): HavenCipher
+}
 
-    @Binds
+@Module
+@InstallIn(SingletonComponent::class)
+object CryptoCacheModule {
+    @dagger.Provides
     @Singleton
-    abstract fun bindAesKeyCache(impl: AesKeyCache): AesKeyCache
+    fun provideAesKeyCache(config: CryptoConfig): AesKeyCache = AesKeyCache(config.aesKeyCacheCapacity)
 
-    @Binds
+    @dagger.Provides
     @Singleton
-    abstract fun bindGateKeyCache(impl: GateKeyCache): GateKeyCache
+    fun provideGateKeyCache(config: CryptoConfig): GateKeyCache = GateKeyCache(config.gateKeyCacheCapacity)
+
+    @dagger.Provides
+    @Singleton
+    fun provideCryptoConfig(): CryptoConfig = CryptoConfig()
 }

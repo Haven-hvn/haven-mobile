@@ -123,9 +123,9 @@ class ArkivClientImpl @Inject constructor(
     }
 
     private fun buildUrl(path: String): okhttp3.HttpUrl.Builder {
-        val baseUrl = okhttp3.HttpUrl.parse(config.endpointUrl)
+        val baseUrl = okhttp3.HttpUrl.Companion.toHttpUrlOrNull(config.endpointUrl)
             ?: throw HavenError.Internal("Invalid Arkiv endpoint URL: ${config.endpointUrl}")
-        return baseUrl.newBuilder().addPathSegments(path)
+        return baseUrl.newBuilder().addPathSegments(path.trimStart('/'))
     }
 
     private fun JSONObject.toMediaItem(): MediaItem {

@@ -44,9 +44,9 @@ class SettingsViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             try {
-                val quota = settingsRepository.cacheQuotaBytes.first()
-                val ttl = settingsRepository.cacheTtlDays.first()
-                val clearOnDisconnect = settingsRepository.clearOnDisconnect.first()
+                val quota = kotlinx.coroutines.flow.first(settingsRepository.cacheQuotaBytes)
+                val ttl = kotlinx.coroutines.flow.first(settingsRepository.cacheTtlDays)
+                val clearOnDisconnect = kotlinx.coroutines.flow.first(settingsRepository.clearOnDisconnect)
                 val address = walletSession.address.value
                 val space = havenCache.space().let { it.usedBytes }
 

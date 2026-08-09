@@ -26,7 +26,7 @@ class SecurityCleanupImpl @Inject constructor(
     override suspend fun runDisconnect(walletAddress: String): DisconnectReport {
         val steps = mutableListOf<DisconnectReport.StepResult>()
 
-        val clearOnDisconnect = settingsRepository.clearOnDisconnect.first()
+        val clearOnDisconnect = kotlinx.coroutines.flow.first(settingsRepository.clearOnDisconnect)
 
         val step1 = runStep("work_manager") {
             withContext(Dispatchers.IO) {

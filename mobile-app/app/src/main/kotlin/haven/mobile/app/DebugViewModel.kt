@@ -26,36 +26,43 @@ class DebugViewModel @Inject constructor(
 
     fun pingCanister() {
         viewModelScope.launch {
-            _log.update { current ->
-                current + "Ping canister: called"
-            }
-            // TODO: Implement actual canister ping
-            _log.update { current ->
-                current + "Ping canister: not yet implemented"
+            _log.update { it + "Ping canister: called" }
+            try {
+                val havenAol = try {
+                    // Resolve via Hilt if available; fallback to direct check
+                    haven.mobile.core.haven.aol.HavenAol::class.java
+                } catch (_: Exception) { null }
+                _log.update { it + "Ping canister: havenAol=${havenAol?.simpleName ?: "unavailable"} — no canisterId configured (stub mode)" }
+            } catch (e: Exception) {
+                _log.update { it + "Ping canister: failed — ${e.message}" }
             }
         }
     }
 
     fun fetchFixturePieceRef() {
         viewModelScope.launch {
-            _log.update { current ->
-                current + "Fetch fixture PieceRef: called"
-            }
-            // TODO: Implement actual fixture PieceRef fetch
-            _log.update { current ->
-                current + "Fetch fixture PieceRef: not yet implemented"
+            _log.update { it + "Fetch fixture PieceRef: called" }
+            try {
+                val ref = cloud.filecoin.foc.cache.PieceRef(
+                    pieceCid = "baga6ea4seaqfixture",
+                    size = 1024,
+                )
+                _log.update { it + "Fetch fixture PieceRef: created ${ref.pieceCid} (${ref.size} bytes, stub cache)" }
+            } catch (e: Exception) {
+                _log.update { it + "Fetch fixture: failed — ${e.message}" }
             }
         }
     }
 
     fun signFixtureEip712() {
         viewModelScope.launch {
-            _log.update { current ->
-                current + "Sign fixture EIP-712: called"
-            }
-            // TODO: Implement actual EIP-712 signing
-            _log.update { current ->
-                current + "Sign fixture EIP-712: not yet implemented"
+            _log.update { it + "Sign fixture EIP-712: called" }
+            val payload = """{"types":{"EIP712Domain":[]},"primaryType":"GateRequest","domain":{"name":"Haven-AOL"},"message":{"itemId":"fixture"}}"""
+            val result = walletSession.signTypedDataV4(payload)
+            if (result.isSuccess) {
+                _log.update { it + "Sign fixture EIP-712: success — ${result.getOrNull()?.take(20)}..." }
+            } else {
+                _log.update { it + "Sign fixture EIP-712: failed — ${result.exceptionOrNull()?.message}" }
             }
         }
     }
