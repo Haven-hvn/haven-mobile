@@ -65,14 +65,23 @@ class MediaRepositoryImpl @Inject constructor(
             try {
                 val walletAddress = walletSession.address.value
                     ?: return@withContext Result.failure(HavenError.WalletNotConnected("No wallet connected"))
-                val result = arkivClient.listMediaForOwner(owner)
-                val items = result.getOrElse { return@withContext Result.failure(it) }
-                val entities = items.items.map { item ->
-                    item.copy(
-                        contentCacheStatus = resolveCacheStatus(item),
-                    )
+                // Pagination 20 → Room mirror write-through, per-wallet namespaced (MOBILE_V1_REQUIREMENTS M1)
+                // Loops cursor until nextCursor null, matching web dApp 20-per-page
+                var cursor: String? = null
+                val allEntities = mutableListOf<MediaMirrorEntity>()
+                do {
+                    val page = arkivClient.listMediaForOwner(owner, pageSize = 20, cursor = cursor)
+                        .getOrElse { return@withContext Result.failure(it) }
+                    val entities = page.items.map { item ->
+                        item.copy(contentCacheStatus = resolveCacheStatus(item))
+                            .toMirrorEntity(walletAddress)
+                    }
+                    allEntities.addAll(entities)
+                    cursor = page.nextCursor
+                } while (cursor != null)
+                if (allEntities.isNotEmpty()) {
+                    getDatabase().mediaDao().insertAll(allEntities)
                 }
-                getDatabase().mediaDao().insertAll(entities.map { it.toMirrorEntity(walletAddress) })
                 Result.success(Unit)
             } catch (e: HavenError) {
                 Result.failure(e)

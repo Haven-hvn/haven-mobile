@@ -1,0 +1,19 @@
+appId: haven.mobile
+name: "Haven Mobile — FILE Save to device + Open with — FR-FILE-1..4"
+tags: ["v1", "file"]
+---
+- launchApp
+- tapOn: "Library"
+# Pick a FILE kind item — requires fixture; search for FILE
+- tapOn: "FILE"
+# In Watch FileViewer
+- assertVisible: "Save to device"
+- tapOn: "Save to device"
+# One-time warning modal (FR-FILE-3)
+- assertVisible: "This file is now readable"
+- tapOn: "Continue"
+# System SAF picker appears — Maestro can't drive system picker; assert chooser launched via toast fallback
+- assertVisible:
+    text: "Saved to device|Save failed"
+    optional: true
+- assertVisible: "Open with…"

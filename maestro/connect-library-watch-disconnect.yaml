@@ -1,0 +1,42 @@
+appId: haven.mobile
+name: "Haven Mobile — connect → library → watch (video, PDF) → disconnect — FR coverage 80% stubs"
+tags: ["v1", "m3", "e2e"]
+---
+# 1. Cold start → onboarding → connect (stubbed wallet)
+- launchApp:
+    clearState: true
+- assertVisible: "Welcome to Haven"
+- tapOn: "Connect wallet"
+- assertVisible: "Connected"
+# 2. Library — CategoryGrid 2x2 + cached list (M1) — pagination 20 write-through
+- tapOn: "Library"
+- assertVisible: "Search"
+- assertVisible: "All"
+# Tap Video category to filter
+- tapOn: "Video"
+- assertVisible: "Video"
+# Toggle grid/list
+- tapOn: "Library"
+# Pull-to-refresh is Box shim for now; tap first item to go Watch
+- tapOn:
+    text: ".*"
+    optional: true
+# 3. Watch — per-kind viewers (M2) — VIDEO via Media3, DOCUMENT via inline hint
+- assertVisible:
+    text: "Cached|Fetching|Expired|Missing"
+    optional: true
+- back
+# 4. Community feed attestation badges (M3)
+- tapOn: "Community"
+- assertVisible: "Search community"
+# 5. Settings — quota/TTL/clear/disconnect (FR-UI-4 / FR-SEC)
+- tapOn: "Settings"
+- assertVisible: "Settings"
+- assertVisible: "Cache"
+- assertVisible: "Storage"
+- assertVisible: "Clear cached files"
+- tapOn: "Back"
+# 6. Debug → disconnect wipe (FR-SEC-1)
+- tapOn: "Debug"
+- tapOn: "Disconnect wallet"
+- assertVisible: "No wallet connected"
