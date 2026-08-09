@@ -3,9 +3,9 @@ package haven.mobile.core.domain.error
 // Mirrors stable error codes from haven-dapp-main/src/lib/cache-errors.ts and playback-errors.ts
 sealed class HavenError(
     open val code: String,
-    open val message: String,
-    open val cause: Throwable? = null
-) {
+    override val message: String,
+    override val cause: Throwable? = null
+) : Exception(message, cause) {
     // Mirrors cache-errors.ts::CACHE_QUOTA_EXCEEDED
     class CacheQuotaExceeded(
         override val message: String,

@@ -9,6 +9,7 @@ import haven.mobile.core.haven.aol.HavenAol
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,7 +27,7 @@ class SecurityCleanupImpl @Inject constructor(
     override suspend fun runDisconnect(walletAddress: String): DisconnectReport {
         val steps = mutableListOf<DisconnectReport.StepResult>()
 
-        val clearOnDisconnect = kotlinx.coroutines.flow.first(settingsRepository.clearOnDisconnect)
+        val clearOnDisconnect = settingsRepository.clearOnDisconnect.first()
 
         val step1 = runStep("work_manager") {
             withContext(Dispatchers.IO) {

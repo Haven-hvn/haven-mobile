@@ -17,8 +17,9 @@ dependencies {
     implementation(project(":core-cache"))
     implementation(project(":core-cache-mirror"))
     implementation(libs.androidx.compose.navigation)
+    implementation(libs.hilt.navigation)
     implementation(libs.androidx.media3)
     implementation(libs.androidx.media3.ui)
     implementation(libs.coil)
-    implementation(libs.androidx.pdf.renderer)
+    // androidx.pdf:pdf-renderer:1.0.0 not yet in google maven — DOCUMENT viewer uses fallback for v1 (see WatchScreen DocumentViewer)
 }

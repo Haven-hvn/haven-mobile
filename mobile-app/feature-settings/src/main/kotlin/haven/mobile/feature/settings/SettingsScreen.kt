@@ -25,7 +25,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun SettingsScreen(
     navController: androidx.navigation.NavController,
     onNavigateBack: () -> Unit,
-    viewModel: SettingsViewModel = androidx.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 

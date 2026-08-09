@@ -77,7 +77,7 @@ class CommunityViewModel @Inject constructor(
                     is CommunityUiState.Ready -> {
                         _uiState.value = current.copy(items = verifiedItems, isRefreshing = false)
                     }
-                    CommunityUiState.Error -> {
+                    is CommunityUiState.Error -> {
                         if (verifiedItems.isNotEmpty()) {
                             _uiState.value = CommunityUiState.Ready(
                                 items = verifiedItems,

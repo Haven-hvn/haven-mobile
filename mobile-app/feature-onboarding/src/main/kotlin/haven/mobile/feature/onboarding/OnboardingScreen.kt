@@ -22,7 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun OnboardingScreen(
     navController: androidx.navigation.NavController,
     onNavigate: () -> Unit,
-    viewModel: OnboardingViewModel = androidx.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: OnboardingViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -46,19 +46,20 @@ fun OnboardingScreen(
 
         Spacer(modifier = Modifier.padding(24.dp))
 
-        when (uiState) {
+        val state = uiState
+        when (state) {
             OnboardingUiState.Idle,
             OnboardingUiState.Connecting -> {
                 Button(
                     onClick = { viewModel.connect() },
-                    enabled = uiState !is OnboardingUiState.Connecting,
+                    enabled = state !is OnboardingUiState.Connecting,
                 ) {
                     Text("Connect wallet")
                 }
             }
             is OnboardingUiState.Connected -> {
                 Text(
-                    text = "Connected: ${uiState.address}",
+                    text = "Connected: ${state.address}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.padding(16.dp))
@@ -68,7 +69,7 @@ fun OnboardingScreen(
             }
             is OnboardingUiState.Error -> {
                 Text(
-                    text = uiState.message,
+                    text = state.message,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.padding(16.dp))

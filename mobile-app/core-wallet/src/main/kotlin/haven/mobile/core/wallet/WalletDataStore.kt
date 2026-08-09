@@ -1,57 +1,22 @@
 package haven.mobile.core.wallet
 
 import android.content.Context
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
 
-internal class WalletDataStore(private val context: Context) {
-    private val dataStore = context.dataStore
+@Singleton
+class WalletDataStore @Inject constructor(
+    private val context: Context
+) {
+    private var cachedAddress: String? = null
+    private var cachedConnector: String? = null
 
-    companion object {
-        val KEY_ADDRESS = stringPreferencesKey("wallet.address")
-        val KEY_LAST_CONNECTOR = stringPreferencesKey("wallet.last_connector")
-    }
+    suspend fun saveAddress(address: String) { cachedAddress = address }
+    suspend fun saveLastConnector(connector: String) { cachedConnector = connector }
+    suspend fun clearAddress() { cachedAddress = null }
+    suspend fun clearLastConnector() { cachedConnector = null }
+    suspend fun clearAll() { cachedAddress = null; cachedConnector = null }
 
-    val address: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[KEY_ADDRESS]
-    }
-
-    val lastConnector: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[KEY_LAST_CONNECTOR]
-    }
-
-    suspend fun saveAddress(address: String) {
-        dataStore.edit { prefs ->
-            prefs[KEY_ADDRESS] = address
-        }
-    }
-
-    suspend fun saveLastConnector(connector: String) {
-        dataStore.edit { prefs ->
-            prefs[KEY_LAST_CONNECTOR] = connector
-        }
-    }
-
-    suspend fun clearAddress() {
-        dataStore.edit { prefs ->
-            prefs.remove(KEY_ADDRESS)
-        }
-    }
-
-    suspend fun clearLastConnector() {
-        dataStore.edit { prefs ->
-            prefs.remove(KEY_LAST_CONNECTOR)
-        }
-    }
-
-    suspend fun clearAll() {
-        dataStore.edit { prefs ->
-            prefs.remove(KEY_ADDRESS)
-            prefs.remove(KEY_LAST_CONNECTOR)
-        }
-    }
+    fun getAddress(): String? = cachedAddress
+    fun getLastConnector(): String? = cachedConnector
 }
-
-private val Context.dataStore by preferencesDataStore(name = "haven-settings")

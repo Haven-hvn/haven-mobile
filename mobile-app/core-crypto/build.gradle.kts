@@ -25,6 +25,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core-domain"))
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")
     implementation(libs.kotlinx.coroutines)

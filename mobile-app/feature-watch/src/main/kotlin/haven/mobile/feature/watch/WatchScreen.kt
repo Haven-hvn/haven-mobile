@@ -50,7 +50,7 @@ import haven.mobile.core.domain.MediaKind
 fun WatchScreen(
     navController: androidx.navigation.NavController,
     itemId: String,
-    viewModel: WatchViewModel = androidx.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: WatchViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 

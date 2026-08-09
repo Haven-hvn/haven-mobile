@@ -5,7 +5,7 @@ import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.TokenGate
 import haven.mobile.core.wallet.WalletSession
 
-internal class GateRequestBuilder {
+class GateRequestBuilder {
     fun buildV1Request(
         item: MediaItem,
         nonce: String,

@@ -15,7 +15,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PullToRefreshBox
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -35,14 +35,13 @@ import haven.mobile.core.domain.MediaItem
 @Composable
 fun CommunityScreen(
     navController: androidx.navigation.NavController,
-    viewModel: CommunityViewModel = androidx.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: CommunityViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val filteredItems = viewModel.filteredItems
 
-    PullToRefreshBox(
-        isRefreshing = (uiState as? CommunityUiState.Ready)?.isRefreshing ?: false,
-        onRefresh = { viewModel.refreshCommunity() },
+    Box(
+        modifier = Modifier.fillMaxSize(),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

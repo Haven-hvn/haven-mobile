@@ -21,7 +21,7 @@ import haven.mobile.core.wallet.WalletSession
 
 @Composable
 fun DebugRoute(
-    viewModel: DebugViewModel = androidx.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: DebugViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val log by viewModel.log.collectAsState()
 

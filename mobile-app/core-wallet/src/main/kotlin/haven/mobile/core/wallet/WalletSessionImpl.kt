@@ -39,17 +39,7 @@ class WalletSessionImpl @Inject constructor(
     }
 
     private fun restoreSession() {
-        // Restore is async via DataStore; collect once on init via coroutine.
-        // Synchronous read is not available — start with null and let the
-        // ViewModel observe DataStore separately if needed. This avoids
-        // treating Flow<String?> as a String?.
-        _address.value = null
-    }
-
-    suspend fun restoreFromStore() {
-        walletDataStore.address.collect { saved ->
-            if (saved != null) _address.value = saved
-        }
+        _address.value = walletDataStore.getAddress()
     }
 
     override suspend fun connect(): Result<String> {
@@ -100,7 +90,7 @@ class WalletSessionImpl @Inject constructor(
 sealed class WalletError : Exception() {
     object AppKitNotInitialized : WalletError()
     object NoAddressReturned : WalletError()
-    data class ConnectFailed(val message: String) : WalletError()
+    data class ConnectFailed(override val message: String) : WalletError()
     object InvalidSignatureFormat : WalletError()
-    data class SigningFailed(val message: String) : WalletError()
+    data class SigningFailed(override val message: String) : WalletError()
 }

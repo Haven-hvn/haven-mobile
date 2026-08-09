@@ -4,7 +4,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.security.SecureRandom
 
-internal class NonceManager {
+class NonceManager {
     private val nonceCache = mutableMapOf<String, String>()
     private val mutex = Mutex()
 

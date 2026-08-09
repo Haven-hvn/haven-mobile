@@ -1,12 +1,15 @@
 package haven.mobile.core.arkiv
 
+import cloud.filecoin.foc.cache.FocChain
+import cloud.filecoin.foc.cache.PieceRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Instant
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.Instant
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -123,7 +126,7 @@ class ArkivClientImpl @Inject constructor(
     }
 
     private fun buildUrl(path: String): okhttp3.HttpUrl.Builder {
-        val baseUrl = okhttp3.HttpUrl.Companion.toHttpUrlOrNull(config.endpointUrl)
+        val baseUrl = config.endpointUrl.toHttpUrlOrNull()
             ?: throw HavenError.Internal("Invalid Arkiv endpoint URL: ${config.endpointUrl}")
         return baseUrl.newBuilder().addPathSegments(path.trimStart('/'))
     }
@@ -143,18 +146,18 @@ class ArkivClientImpl @Inject constructor(
             createdAtBlock = optLong("createdAtBlock"),
             expiresAtBlock = optLong("expiresAtBlock"),
             pieceRef = if (has("pieceCid") && !isNull("pieceCid")) {
-                cloud.filecoin.foc.cache.PieceRef(
+                PieceRef(
                     pieceCid = getString("pieceCid"),
                     size = optLong("pieceSize"),
-                    providerServiceUrls = parseStringList("providerServiceUrls"),
+                    providerServiceUrls = parseStringList("providerServiceUrls") ?: emptyList(),
                     walletAddress = optString("walletAddress", null).takeIf { it.isNotEmpty() },
                     cdnEnabled = optBoolean("cdnEnabled"),
                     chain = if (has("chain") && !isNull("chain")) {
-                        cloud.filecoin.foc.cache.FocChain.valueOf(getString("chain"))
-                    } else cloud.filecoin.foc.cache.FocChain.MAINNET,
+                        FocChain.valueOf(getString("chain"))
+                    } else FocChain.MAINNET,
                     ipfsIndexed = optBoolean("ipfsIndexed"),
                     unixFsRoot = optString("unixFsRoot", null).takeIf { it.isNotEmpty() },
-                    trustlessGateways = parseStringList("trustlessGateways"),
+                    trustlessGateways = parseStringList("trustlessGateways") ?: emptyList(),
                 )
             } else null,
             filecoinCid = optString("filecoinCid", null).takeIf { it.isNotEmpty() },
