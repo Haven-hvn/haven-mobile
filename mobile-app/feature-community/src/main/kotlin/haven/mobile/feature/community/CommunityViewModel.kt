@@ -18,6 +18,7 @@ sealed interface CommunityUiState {
     data object Loading : CommunityUiState
     data class Ready(
         val items: List<haven.mobile.core.domain.MediaItem>,
+        val failedVerificationIds: Set<String> = emptySet(),
         val searchQuery: String,
         val isRefreshing: Boolean,
     ) : CommunityUiState
@@ -51,11 +52,15 @@ class CommunityViewModel @Inject constructor(
             _uiState.value = CommunityUiState.Loading
 
             mediaRepository.observeLibrary(address).collect { items ->
+                val failedIds = mutableSetOf<String>()
                 val verifiedItems = items.map { item ->
                     val attestation = item.attestation
                     if (attestation != null) {
                         val result = attestationVerifier.verifySingle(attestation, item.id)
-                        item.copy(attestation = if (result.isSuccess) attestation else null)
+                        if (result.isSuccess) item else {
+                            failedIds.add(item.id)
+                            item // keep attestation for FailedVerification distinct from Unverified
+                        }
                     } else {
                         item
                     }
@@ -69,18 +74,20 @@ class CommunityViewModel @Inject constructor(
                         } else {
                             _uiState.value = CommunityUiState.Ready(
                                 items = verifiedItems,
+                                failedVerificationIds = failedIds,
                                 searchQuery = "",
                                 isRefreshing = false,
                             )
                         }
                     }
                     is CommunityUiState.Ready -> {
-                        _uiState.value = current.copy(items = verifiedItems, isRefreshing = false)
+                        _uiState.value = current.copy(items = verifiedItems, failedVerificationIds = failedIds, isRefreshing = false)
                     }
                     is CommunityUiState.Error -> {
                         if (verifiedItems.isNotEmpty()) {
                             _uiState.value = CommunityUiState.Ready(
                                 items = verifiedItems,
+                                failedVerificationIds = failedIds,
                                 searchQuery = "",
                                 isRefreshing = false,
                             )
@@ -90,6 +97,7 @@ class CommunityViewModel @Inject constructor(
                         if (verifiedItems.isNotEmpty()) {
                             _uiState.value = CommunityUiState.Ready(
                                 items = verifiedItems,
+                                failedVerificationIds = failedIds,
                                 searchQuery = "",
                                 isRefreshing = false,
                             )

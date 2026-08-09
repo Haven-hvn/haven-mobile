@@ -43,6 +43,12 @@ fun OnboardingScreen(
             text = "Welcome to Haven. Connect your wallet to access gated content.",
             style = MaterialTheme.typography.bodyLarge,
         )
+        Spacer(modifier = Modifier.padding(8.dp))
+        Text(
+            text = "Haven will ask your wallet to sign a message to prove you own this address — no gas, no transaction. You’ll see \"Haven-AOL\" in your wallet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         Spacer(modifier = Modifier.padding(24.dp))
 
@@ -68,8 +74,15 @@ fun OnboardingScreen(
                 }
             }
             is OnboardingUiState.Error -> {
+                val friendly = when {
+                    state.message.contains("AppKitNotInitialized", ignoreCase = true) -> "Wallet not ready — set wallet.projectId in local.properties and rebuild."
+                    state.message.contains("NoAddressReturned", ignoreCase = true) -> "Wallet didn’t return an address — try another wallet."
+                    state.message.contains("InvalidSignatureFormat", ignoreCase = true) -> "Signature was rejected — please try again."
+                    state.message.contains("ConnectFailed", ignoreCase = true) -> "Wallet didn’t respond — check your wallet app and try again."
+                    else -> state.message
+                }
                 Text(
-                    text = state.message,
+                    text = friendly,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.padding(16.dp))

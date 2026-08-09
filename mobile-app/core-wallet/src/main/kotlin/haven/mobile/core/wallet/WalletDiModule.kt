@@ -27,7 +27,7 @@ object WalletDataStoreModule {
     @Provides
     @Singleton
     fun provideWalletConfig(): WalletConfig = WalletConfig(
-        projectId = "",
+        projectId = try { haven.mobile.core.wallet.BuildConfig.WALLET_PROJECT_ID } catch (_: Exception) { "" },
         appName = "Haven",
         appDescription = "Haven — gated media",
         appIconUrl = "",

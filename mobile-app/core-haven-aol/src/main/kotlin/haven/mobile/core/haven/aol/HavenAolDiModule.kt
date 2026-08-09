@@ -20,7 +20,10 @@ abstract class HavenAolDiModule {
 object HavenAolConfigModule {
     @Provides
     @Singleton
-    fun provideHavenAolConfig(): HavenAolConfig = HavenAolConfig(canisterId = "", icHost = "")
+    fun provideHavenAolConfig(): HavenAolConfig = HavenAolConfig(
+        canisterId = try { haven.mobile.core.haven.aol.BuildConfig.HAVEN_AOL_CANISTER_ID } catch (_: Exception) { "" },
+        icHost = try { haven.mobile.core.haven.aol.BuildConfig.HAVEN_AOL_IC_HOST } catch (_: Exception) { "https://ic0.app" },
+    )
 
     @Provides
     @Singleton

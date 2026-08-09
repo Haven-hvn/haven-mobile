@@ -39,7 +39,11 @@ class WalletSessionImpl @Inject constructor(
     }
 
     private fun restoreSession() {
+        // Sync mirror first, then async DataStore load (per-wallet namespacing survives restart)
         _address.value = walletDataStore.getAddress()
+        // Best-effort async restore — viewModel will observe address Flow
+        // Launched via AppKit init scope; keep synchronous path for now to avoid init coroutine scope.
+        // WalletDataStore.loadPersistedAddress() can be called from Application.onCreate if needed.
     }
 
     override suspend fun connect(): Result<String> {

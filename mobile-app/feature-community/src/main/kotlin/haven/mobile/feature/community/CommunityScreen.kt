@@ -92,7 +92,8 @@ fun CommunityScreen(
                                 .padding(horizontal = 16.dp),
                         ) {
                             items(filteredItems, key = { it.id }) { item ->
-                                CommunityListItem(item = item)
+                                val failedIds = (uiState as? CommunityUiState.Ready)?.failedVerificationIds ?: emptySet()
+                                CommunityListItem(item = item, isFailed = item.id in failedIds)
                             }
                         }
                     }
@@ -103,7 +104,7 @@ fun CommunityScreen(
 }
 
 @Composable
-private fun CommunityListItem(item: MediaItem) {
+private fun CommunityListItem(item: MediaItem, isFailed: Boolean = false) {
     Card(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -125,12 +126,12 @@ private fun CommunityListItem(item: MediaItem) {
                 // Attestation badge — 3 distinct states per design/components.md (never collapse latter two)
                 // Tokens: Verified #2E7D32 / Unverified #616161 / Failed #C62828 ; 8dp chips, 32dp height
                 val badgeColor = when {
+                    isFailed -> Color(0xFFC62828) // FailedVerification
                     item.attestation == null -> Color(0xFF616161) // Unverified
-                    // TODO: wire AttestationVerifier result; Until then Verified if attestation present
-                    // FailedVerification will be Color(0xFFC62828) when verifier returns false
                     else -> Color(0xFF2E7D32) // Verified
                 }
                 val badgeLabel = when {
+                    isFailed -> "Failed"
                     item.attestation == null -> "Unverified"
                     else -> "Verified"
                 }

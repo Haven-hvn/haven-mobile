@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -194,7 +195,7 @@ class MediaRepositoryImpl @Inject constructor(
             fileExtension = fileExtension,
             filenameHint = filenameHint,
             sizeBytes = sizeBytes,
-            createdAt = kotlinx.datetime.Instant.parse(createdAt),
+            createdAt = Instant.parse(createdAt),
             createdAtBlock = createdAtBlock,
             expiresAtBlock = expiresAtBlock,
             pieceRef = if (pieceCid != null) cloud.filecoin.foc.cache.PieceRef(
@@ -223,7 +224,7 @@ class MediaRepositoryImpl @Inject constructor(
             attestation = attestation?.let { parseAttestation(it) },
             arkivStatus = ArkivStatus.valueOf(arkivStatus),
             contentCacheStatus = ContentCacheStatus.valueOf(contentCacheStatus),
-            lastAccessedAt = lastAccessedAt?.let { kotlinx.datetime.Instant.parse(it) },
+            lastAccessedAt = lastAccessedAt?.let { Instant.parse(it) },
         )
     }
 
@@ -303,7 +304,7 @@ class MediaRepositoryImpl @Inject constructor(
             signature = obj.getString("signature").toByteArray(Charsets.UTF_8),
             signerKeyId = obj.getString("signerKeyId"),
             merkleProof = merkleProof,
-            issuedAt = kotlinx.datetime.Instant.parse(obj.getString("issuedAt")),
+            issuedAt = Instant.parse(obj.getString("issuedAt")),
         )
     }
 }

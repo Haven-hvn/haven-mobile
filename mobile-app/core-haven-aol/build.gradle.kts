@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.library")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+}
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -11,10 +18,13 @@ android {
     defaultConfig {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "HAVEN_AOL_CANISTER_ID", "\"${localProps.getProperty("haven.aol.canisterId", "")}\"")
+        buildConfigField("String", "HAVEN_AOL_IC_HOST", "\"${localProps.getProperty("haven.aol.icHost", "https://ic0.app")}\"")
     }
 
     buildFeatures {
         compose = false
+        buildConfig = true
     }
 
     packaging {
