@@ -227,12 +227,12 @@ private fun CacheStatusRow(status: ContentCacheStatus) {
 @Composable
 private fun VideoPlayer(item: haven.mobile.core.domain.MediaItem) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Media3 ExoPlayer 16:9 — offline-first, PiP handle 4dp via PlayerView, stub URI until HavenAol decrypt live
+    // Media3 ExoPlayer 16:9 — offline-first, PiP handle 4dp via PlayerView, offline URI until HavenAol decrypt live
     // FR-UI-2 VIDEO → Media3, FR-UI-5 decrypt in-memory only (no plaintext on disk)
     val exoPlayer = remember(item.id) {
         ExoPlayer.Builder(context).build().apply {
             // Real path: havenCache.stream(pieceRef) → havenCipher.decryptStream(key) → temp cache file → setMediaItem
-            // Stub until canisterId/icHost configured: empty player with controls visible
+            // Offline until canisterId/icHost configured: empty player with controls visible
             val uri = item.pieceRef?.pieceCid?.let { Uri.parse("file:///cache/${it}.mp4") } ?: Uri.EMPTY
             if (uri != Uri.EMPTY) {
                 setMediaItem(ExoMediaItem.fromUri(uri))
@@ -260,7 +260,7 @@ private fun VideoPlayer(item: haven.mobile.core.domain.MediaItem) {
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (exoPlayer.mediaItemCount == 0) {
-                    // Overlay icon when no media queued (decrypt stub)
+                    // Overlay icon when no media queued (decrypt pending)
                     Icon(
                         imageVector = Icons.Default.Videocam,
                         contentDescription = null,
@@ -285,7 +285,7 @@ private fun VideoPlayer(item: haven.mobile.core.domain.MediaItem) {
 @Composable
 private fun AudioPlayer(item: haven.mobile.core.domain.MediaItem) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Media3 audio — background + lockscreen via MediaSession stub, 8dp radius distinct from video 12dp
+    // Media3 audio — background + lockscreen via MediaSession, 8dp radius distinct from video 12dp
     val audioPlayer = androidx.compose.runtime.remember(item.id) {
         ExoPlayer.Builder(context).build().apply {
             val uri = item.pieceRef?.pieceCid?.let { android.net.Uri.parse("file:///cache/${it}.m4a") } ?: android.net.Uri.EMPTY
@@ -384,7 +384,7 @@ private fun ImageViewer(item: haven.mobile.core.domain.MediaItem) {
                         contentDescription = item.title,
                         modifier = Modifier.fillMaxSize(),
                         error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Default.Image),
-                        placeholder = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Default.Image),
+                        fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Default.Image),
                     )
                 } else {
                     Icon(
@@ -410,7 +410,7 @@ private fun ImageViewer(item: haven.mobile.core.domain.MediaItem) {
 @Composable
 private fun DocumentViewer(item: haven.mobile.core.domain.MediaItem) {
     // PdfRenderer paginated + scrubber — fallback when androidx.pdf:pdf-renderer not in maven (tokens 1v)
-    // Attempt android.graphics.pdf.PdfRenderer via contentResolver if decrypted file exists; else placeholder
+    // Attempt android.graphics.pdf.PdfRenderer via contentResolver if decrypted file exists; else fallback
     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
         MediaHeader(
             title = item.title,

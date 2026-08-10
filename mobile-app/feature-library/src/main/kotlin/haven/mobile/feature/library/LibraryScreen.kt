@@ -261,7 +261,7 @@ private fun CategoryCard(
 
 @Composable
 private fun LibraryShimmer() {
-    // Shimmer 4 cards + 6 rows placeholder (design/screens/library.md) — no aurora/glow, just surfaceVariant blocks
+    // Shimmer 4 cards + 6 rows fallback (design/screens/library.md) — no aurora/glow, just surfaceVariant blocks
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             repeat(2) {

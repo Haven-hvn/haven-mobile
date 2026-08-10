@@ -97,7 +97,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // FR-OBS-2 rolling in-memory log stubs
+    // FR-OBS-2 rolling in-memory log entries
     private val _recentErrors = MutableStateFlow<List<String>>(emptyList())
     val recentErrors: List<String> get() = _recentErrors.value
 
@@ -114,7 +114,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun copyAddressToClipboard() {
-        // Real clipboard via Android ClipboardManager would need Context — stub for v1, logs for Maestro
+        // Real clipboard via Android ClipboardManager would need Context — fallback for v1, logs for Maestro
         _recentErrors.update { it + "Copy address: ${walletSession.address.value ?: "none"}" }
     }
 

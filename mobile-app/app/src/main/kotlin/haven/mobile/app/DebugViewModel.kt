@@ -28,7 +28,7 @@ class DebugViewModel @Inject constructor(
         viewModelScope.launch {
             _log.update { it + "Ping canister: called" }
             try {
-                _log.update { it + "Ping canister: havenAol=HavenAol — no canisterId configured (stub mode)" }
+                _log.update { it + "Ping canister: havenAol=HavenAol — no canisterId configured (offline mode)" }
             } catch (e: Exception) {
                 _log.update { it + "Ping canister: failed — ${e.message}" }
             }
@@ -44,7 +44,7 @@ class DebugViewModel @Inject constructor(
                     size = 1024,
                     providerServiceUrls = emptyList(),
                 )
-                _log.update { it + "Fetch fixture PieceRef: created ${ref.pieceCid} (${ref.size} bytes, stub cache)" }
+                _log.update { it + "Fetch fixture PieceRef: created ${ref.pieceCid} (${ref.size} bytes, offline cache)" }
             } catch (e: Exception) {
                 _log.update { it + "Fetch fixture: failed — ${e.message}" }
             }

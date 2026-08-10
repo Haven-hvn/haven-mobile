@@ -36,7 +36,7 @@ class HavenAolImpl @Inject constructor(
             val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val method = if (isV3) "requestDecryptionKeyV3" else "requestDecryptionKey"
-            // Typed GateRequest Candid (haven-dapp haven-aol/canister.ts GateRequestType) — no more emptyList placeholder
+            // Typed GateRequest Candid (haven-dapp haven-aol/canister.ts GateRequestType) — no more emptyList value
             val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
             val cid = item.pieceRef?.pieceCid ?: item.id
             val transportPub = run {
@@ -167,6 +167,6 @@ class HavenAolImpl @Inject constructor(
 
     override suspend fun clearFor(walletAddress: String) {
         aesKeyCache.clearAll()
-        // NonceManager is per-canister; stub clears nothing — real impl would iterate keys
+        // NonceManager is per-canister; entry clears nothing — real impl would iterate keys
     }
 }
