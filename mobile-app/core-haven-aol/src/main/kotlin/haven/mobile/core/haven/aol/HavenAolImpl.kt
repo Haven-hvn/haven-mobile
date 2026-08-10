@@ -36,9 +36,45 @@ class HavenAolImpl @Inject constructor(
             val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val method = if (isV3) "requestDecryptionKeyV3" else "requestDecryptionKey"
-            val candidArg = try {
-                dev.ic.kotlin.candid.CandidEncoder.encode(emptyList())
-            } catch (_: Exception) { ByteArray(0) }
+            // Typed GateRequest Candid (haven-dapp haven-aol/canister.ts GateRequestType) — no more emptyList placeholder
+            val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
+            val cid = item.pieceRef?.pieceCid ?: item.id
+            val transportPub = run {
+                val b = ByteArray(32); java.security.SecureRandom().nextBytes(b); b
+            }
+            val sigBytes = run {
+                val hex = sig.removePrefix("0x"); val out = ByteArray(hex.length / 2)
+                for (i in out.indices) out[i] = hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+                out
+            }
+            val nonceNat = try { java.math.BigInteger(nonce) } catch (_: Exception) { java.math.BigInteger.ZERO }
+            val thresholdNat = java.math.BigInteger.valueOf(gate.threshold.toLong().coerceAtLeast(0))
+            val eipChainId = java.math.BigInteger.ONE
+            val chainVariantName = when {
+                gate.chain.contains("11155111") || gate.chain.contains("Sepolia", true) -> "EthSepolia"
+                gate.chain.contains("42161") || gate.chain.contains("Arbitrum", true) -> "ArbitrumOne"
+                gate.chain.contains("8453") || gate.chain.contains("Base", true) -> "BaseMainnet"
+                gate.chain.contains("10") && gate.chain.contains("Optimism", true) -> "OptimismMainnet"
+                else -> "EthMainnet"
+            }
+            val chainVariant = dev.ic.kotlin.candid.CandidValue.CandidVariant(
+                dev.ic.kotlin.candid.fieldId(chainVariantName), dev.ic.kotlin.candid.CandidValue.CandidNull
+            )
+            val record = dev.ic.kotlin.candid.CandidValue.CandidRecord(
+                mapOf(
+                    dev.ic.kotlin.candid.fieldId("chain") to chainVariant,
+                    dev.ic.kotlin.candid.fieldId("tokenAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(gate.tokenAddress),
+                    dev.ic.kotlin.candid.fieldId("threshold") to dev.ic.kotlin.candid.CandidValue.CandidNat(thresholdNat),
+                    dev.ic.kotlin.candid.fieldId("cid") to dev.ic.kotlin.candid.CandidValue.CandidText(cid),
+                    dev.ic.kotlin.candid.fieldId("evmAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(address),
+                    dev.ic.kotlin.candid.fieldId("transportPublicKey") to dev.ic.kotlin.candid.CandidValue.CandidBlob(transportPub),
+                    dev.ic.kotlin.candid.fieldId("nonce") to dev.ic.kotlin.candid.CandidValue.CandidNat(nonceNat),
+                    dev.ic.kotlin.candid.fieldId("signature") to dev.ic.kotlin.candid.CandidValue.CandidBlob(sigBytes),
+                    dev.ic.kotlin.candid.fieldId("eip712ChainId") to dev.ic.kotlin.candid.CandidValue.CandidNat(eipChainId),
+                    dev.ic.kotlin.candid.fieldId("eip712VerifyingContract") to dev.ic.kotlin.candid.CandidValue.CandidText(gate.tokenAddress)
+                )
+            )
+            val candidArg = dev.ic.kotlin.candid.CandidEncoder.encode(listOf(record))
             val reply = agent.call(principal, method, candidArg)
             when (reply) {
                 is dev.ic.kotlin.agent.Reply.Replied -> {
