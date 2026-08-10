@@ -104,8 +104,8 @@ class HavenCipherImpl @javax.inject.Inject constructor() : HavenCipher {
     private fun isChunkedFormat(data: ByteArray): Boolean {
         if (data.size < BASE_IV_SIZE + CHUNK_HEADER_SIZE) return false
         // Peek first chunk header: if length is plausible and offset aligns, treat as chunked.
-        val bb = ByteBuffer.wrap(data, BASE_IV_SIZE, CHUNK_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-        val len = bb.getInt(4)
+        // Use absolute getInt at BASE_IV_SIZE+4 (chunk length field) — ByteBuffer.wrap with offset uses absolute index, not relative.
+        val len = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).getInt(BASE_IV_SIZE + 4)
         // Encrypted chunk length should be > GCM_TAG_SIZE and < MAX and not exceed remaining
         return len in (GCM_TAG_SIZE + 1)..MAX_CHUNK_SIZE && BASE_IV_SIZE + CHUNK_HEADER_SIZE + len <= data.size
     }

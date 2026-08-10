@@ -37,14 +37,12 @@ android {
 android {
     testOptions {
         unitTests.all {
-            it.useJUnitPlatform()
             it.failOnNoDiscoveredTests = false
         }
     }
 }
 
 tasks.withType<Test> {
-    useJUnitPlatform()
     failOnNoDiscoveredTests.set(false)
 }
 
@@ -59,6 +57,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)
     testImplementation(libs.junit)
+    testImplementation("junit:junit:4.13.2")
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines)

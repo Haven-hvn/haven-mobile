@@ -39,7 +39,7 @@ class MediaRepositoryPaginationTest {
         createdAt = Instant.parse("2024-01-01T00:00:00Z"), createdAtBlock = null, expiresAtBlock = null,
         pieceRef = null, filecoinCid = null, encryptedCid = null, cidHash = null,
         gate = null, isEncrypted = false, encryptionMetadata = null, cidEncryptionMetadata = null,
-        attestation = null, arkivStatus = ArkivStatus.ACTIVE, contentCacheStatus = ContentCacheStatus.CACHED,
+        attestation = null, arkivStatus = ArkivStatus.FRESH, contentCacheStatus = ContentCacheStatus.CACHED,
         lastAccessedAt = null
     )
 }

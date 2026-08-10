@@ -1,17 +1,11 @@
 plugins {
-    id("com.android.library")
+    id("haven.android.library")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
 
 android {
     namespace = "haven.mobile.core.crypto"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = 26
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
 
     buildFeatures {
         compose = false

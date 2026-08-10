@@ -6,11 +6,10 @@ import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.ArkivStatus
 import haven.mobile.core.domain.ContentCacheStatus
 import kotlinx.datetime.Instant
-import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.Test
+import org.junit.Assert.*
 
 class HavenAolBatchGroupingTest {
-    @Test
+    @org.junit.Test
     fun `decryptAll groups by V3 epoch`() {
         val v3a = GateMetadata.V3(epochId = 1, wrappedKey = byteArrayOf(1), gateReference = "g1")
         val v3b = GateMetadata.V3(epochId = 2, wrappedKey = byteArrayOf(2), gateReference = "g2")
@@ -23,7 +22,7 @@ class HavenAolBatchGroupingTest {
         assertEquals(3, groups.size)
     }
 
-    @Test
+    @org.junit.Test
     fun `V1 items fallback to per-item`() {
         val v1 = GateMetadata.V1(wrappedKey = byteArrayOf(9), nonce = "n")
         val items = listOf(stub("x", v1), stub("y", v1))
