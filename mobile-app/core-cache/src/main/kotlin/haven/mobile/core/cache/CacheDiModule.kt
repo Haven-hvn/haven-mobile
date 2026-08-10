@@ -26,5 +26,5 @@ object CacheConfigModule {
 
     @Provides
     @Singleton
-    fun providePieceCidVerifier(): PieceCidVerifier = NoOpPieceCidVerifier()
+    fun providePieceCidVerifier(): PieceCidVerifier = CommPPieceCidVerifier()
 }

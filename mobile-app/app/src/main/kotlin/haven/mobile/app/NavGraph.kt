@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.reown.appkit.ui.appKitGraph
 import haven.mobile.feature.community.communityRoute
 import haven.mobile.feature.library.libraryRoute
 import haven.mobile.feature.onboarding.onboardingRoute
@@ -44,5 +45,6 @@ fun AppNavGraph(
         composable(AppRoute.Debug.route()) {
             DebugRoute()
         }
+        appKitGraph(navController)
     }
 }

@@ -19,6 +19,8 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         mavenLocal()
+        maven(url = "https://jitpack.io")
+        maven(url = "https://central.sonatype.com/repository/maven-snapshots/")
     }
 }
 
@@ -45,4 +47,4 @@ include(":foc-cache")
 project(":foc-cache").projectDir = File("../../foc-local-first-android/foc-cache")
 
 includeBuild("../../ic-kotlin")
-// includeBuild("../../reown-kotlin-develop") // Reown AppKit via Maven Central when online; offline uses local AppKit wrapper (see core-wallet AppKit.kt)
+// includeBuild("../../reown-kotlin-develop") // enabled for local dev when offline; online uses Maven Central (1.6.14)

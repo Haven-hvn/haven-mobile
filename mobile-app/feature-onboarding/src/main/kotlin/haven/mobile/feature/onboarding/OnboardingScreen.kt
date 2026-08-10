@@ -16,7 +16,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import com.reown.appkit.ui.components.button.ConnectButton
+import com.reown.appkit.ui.components.button.ConnectButtonSize
+import com.reown.appkit.ui.components.button.rememberAppKitState
 
 @Composable
 fun OnboardingScreen(
@@ -25,6 +27,7 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val appKitState = rememberAppKitState(navController = navController)
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) {
@@ -56,11 +59,20 @@ fun OnboardingScreen(
         when (state) {
             OnboardingUiState.Idle,
             OnboardingUiState.Connecting -> {
+                // Primary Reown connect via modal — handles WalletConnect, MetaMask, Rainbow, Trust
+                ConnectButton(state = appKitState, buttonSize = ConnectButtonSize.NORMAL)
+                Spacer(modifier = Modifier.padding(8.dp))
+                Text(
+                    text = "Or",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.padding(8.dp))
                 Button(
                     onClick = { viewModel.connect() },
                     enabled = state !is OnboardingUiState.Connecting,
                 ) {
-                    Text("Connect wallet")
+                    Text("Connect wallet (legacy)")
                 }
             }
             is OnboardingUiState.Connected -> {
@@ -86,8 +98,10 @@ fun OnboardingScreen(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.padding(16.dp))
+                ConnectButton(state = appKitState, buttonSize = ConnectButtonSize.NORMAL)
+                Spacer(modifier = Modifier.padding(16.dp))
                 Button(onClick = { viewModel.connect() }) {
-                    Text("Retry")
+                    Text("Retry (legacy)")
                 }
             }
         }

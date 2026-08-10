@@ -28,5 +28,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")
-    // Reown AppKit — local wrapper delegates to WalletConnect when projectId configured (offline-safe)
+    implementation(platform("com.reown:android-bom:1.6.14"))
+    implementation("com.reown:android-core")
+    implementation("com.reown:appkit")
+    implementation("com.jakewharton.timber:timber:5.0.1")
 }
