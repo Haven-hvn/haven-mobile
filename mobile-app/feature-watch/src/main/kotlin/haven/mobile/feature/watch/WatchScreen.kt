@@ -454,25 +454,36 @@ private fun DocumentViewer(item: haven.mobile.core.domain.MediaItem) {
 }
 
 @Composable
-private fun FileViewer(item: haven.mobile.core.domain.MediaItem) {
+private fun FileViewer(
+    item: haven.mobile.core.domain.MediaItem,
+    viewModel: WatchViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+) {
     val context = LocalContext.current
     var showWarning by remember { mutableStateOf(false) }
     var pendingSave by remember { mutableStateOf(false) }
     var lastSavedUri by remember { mutableStateOf<Uri?>(null) }
 
-    // FR-FILE-4: do not allow export if attestation/ PieceCID verification failed — stub check until verifier wired
+    // FR-FILE-4: block export if EXPIRED (attestation/PieceCID failed) — real verifier wired via WatchViewModel.exportFile double-check
     val canExport = item.contentCacheStatus != haven.mobile.core.domain.ContentCacheStatus.EXPIRED
 
     val createDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(item.mimeType ?: "application/octet-stream")) { uri ->
         if (uri != null) {
-            lastSavedUri = uri
-            // In M2 real path: decrypt in memory then write to uri via contentResolver.openOutputStream — no plaintext on disk
-            // For now: placeholder write (zero bytes) to prove SAF wiring; real decrypt comes from HavenCache/HavenCipher
-            try {
-                context.contentResolver.openOutputStream(uri)?.use { it.write(ByteArray(0)) }
-                android.widget.Toast.makeText(context, "Saved to device", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                android.widget.Toast.makeText(context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            // Real path: HavenAol→HavenCache→HavenCipher in-memory decrypt → SAF (FR-FILE-1, FR-UI-5) + persistable so Open with… survives process death
+            viewModel.exportFile(item, uri, context.contentResolver) { result ->
+                if (result.isSuccess) {
+                    // Persist URI permission so the saved file remains openable via lastSavedUri after process death (SAF persistable)
+                    try {
+                        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        context.contentResolver.takePersistableUriPermission(uri, flags)
+                    } catch (_: Exception) {
+                        // Not all providers support persistable (e.g. Downloads on some OEMs) — file is still saved at SAF location and openable via file manager
+                    }
+                    lastSavedUri = uri
+                    android.widget.Toast.makeText(context, "Saved to device", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    val msg = result.exceptionOrNull()?.message ?: "Save failed"
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }
         pendingSave = false

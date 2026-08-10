@@ -101,4 +101,68 @@ class WatchViewModel @Inject constructor(
             }
         }
     }
+
+    fun exportFile(item: haven.mobile.core.domain.MediaItem, uri: android.net.Uri, contentResolver: android.content.ContentResolver, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { current ->
+                if (current is WatchUiState.Ready) current.copy(isDecrypting = true, decryptError = null) else current
+            }
+            val piece = item.pieceRef
+            if (piece == null) {
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = "No piece ref") else it }
+                onResult(Result.failure(haven.mobile.core.domain.error.HavenError.CacheMiss("No piece ref for ${item.id}")))
+                return@launch
+            }
+            // FR-FILE-4: block export if attestation failed (handled by caller canExport) — double-check here
+            if (item.contentCacheStatus == haven.mobile.core.domain.ContentCacheStatus.EXPIRED) {
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = "Verification failed") else it }
+                onResult(Result.failure(haven.mobile.core.domain.error.HavenError.AttestationFailed("Export blocked: verification failed")))
+                return@launch
+            }
+            // 1. Get AES key (cached or via HavenAol decrypt)
+            val cachedKey = aesKeyCache.get(piece.pieceCid)
+            val keyResult = if (cachedKey != null) Result.success(cachedKey) else havenAol.decrypt(item, walletSession)
+            if (keyResult.isFailure) {
+                val msg = keyResult.exceptionOrNull()?.message ?: "Decryption failed"
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = msg) else it }
+                onResult(Result.failure(keyResult.exceptionOrNull()!!))
+                return@launch
+            }
+            val key = keyResult.getOrNull()!!
+            aesKeyCache.put(piece.pieceCid, key)
+            // 2. Fetch ciphertext via HavenCache (hedged, offline-first) — FR-CACHE-1
+            val bytesResult = try {
+                // Prefer HavenCache.get for FILE (full bytes, not stream)
+                havenCache.get(piece)
+            } catch (e: Exception) {
+                Result.failure(haven.mobile.core.domain.error.HavenError.CacheReadFailed(e.message ?: "Fetch failed"))
+            }
+            if (bytesResult.isFailure) {
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = bytesResult.exceptionOrNull()?.message) else it }
+                onResult(Result.failure(bytesResult.exceptionOrNull()!!))
+                return@launch
+            }
+            val ciphertext = bytesResult.getOrNull()!!
+            // 3. Decrypt in memory only — FR-UI-5 no plaintext on disk
+            val plainResult = havenCipher.decrypt(key, ciphertext, null)
+            if (plainResult.isFailure) {
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = plainResult.exceptionOrNull()?.message) else it }
+                onResult(Result.failure(plainResult.exceptionOrNull()!!))
+                return@launch
+            }
+            val plain = plainResult.getOrNull()!!
+            // 4. Write to SAF uri via ContentResolver
+            try {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(plain)
+                    out.flush()
+                } ?: throw IllegalStateException("Could not open output stream for $uri")
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false) else it }
+                onResult(Result.success(Unit))
+            } catch (e: Exception) {
+                _uiState.update { if (it is WatchUiState.Ready) it.copy(isDecrypting = false, decryptError = e.message) else it }
+                onResult(Result.failure(haven.mobile.core.domain.error.HavenError.PlaybackDecryptFailed(e.message ?: "Write failed")))
+            }
+        }
+    }
 }
