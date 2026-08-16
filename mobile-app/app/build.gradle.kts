@@ -19,7 +19,7 @@ android {
     defaultConfig {
         applicationId = "haven.mobile"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
