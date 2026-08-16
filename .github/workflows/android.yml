@@ -50,13 +50,13 @@ jobs:
         working-directory: haven-mobile/mobile-app
         run: ./gradlew testDebugUnitTest --continue
         env:
-          GRADLE_OPTS: -Xmx2g -Dorg.gradle.jvmargs=-Xmx2g
+          GRADLE_OPTS: -Xmx4g -Dorg.gradle.jvmargs=-Xmx4g
 
       - name: Build debug APK
         working-directory: haven-mobile/mobile-app
         run: ./gradlew :app:assembleDebug
         env:
-          GRADLE_OPTS: -Xmx2g -Dorg.gradle.jvmargs=-Xmx2g
+          GRADLE_OPTS: -Xmx4g -Dorg.gradle.jvmargs=-Xmx4g
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
