@@ -83,7 +83,7 @@ jobs:
   startup-logcat:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     if: always() && needs.build.result != 'cancelled'
     steps:
       - name: Checkout haven-mobile
@@ -134,7 +134,7 @@ jobs:
   verify-release:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout haven-mobile
         uses: actions/checkout@v4
