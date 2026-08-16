@@ -1,11 +1,32 @@
+import java.util.Properties
+
 plugins {
     id("haven.android.library")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
 
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 android {
     namespace = "haven.mobile.core.arkiv"
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    defaultConfig {
+        // Arkiv gateway base URL. Empty is a valid state: the client reports "not configured"
+        // instead of throwing, so a fresh clone builds and runs against the local mirror only.
+        buildConfigField(
+            "String",
+            "ARKIV_ENDPOINT_URL",
+            "\"${localProps.getProperty("arkiv.endpointUrl", "")}\"",
+        )
+    }
 }
 
 dependencies {

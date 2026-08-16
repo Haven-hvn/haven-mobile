@@ -18,11 +18,14 @@ abstract class ArkivDiModule {
 @Module
 @InstallIn(SingletonComponent::class)
 object ArkivConfigModule {
+    /**
+     * Endpoint comes from `local.properties` via `BuildConfig` (see this module's build script),
+     * the same pattern as `wallet.projectId` and `haven.aol.*`. It used to be hard-coded to `""`,
+     * which meant every Arkiv call failed while looking like a network error.
+     */
     @Provides
     @Singleton
-    fun provideArkivConfig(): ArkivConfig {
-        return ArkivConfig(
-            endpointUrl = "",
-        )
-    }
+    fun provideArkivConfig(): ArkivConfig = ArkivConfig(
+        endpointUrl = BuildConfig.ARKIV_ENDPOINT_URL,
+    )
 }

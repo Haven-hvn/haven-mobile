@@ -15,23 +15,12 @@ dependencies {
     implementation("com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin:2.3.11")
 }
 
-gradlePlugin {
-    plugins {
-        register("android-application") {
-            id = "haven.android.application"
-            implementationClass = "haven.android.application.gradle.kts"
-        }
-        register("android-library") {
-            id = "haven.android.library"
-            implementationClass = "haven.android.library.gradle.kts"
-        }
-        register("android-compose") {
-            id = "haven.android.compose"
-            implementationClass = "haven.android.compose.gradle.kts"
-        }
-        register("kotlin-library") {
-            id = "haven.kotlin.library"
-            implementationClass = "haven.kotlin.library.gradle.kts"
-        }
-    }
-}
+// NOTE: do NOT declare a `gradlePlugin { plugins { register(...) } }` block here.
+// Every file under src/main/kotlin/*.gradle.kts is a *precompiled script plugin*: the
+// `kotlin-dsl` plugin compiles it and registers the plugin id from the file name
+// (haven.android.library.gradle.kts -> id "haven.android.library"). Registering the same
+// ids manually with an `implementationClass` fails at configuration time, because the
+// named class does not exist and the id is already taken.
+//
+// Available ids (one per file in src/main/kotlin):
+//   haven.android.application, haven.android.library, haven.android.compose, haven.kotlin.library

@@ -1,0 +1,162 @@
+{
+  "_comment": [
+    "Collection roster. Ported from haven-web/src/lib/chains.ts GATES — same contracts, same",
+    "thresholds, same editorial premises, trimmed to one sentence for a phone.",
+    "",
+    "Bundled rather than fetched because there is no public Arkiv network to discover communities",
+    "from yet (see the index status note in haven-web/src/lib/chains.ts). When one exists this file",
+    "becomes the offline fallback and the live roster comes from the index.",
+    "",
+    "Deliberately absent: prices. The web page reads live floor prices from market data; a price",
+    "frozen into an APK would be wrong within a day, and a wrong price is a trust problem. The",
+    "'get access' link opens the marketplace, where the real number is.",
+    "",
+    "The 'gate' block is read by internal code only and is never shown to a reader."
+  ],
+  "collections": [
+    {
+      "id": "forgotten-runes",
+      "name": "Forgotten Runes Wizard's Cult",
+      "category": "LORE",
+      "premise": "A cult that produces its own animation and serialised film. Masters, stems and unreleased cuts are exactly the material that should never sit on a platform.",
+      "requirement": "Hold any 1 Wizard",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x521f9C7505005CFA19A8E5786a9c3c9c9F5e6f42" },
+      "gate": { "address": "0x521f9C7505005CFA19A8E5786a9c3c9c9F5e6f42", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "chain-runners",
+      "name": "Chain Runners",
+      "category": "LORE",
+      "premise": "On-chain characters with a written world around them. The canon is community-authored, which makes where it lives a governance question.",
+      "requirement": "Hold any 1 Runner",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x97597002980134beA46250Aa0510C9B90d87A587" },
+      "gate": { "address": "0x97597002980134beA46250Aa0510C9B90d87A587", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "mfers",
+      "name": "mfers",
+      "category": "LORE",
+      "premise": "A CC0 culture that generates more derivative work than any single site could host. An archive its holders control is the only stable copy.",
+      "requirement": "Hold any 1 mfer",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x79FCDEF22feeD20eDDacbB2587640e45491b757f" },
+      "gate": { "address": "0x79FCDEF22feeD20eDDacbB2587640e45491b757f", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "opepen",
+      "name": "Opepen Edition",
+      "category": "LORE",
+      "premise": "A long-running set release with process, revisions and correspondence behind it — the parts of an artwork that usually vanish.",
+      "requirement": "Hold any 1 Opepen",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x6339e5E072086621540D0362C4e3Cea0d643E114" },
+      "gate": { "address": "0x6339e5E072086621540D0362C4e3Cea0d643E114", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "autoglyphs",
+      "name": "Autoglyphs",
+      "category": "ART",
+      "premise": "512 pieces of primary art-historical material. Provenance, scholarship and interviews belong with the holders, not with a gallery site.",
+      "requirement": "Hold any 1 Autoglyph",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0xd4e4078ca3495DE5B1d4dB434BEbc5a986197782" },
+      "gate": { "address": "0xd4e4078ca3495DE5B1d4dB434BEbc5a986197782", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "blitmap",
+      "name": "Blitmap",
+      "category": "ART",
+      "premise": "Community-composed art with a documented authorship chain. The source files matter as much as the outputs.",
+      "requirement": "Hold any 1 Blitmap",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x8d04a8c79cEB0889Bdd12acdF3Fa9D207eD3Ff63" },
+      "gate": { "address": "0x8d04a8c79cEB0889Bdd12acdF3Fa9D207eD3Ff63", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "terraforms",
+      "name": "Terraforms",
+      "category": "ART",
+      "premise": "Fully on-chain terrain with a deep technical record behind it. The writing about the work is as scarce as the work.",
+      "requirement": "Hold any 1 Terraform",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x4E1f41613c9084FdB9E34E11fAE9412427480e56" },
+      "gate": { "address": "0x4E1f41613c9084FdB9E34E11fAE9412427480e56", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "superrare",
+      "name": "SuperRare",
+      "category": "ART",
+      "premise": "A curation DAO sitting on two decades of artist material at full resolution — the masters, not the transcodes.",
+      "requirement": "Hold 2,500 RARE",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0xba5BDe662c17e2aDFF1075610382B9B691296350" },
+      "gate": { "address": "0xba5BDe662c17e2aDFF1075610382B9B691296350", "kind": "token", "threshold": 2500 }
+    },
+    {
+      "id": "fwb",
+      "name": "Friends With Benefits",
+      "category": "CULTURE",
+      "premise": "A membership that has always been token-gated. Talks, sets and dinners recorded for members are the canonical case for an archive.",
+      "requirement": "Hold 75 FWB",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x35bD01FC9d6D5D81CA9E055Db88Dc49aa2c699A8" },
+      "gate": { "address": "0x35bD01FC9d6D5D81CA9E055Db88Dc49aa2c699A8", "kind": "token", "threshold": 75 }
+    },
+    {
+      "id": "whale",
+      "name": "WHALE",
+      "category": "CULTURE",
+      "premise": "A social token backed by a real collection. The vault has a story, and the story is worth more to members than to the public.",
+      "requirement": "Hold 500 WHALE",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x9355372396e3F6daF13359B7b607a3374cc638e0" },
+      "gate": { "address": "0x9355372396e3F6daF13359B7b607a3374cc638e0", "kind": "token", "threshold": 500 }
+    },
+    {
+      "id": "rally",
+      "name": "Rally",
+      "category": "CULTURE",
+      "premise": "Creator economies whose back catalogues outlived the platforms that hosted them. That is the failure this protocol exists to answer.",
+      "requirement": "Hold 5,000 RLY",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0xf1f955016EcbCd7321c7266BccFB96c68ea5E49b" },
+      "gate": { "address": "0xf1f955016EcbCd7321c7266BccFB96c68ea5E49b", "kind": "token", "threshold": 5000 }
+    },
+    {
+      "id": "audius",
+      "name": "Audius",
+      "category": "CULTURE",
+      "premise": "Music, and the unreleased half of every catalogue. Stems and sessions are precisely what an artist will not upload anywhere.",
+      "requirement": "Hold 10,000 AUDIO",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x18aAA7115705e8be94bfFEBDE57Af9BFc265B998" },
+      "gate": { "address": "0x18aAA7115705e8be94bfFEBDE57Af9BFc265B998", "kind": "token", "threshold": 10000 }
+    },
+    {
+      "id": "nouns",
+      "name": "Nouns",
+      "category": "GOVERNANCE",
+      "premise": "One vote, one holder, and a treasury that has funded hundreds of things. The evidence of what it funded is a public good with a private half.",
+      "requirement": "Hold any 1 Noun",
+      "market": { "name": "OpenSea", "url": "https://opensea.io/assets/ethereum/0x9C8fF314C9Bc7F6e59A9d9225Fb22946427eDC03" },
+      "gate": { "address": "0x9C8fF314C9Bc7F6e59A9d9225Fb22946427eDC03", "kind": "collection", "threshold": 1 }
+    },
+    {
+      "id": "juicebox",
+      "name": "Juicebox",
+      "category": "GOVERNANCE",
+      "premise": "The funding rail for hundreds of small treasuries. Every campaign leaves records its contributors have a claim on.",
+      "requirement": "Hold 100,000 JBX",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x4554CC10898f92D45378b98D6D6c2dD54c687Fb2" },
+      "gate": { "address": "0x4554CC10898f92D45378b98D6D6c2dD54c687Fb2", "kind": "token", "threshold": 100000 }
+    },
+    {
+      "id": "kleros",
+      "name": "Kleros",
+      "category": "GOVERNANCE",
+      "premise": "Dispute resolution runs on evidence. Evidence needs to be encrypted, addressable, and readable only by the panel.",
+      "requirement": "Hold 25,000 PNK",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x93ED3FBe21207Ec2E8f2d3c3de6e058Cb73Bc04d" },
+      "gate": { "address": "0x93ED3FBe21207Ec2E8f2d3c3de6e058Cb73Bc04d", "kind": "token", "threshold": 25000 }
+    },
+    {
+      "id": "radicle",
+      "name": "Radicle",
+      "category": "GOVERNANCE",
+      "premise": "Sovereign code collaboration — a project already committed to the premise that infrastructure should not be able to remove your work.",
+      "requirement": "Hold 1,000 RAD",
+      "market": { "name": "Uniswap", "url": "https://app.uniswap.org/swap?chain=ethereum&outputCurrency=0x31c8EAcBFFdD875c74b94b077895Bd78CF1E64A3" },
+      "gate": { "address": "0x31c8EAcBFFdD875c74b94b077895Bd78CF1E64A3", "kind": "token", "threshold": 1000 }
+    }
+  ]
+}

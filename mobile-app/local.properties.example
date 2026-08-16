@@ -1,0 +1,55 @@
+# Haven Mobile — local configuration
+#
+# Copy to `local.properties` (git-ignored) and fill in. Every key is optional: with none of them
+# set the app builds and runs, and each subsystem reports "not configured" instead of failing in a
+# way that looks like a network error.
+#
+#   cp local.properties.example local.properties
+
+# ── Android SDK ──────────────────────────────────────────────────────────────────────────────
+# Written automatically by Android Studio on first sync. Set it by hand for a headless build.
+#sdk.dir=/Users/you/Library/Android/sdk
+
+# ── Wallet (Reown AppKit / WalletConnect v2) ─────────────────────────────────────────────────
+# Project id from https://dashboard.reown.com. Without it AppKit is not initialised: onboarding
+# explains this, and the connect button cannot open a session.
+# Surfaces as BuildConfig.WALLET_PROJECT_ID in :app and :core-wallet.
+wallet.projectId=
+
+# ── Haven-AOL canister (Internet Computer) ───────────────────────────────────────────────────
+# Canister that unwraps gate keys via vetKD. Blank means every unlock fails with
+# CANISTER_CALL_FAILED, which is the correct behaviour for an unconfigured build.
+# Surfaces as BuildConfig.HAVEN_AOL_CANISTER_ID / HAVEN_AOL_IC_HOST in :app and :core-haven-aol.
+haven.aol.canisterId=
+haven.aol.icHost=https://ic0.app
+
+# ── Arkiv gateway ────────────────────────────────────────────────────────────────────────────
+# Base URL for entity queries (/api/arkiv/media, /api/arkiv/communities). Blank means the library
+# renders from the local Room mirror only — which is a genuinely useful offline mode.
+# Surfaces as BuildConfig.ARKIV_ENDPOINT_URL in :core-arkiv.
+arkiv.endpointUrl=
+
+# ── EVM balance reads (access checks) ────────────────────────────────────────────────────────
+# Haven-AOL evaluates gates on five chains (see core-domain HavenChain). Access is decided by
+# reading balanceOf at the gate contract — read-only, no signature, batched per chain.
+#
+# These are OVERRIDES ONLY. Left blank, each chain falls back to the same public endpoint
+# haven-dapp uses (publicnode, no account, no API key), so access checking works on a fresh clone.
+# Set them if you would rather not send wallet addresses to a third party: a balance query does
+# reveal which address is asking about which contract.
+# Surfaces as BuildConfig.RPC_* in :core-collections.
+evm.rpc.ethereum=
+evm.rpc.base=
+evm.rpc.arbitrum=
+evm.rpc.optimism=
+evm.rpc.sepolia=
+
+# ── Notes ────────────────────────────────────────────────────────────────────────────────────
+# The two sibling Kotlin projects are consumed as Gradle composite builds, not artifacts, and are
+# resolved by path in settings.gradle.kts:
+#
+#   ../../foc-local-first-android/foc-cache   -> :foc-cache          (content cache, PDP, hedged fetch)
+#   ../../ic-kotlin                           -> dev.ic.kotlin:*     (Candid + agent transport)
+#
+# Both paths are relative to `mobile-app/`, so they must sit next to the repository that contains
+# it. Nothing in local.properties can override that.

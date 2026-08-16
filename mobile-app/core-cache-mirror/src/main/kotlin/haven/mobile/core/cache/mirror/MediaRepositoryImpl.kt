@@ -6,6 +6,7 @@ import haven.mobile.core.domain.ArkivStatus
 import haven.mobile.core.domain.Attestation
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.GateMetadata
+import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.TokenGate
@@ -14,9 +15,13 @@ import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.arkiv.ArkivClient
 import haven.mobile.core.arkiv.ArkivPage
 import haven.mobile.core.cache.HavenCache
+import haven.mobile.core.collections.CollectionRepository
+import haven.mobile.core.collections.GateAccessChecker
+import haven.mobile.core.collections.gateKeyOrNull
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
@@ -33,6 +38,16 @@ class MediaRepositoryImpl @Inject constructor(
     private val arkivClient: ArkivClient,
     private val havenCache: HavenCache,
     private val settingsRepository: SettingsRepository,
+    /**
+     * Where the reader's communities actually come from: what the wallet holds.
+     *
+     * Arkiv's `discoverUserCommunities` derives gates from entities you *own*, which is the publisher's
+     * view — useless to a reader who has published nothing. The access check answers the question that
+     * matters instead.
+     */
+    private val collectionRepository: CollectionRepository,
+    /** Intersects Arkiv's stored gate conditions with the wallet's balances across the enabled chains. */
+    private val gateAccessChecker: GateAccessChecker,
 ) : MediaRepository {
 
     private var database: HavenMirrorDatabase? = null
@@ -49,10 +64,19 @@ class MediaRepositoryImpl @Inject constructor(
                 context,
                 HavenMirrorDatabase::class.java,
                 dbName,
-            ).build()
+            )
+                // The mirror is a cache of Arkiv, so a schema change drops it and the next refresh
+                // rebuilds it. See HavenMirrorDatabase for why there are no migrations.
+                .fallbackToDestructiveMigration(dropAllTables = true)
+                .build()
             currentWalletAddress = walletAddress
         }
         return database!!
+    }
+
+    private companion object {
+        /** Matches the web dApp's page size so paging behaviour stays comparable. */
+        const val PAGE_SIZE = 20
     }
 
     override fun observeLibrary(owner: String): Flow<List<MediaItem>> {
@@ -92,6 +116,113 @@ class MediaRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun observeAccessible(): Flow<List<MediaItem>> {
+        return getDatabase().mediaDao().observeAccessible().map { entities ->
+            entities.map { it.toMediaItem() }
+        }
+    }
+
+    override suspend fun refreshAccessible(): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val walletAddress = walletSession.address.value
+                    ?: return@withContext Result.failure(
+                        HavenError.WalletNotConnected("No wallet connected"),
+                    )
+
+                val chains = settingsRepository.enabledChains.first()
+                    .ifEmpty { HavenChain.mainnets.toSet() }
+
+                // ── The intersection ──────────────────────────────────────────────────────────
+                // Arkiv stores what every archive requires; the wallet's balances say what it has.
+                // What overlaps is what this reader can open. Neither side is authoritative alone:
+                // holdings without conditions is a wallet inventory, conditions without holdings is a
+                // catalogue.
+                val candidateGates = buildList {
+                    addAll(arkivClient.discoverGates(chains).getOrDefault(emptyList()))
+                    // The bundled roster is a fallback for the same question, for as long as there is no
+                    // public index to ask (see collections.json).
+                    addAll(collectionRepository.accessibleGates(chains))
+                    // Gates this wallet has published under. A creator keeps access to their own
+                    // community even if the index cannot be reached.
+                    addAll(
+                        arkivClient.discoverUserCommunities(walletAddress)
+                            .getOrDefault(emptyList())
+                            .map { it.gate },
+                    )
+                }.distinctBy { gate ->
+                    "${HavenChain.parse(gate.chain)?.aolVariant}:${gate.tokenAddress.lowercase()}"
+                }
+
+                val satisfiedKeys = if (candidateGates.isEmpty()) {
+                    emptySet()
+                } else {
+                    gateAccessChecker.satisfied(walletAddress, candidateGates, chains)
+                }
+                val openable = candidateGates.filter { it.gateKeyOrNull() in satisfiedKeys }
+
+                // ── Own uploads ───────────────────────────────────────────────────────────────
+                // A creator sees their own work regardless of what they hold: they published it, and
+                // they may well have moved the gating asset on since.
+                val ownItems = arkivClient.listMediaForOwner(walletAddress, PAGE_SIZE, null)
+                    .getOrNull()
+                    ?.items
+                    .orEmpty()
+
+                if (openable.isEmpty() && ownItems.isEmpty()) {
+                    // Nothing to fetch is not a failure: a wallet that holds nothing yet has an empty
+                    // library, and the Communities screen is where that gets fixed.
+                    return@withContext Result.success(Unit)
+                }
+
+                var reached = 0
+                var lastFailure: Throwable? = null
+
+                if (ownItems.isNotEmpty()) {
+                    persist(ownItems, walletAddress)
+                    reached++
+                }
+
+                openable.forEach { gate ->
+                    var cursor: String? = null
+                    do {
+                        val page = arkivClient.listMediaForCommunity(
+                            gate = gate,
+                            pageSize = PAGE_SIZE,
+                            cursor = cursor,
+                        ).getOrElse { throwable ->
+                            lastFailure = throwable
+                            return@forEach
+                        }
+
+                        persist(page.items, walletAddress)
+                        cursor = page.nextCursor
+                    } while (cursor != null)
+                    reached++
+                }
+
+                if (reached == 0 && lastFailure != null) {
+                    Result.failure(lastFailure!!)
+                } else {
+                    Result.success(Unit)
+                }
+            } catch (e: HavenError) {
+                Result.failure(e)
+            } catch (e: Exception) {
+                Result.failure(HavenError.Internal(e.message ?: "Refresh failed"))
+            }
+        }
+    }
+
+    /** Write-through, with each item's residency resolved against the content cache. */
+    private suspend fun persist(items: List<MediaItem>, walletAddress: String) {
+        if (items.isEmpty()) return
+        val entities = items.map { item ->
+            item.copy(contentCacheStatus = resolveCacheStatus(item)).toMirrorEntity(walletAddress)
+        }
+        getDatabase().mediaDao().insertAll(entities)
+    }
+
     override fun observeItem(id: String): Flow<MediaItem?> {
         return getDatabase().mediaDao().observeItem(id).map { entity ->
             entity?.toMediaItem()
@@ -122,7 +253,9 @@ class MediaRepositoryImpl @Inject constructor(
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
             try {
-                getDatabase().mediaDao().deleteForOwner(walletAddress)
+                // deleteAll, not deleteForOwner: the mirror now also holds items published by other
+                // wallets (the feed), and owner-scoped deletion would leave those behind.
+                getDatabase().mediaDao().deleteAll()
                 if (currentWalletAddress == walletAddress) {
                     database?.close()
                     database = null
@@ -181,6 +314,8 @@ class MediaRepositoryImpl @Inject constructor(
             arkivStatus = arkivStatus.name,
             contentCacheStatus = contentCacheStatus.name,
             lastAccessedAt = lastAccessedAt?.toString(),
+            durationSeconds = durationSeconds,
+            creatorHandle = creatorHandle,
         )
     }
 
@@ -225,6 +360,8 @@ class MediaRepositoryImpl @Inject constructor(
             arkivStatus = ArkivStatus.valueOf(arkivStatus),
             contentCacheStatus = ContentCacheStatus.valueOf(contentCacheStatus),
             lastAccessedAt = lastAccessedAt?.let { Instant.parse(it) },
+            durationSeconds = durationSeconds,
+            creatorHandle = creatorHandle,
         )
     }
 

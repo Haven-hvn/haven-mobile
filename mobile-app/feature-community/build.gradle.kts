@@ -12,6 +12,7 @@ android {
 dependencies {
     ksp("com.google.dagger:hilt-compiler:2.60.1")
     implementation(project(":core-domain"))
+    implementation(project(":core-design"))
     implementation(project(":core-wallet"))
     implementation(project(":core-cache-mirror"))
     implementation(project(":core-arkiv"))

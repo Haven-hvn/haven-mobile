@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Platform-level theme only. All in-app color/typography comes from Compose
+  (app/ui/theme/Theme.kt, tokens from design/tokens.md). This exists so the window
+  has no ActionBar and paints the Haven surface color before the first Compose frame.
+
+  Compose picks its palette with isSystemInDarkTheme(), so this file is the light
+  pairing and values-night/themes.xml is the dark one. Brand is dark-first, but the
+  pre-frame window background must agree with whatever Compose is about to draw.
+-->
+<resources>
+    <color name="haven_surface_dark">#0B0E14</color>
+    <color name="haven_surface_light">#F6F7F9</color>
+    <color name="haven_amber">#C8932A</color>
+
+    <style name="Theme.Haven" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/haven_surface_light</item>
+        <item name="android:statusBarColor">@color/haven_surface_light</item>
+        <item name="android:navigationBarColor">@color/haven_surface_light</item>
+        <item name="android:colorAccent">@color/haven_amber</item>
+    </style>
+</resources>

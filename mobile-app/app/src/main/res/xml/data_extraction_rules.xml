@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing leaves the device.
+
+  Haven's local state is a wallet address, per-wallet Room mirrors, and the encrypted content
+  cache. None of it should ride a cloud backup or a device-to-device transfer: the cache is
+  keyed to a wallet that may not be present on the target device, and restoring a stale mirror
+  would show a library the new device cannot decrypt. Requirement FR-SEC treats disconnect as
+  the only way state leaves, so both backup paths are emptied here.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

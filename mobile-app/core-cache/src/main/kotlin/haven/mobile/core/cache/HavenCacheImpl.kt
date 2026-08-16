@@ -5,177 +5,158 @@ import cloud.filecoin.foc.cache.Config
 import cloud.filecoin.foc.cache.FocCache
 import cloud.filecoin.foc.cache.PieceRef
 import cloud.filecoin.foc.cache.SpaceInfo
+import dagger.hilt.android.qualifiers.ApplicationContext
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Thin facade over `foc-cache`.
+ *
+ * Three jobs, all boring on purpose:
+ *  1. namespace the cache directory per wallet (`<cacheDir>/foc/<address>/`) so a disconnect wipes
+ *     exactly one wallet's content;
+ *  2. apply the user's quota and TTL, rebuilding the cache when either changes;
+ *  3. translate foc failures into the app's [HavenError] taxonomy.
+ *
+ * **Content integrity is not checked here.** An earlier revision ran a "PieceCID verifier" over every
+ * returned buffer, which was both misplaced and misleading: foc already proves possession and
+ * integrity through PDP against the storage providers, and the local check that shipped only inspected
+ * the CID's string prefix — it would have passed any corrupt buffer whose CID merely started with
+ * `baga`. Verification belongs at the layer that holds the proofs, so it stays in foc.
+ */
 @Singleton
 class HavenCacheImpl @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
+    @ApplicationContext private val context: Context,
     private val walletSession: WalletSession,
-    private val config: CacheConfig,
-    private val pieceCidVerifier: PieceCidVerifier,
+    private val defaults: CacheConfig,
+    private val settings: CacheSettingsSource,
 ) : HavenCache {
 
-    private var currentWalletAddress: String? = null
+    /** What the live instance was built for. A change in any field means it has to be rebuilt. */
+    private data class CacheKey(
+        val walletAddress: String,
+        val quotaBytes: Long,
+        val ttlDays: Int,
+    )
+
+    private val lock = Mutex()
+    private var key: CacheKey? = null
     private var focCache: FocCache? = null
 
-    private fun getFocCache(): FocCache {
+    /**
+     * Suspending because it reads the current preferences.
+     *
+     * `foc` takes its `Config` at construction, so applying a new quota or TTL means building a new
+     * instance — which is why this compares a key rather than caching one instance forever. The mutex
+     * keeps two concurrent reads from each building one.
+     */
+    private suspend fun requireFocCache(): FocCache {
         val walletAddress = walletSession.address.value
             ?: throw HavenError.WalletNotConnected("No wallet connected")
-        if (walletAddress != currentWalletAddress) {
-            focCache = null
+
+        val desired = CacheKey(
+            walletAddress = walletAddress,
+            quotaBytes = settings.quotaBytes.first(),
+            ttlDays = settings.ttlDays.first(),
+        )
+
+        lock.withLock {
+            val existing = focCache
+            if (existing != null && key == desired) return existing
+
             val cacheDir = File(context.cacheDir, "foc/$walletAddress")
             cacheDir.mkdirs()
-            focCache = FocCache(
+            val created = FocCache(
                 context,
                 Config(
                     cacheDir = cacheDir,
-                    quotaBytes = config.quotaBytes,
-                    blockTtl = Duration.ofDays(config.blockTtlDays.toLong()),
-                    chunkSize = config.chunkSize,
-                    maxParallelFetches = config.maxParallelFetches,
-                    hedgeDelay = Duration.ofMillis(config.hedgeDelayMillis),
-                )
+                    quotaBytes = desired.quotaBytes,
+                    blockTtl = Duration.ofDays(desired.ttlDays.toLong()),
+                    chunkSize = defaults.chunkSize,
+                    maxParallelFetches = defaults.maxParallelFetches,
+                    hedgeDelay = Duration.ofMillis(defaults.hedgeDelayMillis),
+                ),
             )
-            currentWalletAddress = walletAddress
-        }
-        return focCache!!
-    }
-
-    override suspend fun get(ref: PieceRef): Result<ByteArray> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val bytes = getFocCache().get(ref)
-                val verified = pieceCidVerifier.verify(ref.pieceCid, bytes)
-                if (!verified) {
-                    getFocCache().remove(ref.pieceCid)
-                    return@withContext Result.failure(HavenError.CachePieceVerifyFailed("PieceCID verification failed for ${ref.pieceCid}"))
-                }
-                Result.success(bytes)
-            } catch (e: HavenError) {
-                Result.failure(e)
-            } catch (e: Exception) {
-                Result.failure(HavenError.CacheMiss(e.message ?: "Unknown error"))
-            }
+            focCache = created
+            key = desired
+            return created
         }
     }
 
-    override fun stream(ref: PieceRef): Flow<ByteArray> {
-        val walletAddress = walletSession.address.value
-        if (walletAddress == null) {
-            return flow { throw HavenError.WalletNotConnected("No wallet connected") }
-        }
-        return flow {
-            val cache = getFocCache()
-            cache.stream(ref).collect { chunk ->
-                emit(chunk)
-            }
-        }.flowOn(Dispatchers.IO)
+    override suspend fun get(ref: PieceRef): Result<ByteArray> = withContext(Dispatchers.IO) {
+        runCatching { requireFocCache().get(ref) }
+            .recoverToHavenError("Fetch failed for ${ref.pieceCid}")
     }
 
-    override suspend fun exists(pieceCid: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                val walletAddress = walletSession.address.value
-                if (walletAddress == null) return@withContext false
-                getFocCache().exists(pieceCid)
-            } catch (_: Exception) {
-                false
-            }
-        }
+    override fun stream(ref: PieceRef): Flow<ByteArray> = flow {
+        requireFocCache().stream(ref).collect { chunk -> emit(chunk) }
+    }.flowOn(Dispatchers.IO)
+
+    override suspend fun exists(pieceCid: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { requireFocCache().exists(pieceCid) }.getOrDefault(false)
     }
 
-    override suspend fun fetch(ref: PieceRef): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                getFocCache().fetch(ref)
-                Result.success(Unit)
-            } catch (e: HavenError) {
-                Result.failure(e)
-            } catch (e: Exception) {
-                Result.failure(HavenError.CacheMiss(e.message ?: "Unknown error"))
-            }
-        }
+    override suspend fun fetch(ref: PieceRef): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching { requireFocCache().fetch(ref) }
+            .map { }
+            .recoverToHavenError("Prefetch failed for ${ref.pieceCid}")
     }
 
     override suspend fun remove(pieceCid: String) {
         withContext(Dispatchers.IO) {
-            try {
-                getFocCache().remove(pieceCid)
-            } catch (_: Exception) {
-            }
+            runCatching { requireFocCache().remove(pieceCid) }
         }
     }
 
-    override suspend fun space(): CacheSpace {
-        return withContext(Dispatchers.IO) {
-            try {
-                val walletAddress = walletSession.address.value
-                if (walletAddress == null) {
-                    return@withContext CacheSpace(
-                        quotaBytes = config.quotaBytes,
-                        usedBytes = 0,
-                        itemCount = 0,
-                    )
-                }
-                val spaceInfo: SpaceInfo = getFocCache().space()
-                CacheSpace(
-                    quotaBytes = spaceInfo.quotaMaxBytes,
-                    usedBytes = spaceInfo.quotaUsedBytes,
-                    itemCount = spaceInfo.totalPieces.toInt(),
-                )
-            } catch (_: Exception) {
-                CacheSpace(
-                    quotaBytes = config.quotaBytes,
-                    usedBytes = 0,
-                    itemCount = 0,
-                )
-            }
-        }
+    override suspend fun space(): CacheSpace = withContext(Dispatchers.IO) {
+        val info: SpaceInfo? = runCatching { requireFocCache().space() }.getOrNull()
+        CacheSpace(
+            quotaBytes = info?.quotaMaxBytes ?: settings.quotaBytes.first(),
+            usedBytes = info?.quotaUsedBytes ?: 0L,
+            itemCount = info?.totalPieces?.toInt() ?: 0,
+        )
     }
 
-    override suspend fun clearExpiredFor(walletAddress: String) {
-        // v1: TTL eviction is handled by FocCache quota/TTL; this is a no-op until MediaRepository TTL query is wired
-        clearFor(walletAddress)
-    }
+    /**
+     * TTL eviction is foc's job — it holds the per-block timestamps and the quota accounting, and runs
+     * eviction as part of its own read/write path. There is no selective "drop the expired ones" call
+     * to make from here, and the previous implementation quietly delegated to [clearFor], so "clear
+     * expired" deleted the entire cache.
+     */
+    override suspend fun clearExpiredFor(walletAddress: String) = Unit
 
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
-            try {
-                val cacheDir = File(context.cacheDir, "foc/$walletAddress")
-                cacheDir.deleteRecursively()
-                if (currentWalletAddress == walletAddress) {
-                    focCache = null
-                    currentWalletAddress = null
+            lock.withLock {
+                runCatching {
+                    File(context.cacheDir, "foc/$walletAddress").deleteRecursively()
+                    if (key?.walletAddress == walletAddress) {
+                        focCache = null
+                        key = null
+                    }
                 }
-            } catch (_: Exception) {
             }
         }
     }
 }
 
-class NoOpPieceCidVerifier : PieceCidVerifier {
-    override suspend fun verify(pieceCid: String, bytes: ByteArray): Boolean = true
-}
-
-class CommPPieceCidVerifier : PieceCidVerifier {
-    override suspend fun verify(pieceCid: String, bytes: ByteArray): Boolean {
-        if (pieceCid.isBlank() || bytes.isEmpty()) return false
-        // Basic CID format check: Piece CIDs are baga… (Filecoin Piece) or baf… (IPFS)
-        if (!pieceCid.startsWith("baga") && !pieceCid.startsWith("baf")) return false
-        // Length sanity: CIDs are 50-100 chars; empty/short rejects
-        if (pieceCid.length < 10) return false
-        // bytes parity: handled by foc-cache hedged fetch + PieceCidVerifier contract
-        // Full CommP SHA-256 verification delegated to foc provider when available; this verifier enforces format + non-empty.
-        return true
+/** Keep [HavenError]s as themselves; wrap anything else so callers only handle one taxonomy. */
+private fun <T> Result<T>.recoverToHavenError(fallbackMessage: String): Result<T> =
+    recoverCatching { throwable ->
+        throw when (throwable) {
+            is HavenError -> throwable
+            else -> HavenError.CacheReadFailed(throwable.message ?: fallbackMessage, throwable)
+        }
     }
-}

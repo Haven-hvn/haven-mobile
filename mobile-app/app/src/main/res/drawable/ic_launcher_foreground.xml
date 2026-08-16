@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon foreground: amber Haven seal (ring + H monogram), kept inside the
+  66dp safe zone of the 108dp canvas so no launcher mask clips it.
+  Amber #C8932A per design/tokens.md — accent only, no gradient.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Seal ring -->
+    <path
+        android:pathData="M54,30 a24,24 0 1,0 0,48 a24,24 0 1,0 0,-48"
+        android:strokeColor="#C8932A"
+        android:strokeWidth="4" />
+    <!-- H monogram: left stem, right stem, crossbar -->
+    <path
+        android:fillColor="#C8932A"
+        android:pathData="M45,42h5v24h-5z" />
+    <path
+        android:fillColor="#C8932A"
+        android:pathData="M58,42h5v24h-5z" />
+    <path
+        android:fillColor="#C8932A"
+        android:pathData="M45,51.5h18v5h-18z" />
+</vector>

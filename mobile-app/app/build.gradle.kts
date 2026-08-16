@@ -51,14 +51,28 @@ android {
 }
 
 dependencies {
+    // The app hosts the Hilt component, so it aggregates every @Module on the classpath and its
+    // generated code references the bound types by name. Those types therefore have to be on this
+    // module's compile classpath — including the ones the app never touches itself (the cache
+    // facade, the mirror, the collections repository). Omitting them fails at codegen with an
+    // "cannot access class" that points at generated sources rather than at the cause.
     implementation(project(":core-domain"))
+    implementation(project(":core-design"))
     implementation(project(":core-wallet"))
+    implementation(project(":core-haven-aol"))
+    implementation(project(":core-arkiv"))
+    implementation(project(":core-collections"))
+    implementation(project(":core-crypto"))
+    implementation(project(":core-attestation"))
+    implementation(project(":core-cache"))
+    implementation(project(":core-cache-mirror"))
+    implementation(project(":core-security"))
     implementation(project(":feature-onboarding"))
     implementation(project(":feature-library"))
     implementation(project(":feature-watch"))
     implementation(project(":feature-community"))
+    implementation(project(":feature-collections"))
     implementation(project(":feature-settings"))
-    implementation(project(":core-security"))
     implementation(platform("com.reown:android-bom:1.6.14"))
     implementation("com.reown:android-core")
     implementation("com.reown:appkit")
@@ -69,6 +83,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation("androidx.compose.material:material:1.7.3")
+    // Icons.Default.{VideoLibrary, Groups, BugReport} in Routes.kt live in the extended set. The
+    // compose convention plugin adds this for feature modules; :app uses the application convention,
+    // so it needs the dependency explicitly.
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.6")
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.navigation)

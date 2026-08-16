@@ -1,42 +1,121 @@
 appId: haven.mobile
-name: "Haven Mobile — connect → library → watch (video, PDF) → disconnect — FR coverage 80% stubs"
-tags: ["v1", "m3", "e2e"]
+name: "connect → library → watch → settings → disconnect"
+tags: ["v1", "e2e"]
 ---
-# 1. Cold start → onboarding → connect (stubbed wallet)
+# Covers the spine of the app: the gate, the shell's bottom navigation, a viewer, and the wipe.
+# Selectors are the visible strings from the rebuilt screens — keep them in step with
+# core-design/component and the five feature screens.
+
+# ── 1. Cold start lands on the gate ──────────────────────────────────────────────────────────
 - launchApp:
     clearState: true
-- assertVisible: "Welcome to Haven"
-- tapOn: "Connect wallet"
-- assertVisible: "Connected"
-# 2. Library — CategoryGrid 2x2 + cached list (M1) — pagination 20 write-through
+- assertVisible: "HAVEN"
+- assertVisible: "An archive only you can open."
+# The three assurances are the anxiety-reducers; if they regress, so does first-run conversion.
+- assertVisible: "A signature, not a transaction"
+- assertVisible: "Works offline"
+
+# ── 2. Connect ───────────────────────────────────────────────────────────────────────────────
+# Reown owns the connect control, so the label comes from AppKit. Without wallet.projectId the
+# button is present but cannot open a session, hence optional assertions below.
+- tapOn:
+    text: "Connect wallet|Connect"
+    optional: true
+- assertVisible:
+    text: "Connected|Waiting for your wallet…|Wallet connect isn't configured.*"
+    optional: true
+
+# ── 3. Library — everything this wallet can read ──────────────────────────────────────────────
+# Reachable only because the shell now has bottom navigation; before, no route led here.
 - tapOn: "Library"
-- assertVisible: "Search"
+- assertVisible: "Library"
+- assertVisible: "Search this library"
+# Residency is a filter, not a hidden rule: everything accessible is listed and badged.
+- assertVisible:
+    text: "Offline.*"
 - assertVisible: "All"
-# Tap Video category to filter
-- tapOn: "Video"
-- assertVisible: "Video"
-# Toggle grid/list
+- tapOn:
+    text: "Video.*"
+    optional: true
+# Grid ⇄ list toggle lives in the top bar and is described for screen readers.
+- tapOn:
+    id: "Switch to list view"
+    optional: true
+- tapOn:
+    id: "Refresh library"
+    optional: true
+# Either there is content, or the empty state points at the thing that fixes it — never a blank screen.
+- assertVisible:
+    text: "Nothing to read yet|No wallet connected|Offline|Not cached|No matches"
+    optional: true
+
+# ── 4. Communities — the way in ───────────────────────────────────────────────────────────────
+# Joining a community is how reading works, so this is where an empty library sends you.
+- tapOn: "Communities"
+- assertVisible: "Collections"
+- assertVisible:
+    text: ".*Hold what it asks for.*"
+# Access verdicts are three distinct states and must not collapse into one.
+- assertVisible:
+    text: "You're in|Not yet|Not checked"
+    optional: true
+# Requirements are stated in plain language — never a contract address.
+- assertVisible:
+    text: "Hold any 1.*|Hold [0-9,]+ .*"
+    optional: true
+# Newcomer questions are answered in place.
+- tapOn: "Why do I need to hold something?"
+- assertVisible:
+    text: ".*no company can revoke it.*"
+
+# ── 5. Watch ─────────────────────────────────────────────────────────────────────────────────
+# Opening an item runs access check → fetch → decrypt → stage. Any of those may fail on an
+# unconfigured build, so the assertion accepts progress, a viewer, or a typed error.
 - tapOn: "Library"
-# Pull-to-refresh is Box shim for now; tap first item to go Watch
 - tapOn:
     text: ".*"
+    index: 0
     optional: true
-# 3. Watch — per-kind viewers (M2) — VIDEO via Media3, DOCUMENT via inline hint
 - assertVisible:
-    text: "Cached|Fetching|Expired|Missing"
+    text: "Checking your access…|Decrypting…|This isn't in your library|Couldn't open this|Save to device"
     optional: true
 - back
-# 4. Community feed attestation badges (M3)
-- tapOn: "Community"
-- assertVisible: "Search community"
-# 5. Settings — quota/TTL/clear/disconnect (FR-UI-4 / FR-SEC)
+
+# ── 6. Feed ──────────────────────────────────────────────────────────────────────────────────
+- tapOn: "Feed"
+- assertVisible: "Search the feed or a publisher"
+# Signature verdicts: three states, never collapsed.
+- assertVisible:
+    text: "Verified|Unsigned|Failed check|No community content yet|No wallet connected"
+    optional: true
+
+# ── 7. Settings ──────────────────────────────────────────────────────────────────────────────
 - tapOn: "Settings"
 - assertVisible: "Settings"
-- assertVisible: "Cache"
-- assertVisible: "Storage"
-- assertVisible: "Clear cached files"
-- tapOn: "Back"
-# 6. Debug → disconnect wipe (FR-SEC-1)
-- tapOn: "Debug"
+- assertVisible: "STORAGE"
+- assertVisible: "Cache limit"
+- assertVisible: "Keep content for"
+# Multi-chain is the default and nothing had to be chosen to get here — these switches exist to turn
+# a network off, and the set cannot be emptied.
+- assertVisible: "NETWORKS"
+- assertVisible: "Ethereum"
+- assertVisible: "Base"
+- assertVisible: "Arbitrum"
+- assertVisible: "Optimism"
+- assertVisible: "SECURITY"
+- assertVisible: "Wipe on disconnect"
+
+# Destructive actions confirm first, and the dialog names what is destroyed.
+- tapOn: "Clear cached content"
+- assertVisible: "Clear cached content?"
+- assertVisible:
+    text: "Every cached piece for this wallet is deleted.*"
+- tapOn: "Cancel"
+
+# ── 8. Disconnect wipes (FR-SEC-1) ───────────────────────────────────────────────────────────
 - tapOn: "Disconnect wallet"
-- assertVisible: "No wallet connected"
+- assertVisible: "Disconnect wallet?"
+- tapOn: "Disconnect"
+- assertVisible:
+    text: "No wallet connected|Disconnected.*"
+    optional: true

@@ -13,6 +13,7 @@ dependencies {
     ksp("com.google.dagger:hilt-compiler:2.60.1")
     implementation(project(":core-wallet"))
     implementation(project(":core-domain"))
+    implementation(project(":core-design"))
     implementation(platform("com.reown:android-bom:1.6.14"))
     implementation("com.reown:android-core")
     implementation("com.reown:appkit")

@@ -12,6 +12,8 @@ dependencies {
     implementation(project(":core-domain"))
     implementation(project(":core-cache"))
     implementation(project(":core-arkiv"))
+    // The reader's communities come from what the wallet holds, not from what it published.
+    implementation(project(":core-collections"))
     implementation(project(":core-wallet"))
     implementation(project(":foc-cache"))
     implementation(libs.kotlinx.coroutines)

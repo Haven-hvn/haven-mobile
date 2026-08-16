@@ -2,176 +2,366 @@ package haven.mobile.feature.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
+import haven.mobile.core.design.HavenSpacing
+import haven.mobile.core.design.HavenTheme
+import haven.mobile.core.design.component.ConfirmDialog
+import haven.mobile.core.design.component.HavenTopBar
+import haven.mobile.core.design.component.MonoIdentifier
+import haven.mobile.core.design.component.SectionHeader
+import haven.mobile.core.design.component.SettingSliderRow
+import haven.mobile.core.design.component.SettingSwitchRow
+import haven.mobile.core.design.component.formatBytes
+import haven.mobile.core.domain.HavenChain
 
+/** Which destructive confirmation is open, if any. Hoisted so scrolling cannot lose it. */
+private enum class PendingAction { NONE, CLEAR_CACHE, DISCONNECT }
+
+/**
+ * Settings.
+ *
+ * Three destructive actions live here (clear cache, clear expired, disconnect-and-wipe), so each
+ * one confirms first, and every confirmation says what will actually be destroyed rather than
+ * "are you sure?".
+ *
+ * The dialog flags are `rememberSaveable` at screen level. They previously lived inside
+ * `LazyColumn` item lambdas, where `remember` is scoped to a composition that is thrown away when
+ * the item scrolls out of view — a dialog could be dismissed by scrolling, and the flag reset
+ * behind the user's back.
+ */
 @Composable
 fun SettingsScreen(
-    navController: androidx.navigation.NavController,
+    navController: NavController,
     onNavigateBack: () -> Unit,
-    viewModel: SettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsState()
+    val clipboard = LocalClipboardManager.current
 
-    LaunchedEffect(uiState) {
-        if (uiState is SettingsUiState.Ready) {
-            // Settings loaded, screen renders
+    var pending by rememberSaveable { mutableStateOf(PendingAction.NONE) }
+
+    // Slider positions are local while dragging so the thumb tracks the finger at 60fps; the
+    // value is committed to DataStore once, on release.
+    var quotaGiB by rememberSaveable { mutableStateOf<Float?>(null) }
+    var ttlDays by rememberSaveable { mutableStateOf<Float?>(null) }
+
+    LaunchedEffect(state.message) {
+        // Messages are one-shot; the screen shows them inline and clears them so they do not
+        // reappear on the next recomposition.
+        if (state.message != null) viewModel.consumeMessage()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        HavenTopBar(
+            title = "Settings",
+            onBack = onNavigateBack,
+        )
+
+        if (state.isWorking) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = HavenSpacing.gutter,
+                end = HavenSpacing.gutter,
+                top = HavenSpacing.md,
+                bottom = HavenSpacing.xxl,
+            ),
+            verticalArrangement = Arrangement.spacedBy(HavenSpacing.lg),
+        ) {
+            item {
+                SectionHeader(label = "Wallet")
+                Spacer(Modifier.height(HavenSpacing.md))
+                val address = state.walletAddress
+                if (address == null) {
+                    Text(
+                        text = "No wallet connected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MonoIdentifier(
+                            value = address,
+                            full = false,
+                            head = 10,
+                            tail = 8,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { clipboard.setText(AnnotatedString(address)) }) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy wallet address",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SectionHeader(label = "Storage")
+                Spacer(Modifier.height(HavenSpacing.md))
+
+                val usage = state.usage
+                if (usage != null) {
+                    val fraction = if (usage.quotaBytes > 0) {
+                        (usage.usedBytes.toFloat() / usage.quotaBytes.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                    Text(
+                        text = "${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)} used" +
+                            " \u00b7 ${usage.itemCount} pieces",
+                        style = HavenTheme.text.figure,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(HavenSpacing.sm))
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    )
+                    Spacer(Modifier.height(HavenSpacing.lg))
+                }
+
+                SettingSliderRow(
+                    title = "Cache limit",
+                    valueLabel = "${"%.1f".format(quotaGiB ?: state.quotaBytes.toGiB())} GiB",
+                    value = quotaGiB ?: state.quotaBytes.toGiB(),
+                    range = MIN_QUOTA_GIB..MAX_QUOTA_GIB,
+                    supporting = "Hard cap on cached content for this wallet.",
+                    onValueChange = { quotaGiB = it },
+                    onValueChangeFinished = {
+                        quotaGiB?.let { viewModel.setQuotaBytes(it.gibToBytes()) }
+                    },
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                SettingSliderRow(
+                    title = "Keep content for",
+                    valueLabel = "${(ttlDays ?: state.ttlDays.toFloat()).toInt()} days",
+                    value = ttlDays ?: state.ttlDays.toFloat(),
+                    range = MIN_TTL_DAYS..MAX_TTL_DAYS,
+                    steps = 0,
+                    supporting = "Pieces untouched for longer than this are evicted.",
+                    onValueChange = { ttlDays = it },
+                    onValueChangeFinished = {
+                        ttlDays?.let { viewModel.setTtlDays(it.toInt()) }
+                    },
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                Row(horizontalArrangement = Arrangement.spacedBy(HavenSpacing.sm)) {
+                    OutlinedButton(
+                        onClick = { pending = PendingAction.CLEAR_CACHE },
+                        enabled = state.walletAddress != null && !state.isWorking,
+                        modifier = Modifier.height(HavenSpacing.touchTarget),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Text("Clear cached content")
+                    }
+                }
+                Spacer(Modifier.height(HavenSpacing.sm))
+                Text(
+                    // No "clear expired" button: foc owns TTL accounting and evicts on its own
+                    // read/write path. A button here could only either lie or delete everything —
+                    // which is precisely what the previous implementation did.
+                    text = "Expired pieces are evicted automatically once past the limit above.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            item {
+                SectionHeader(label = "Networks")
+                Spacer(Modifier.height(HavenSpacing.sm))
+                Text(
+                    // Deliberately not a decision anyone has to make. Every live network is on from
+                    // first launch — asking a reader to pick a chain before they can see anything is a
+                    // configuration step standing in front of the product, and most people could not
+                    // answer it. This is here to turn one *off*.
+                    text = "Haven looks for the assets that open an archive on all of these. " +
+                        "They're on by default — switch one off if you'd rather it wasn't checked.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                HavenChain.entries.forEach { chain ->
+                    SettingSwitchRow(
+                        title = chain.label,
+                        supporting = if (chain.isTestnet) {
+                            "Test network — off unless you're testing"
+                        } else {
+                            null
+                        },
+                        checked = chain in state.enabledChains,
+                        onCheckedChange = { viewModel.toggleChain(chain) },
+                    )
+                }
+            }
+
+            item {
+                SectionHeader(label = "Security")
+                Spacer(Modifier.height(HavenSpacing.sm))
+                SettingSwitchRow(
+                    title = "Wipe on disconnect",
+                    supporting = "Remove this wallet's cached content and metadata when disconnecting.",
+                    checked = state.clearOnDisconnect,
+                    onCheckedChange = viewModel::setClearOnDisconnect,
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                Button(
+                    onClick = { pending = PendingAction.DISCONNECT },
+                    enabled = state.walletAddress != null && !state.isWorking,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(HavenSpacing.touchTarget),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Text("Disconnect wallet")
+                }
+            }
+
+            item {
+                SectionHeader(label = "Diagnostics") {
+                    if (state.recentEvents.isNotEmpty()) {
+                        TextButton(onClick = { viewModel.clearEvents() }) { Text("Clear") }
+                    }
+                }
+                Spacer(Modifier.height(HavenSpacing.sm))
+                Text(
+                    // Named for what it is: a support aid, not a feature. It stays last on the screen
+                    // and holds nothing that outlives the session.
+                    text = if (state.recentEvents.isEmpty()) {
+                        "Nothing recorded this session. If something goes wrong, the detail appears " +
+                            "here so you can describe it."
+                    } else {
+                        "Kept in memory for this session only, to help describe a problem."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            items(items = state.recentEvents.take(MAX_VISIBLE_EVENTS)) { entry ->
+                Text(
+                    text = entry,
+                    style = HavenTheme.text.monoSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+
+            item {
+                HorizontalDivider(
+                    thickness = HavenSpacing.hairline,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                Text(
+                    text = "Haven Mobile 0.1.0",
+                    style = HavenTheme.text.monoSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Content keys are unwrapped in memory only. Nothing is backed up off device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 
-    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
-        when (uiState) {
-            SettingsUiState.Loading -> {
-                Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    Text("Loading settings…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            is SettingsUiState.Error -> {
-                Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text((uiState as SettingsUiState.Error).message, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.padding(8.dp))
-                    Button(onClick = { viewModel.refresh() }) { Text("Retry") }
-                }
-            }
-            is SettingsUiState.Ready -> {
-                val ready = uiState as SettingsUiState.Ready
-                androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    item {
-                        Text(text = "Settings", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onBackground)
-                    }
-                    // Wallet — mono full, Copy + Disconnect destructive dialog
-                    item {
-                        Text("Wallet", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.padding(4.dp))
-                        val addr = ready.walletAddress ?: "Not connected"
-                        Text(text = addr, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
-                        Spacer(Modifier.padding(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                val cm = viewModel.copyAddressToClipboard()
-                            }, modifier = Modifier.height(48.dp)) { Text("Copy") }
-                            var showDisc by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-                            if (showDisc) {
-                                androidx.compose.material3.AlertDialog(
-                                    onDismissRequest = { showDisc = false },
-                                    title = { Text("Disconnect wallet?") },
-                                    text = { Text("This will wipe cached keys and per-wallet data (FR-SEC-1).") },
-                                    confirmButton = { androidx.compose.material3.TextButton(onClick = { showDisc = false; viewModel.disconnect() }) { Text("Disconnect", color = MaterialTheme.colorScheme.error) } },
-                                    dismissButton = { androidx.compose.material3.TextButton(onClick = { showDisc = false }) { Text("Cancel") } },
-                                )
-                            }
-                            OutlinedButton(onClick = { showDisc = true }, modifier = Modifier.height(48.dp)) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
-                        }
-                        androidx.compose.material3.Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                    }
-                    // Cache quotas — two Sliders 48dp thumb, value label above, GiB 0–20 / days 1–30 per design
-                    item {
-                        Text("Cache", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.padding(4.dp))
-                        Text("Storage — ${(ready.cacheQuotaBytes / (1024 * 1024 * 1024.0)).let { String.format("%.1f GiB", it) }}", style = MaterialTheme.typography.bodyMedium)
-                        Slider(
-                            value = ready.cacheQuotaBytes.toFloat(),
-                            onValueChange = { viewModel.setCacheQuotaBytes(it.toLong()) },
-                            valueRange = 0f..20_000_000_000f,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.padding(4.dp))
-                        Text("Keep for — ${ready.cacheTtlDays} days", style = MaterialTheme.typography.bodyMedium)
-                        Slider(
-                            value = ready.cacheTtlDays.toFloat(),
-                            onValueChange = { viewModel.setCacheTtlDays(it.toInt()) },
-                            valueRange = 1f..30f,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        ready.cacheSpaceBytes?.let { space ->
-                            Text("Used: ${space / (1024 * 1024)} MB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Spacer(Modifier.padding(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            var showClear by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-                            if (showClear) {
-                                androidx.compose.material3.AlertDialog(
-                                    onDismissRequest = { showClear = false },
-                                    title = { Text("Clear cached files?") },
-                                    text = { Text("This frees space per quota/TTL (FR-CACHE-4).") },
-                                    confirmButton = { androidx.compose.material3.TextButton(onClick = { showClear = false; viewModel.clearCache() }) { Text("Clear", color = MaterialTheme.colorScheme.error) } },
-                                    dismissButton = { androidx.compose.material3.TextButton(onClick = { showClear = false }) { Text("Cancel") } },
-                                )
-                            }
-                            Button(onClick = { showClear = true }, modifier = Modifier.height(48.dp)) { Text("Clear cached files") }
-                            OutlinedButton(onClick = { viewModel.clearExpired() }, modifier = Modifier.height(48.dp)) { Text("Clear expired") }
-                        }
-                        Spacer(Modifier.padding(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text("Clear on disconnect", style = MaterialTheme.typography.bodyMedium)
-                            Switch(checked = ready.clearOnDisconnect, onCheckedChange = { viewModel.setClearOnDisconnect(it) })
-                        }
-                        androidx.compose.material3.Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                    }
-                    // Attestation toggle — Strict verify warns on Failed per design/settings.md
-                    item {
-                        Text("Attestation", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Column { Text("Strict verify", style = MaterialTheme.typography.bodyMedium); Text("Warn on Failed attestation", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            var strict by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-                            Switch(checked = strict, onCheckedChange = { strict = it })
-                        }
-                        androidx.compose.material3.Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                    }
-                    // Recent errors — expandable last 5 HavenError mono 12/400 per design/settings.md + FR-OBS-2
-                    item {
-                        Text("Recent errors", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.padding(4.dp))
-                        val errors = viewModel.recentErrors
-                        if (errors.isEmpty()) {
-                            Text("No recent errors", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                errors.take(5).forEach { e ->
-                                    Text(text = e, style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-                                }
-                            }
-                            Spacer(Modifier.padding(4.dp))
-                            OutlinedButton(onClick = { viewModel.clearRecentErrors() }, modifier = Modifier.height(40.dp)) { Text("Clear", style = MaterialTheme.typography.labelSmall) }
-                        }
-                        androidx.compose.material3.Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                    }
-                    // About
-                    item {
-                        Text("About", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Haven Mobile v0.1.0 — parity with haven-dapp-main", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.padding(8.dp))
-                        OutlinedButton(onClick = onNavigateBack, modifier = Modifier.height(48.dp)) { Text("Back") }
-                    }
-                }
-            }
-        }
+    when (pending) {
+        PendingAction.NONE -> Unit
+
+        PendingAction.CLEAR_CACHE -> ConfirmDialog(
+            title = "Clear cached content?",
+            body = "Every cached piece for this wallet is deleted. Anything you open again will be " +
+                "re-fetched and re-decrypted, which needs a connection.",
+            confirmLabel = "Clear",
+            onConfirm = {
+                pending = PendingAction.NONE
+                viewModel.clearCache()
+            },
+            onDismiss = { pending = PendingAction.NONE },
+        )
+
+        PendingAction.DISCONNECT -> ConfirmDialog(
+            title = "Disconnect wallet?",
+            body = if (state.clearOnDisconnect) {
+                "In-memory keys are wiped, and this wallet's cached content and local library are " +
+                    "deleted. You will need to reconnect and re-fetch."
+            } else {
+                "In-memory keys are wiped and the session ends. Cached content is kept because " +
+                    "\u201cWipe on disconnect\u201d is off."
+            },
+            confirmLabel = "Disconnect",
+            onConfirm = {
+                pending = PendingAction.NONE
+                viewModel.disconnect()
+            },
+            onDismiss = { pending = PendingAction.NONE },
+        )
     }
 }
+
+private const val MAX_VISIBLE_EVENTS = 20
+private const val MIN_QUOTA_GIB = 0.5f
+private const val MAX_QUOTA_GIB = 20f
+private const val MIN_TTL_DAYS = 1f
+private const val MAX_TTL_DAYS = 90f
+private const val BYTES_PER_GIB = 1024L * 1024L * 1024L
+
+private fun Long.toGiB(): Float = (this.toDouble() / BYTES_PER_GIB).toFloat()
+private fun Float.gibToBytes(): Long = (this.toDouble() * BYTES_PER_GIB).toLong()

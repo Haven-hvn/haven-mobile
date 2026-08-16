@@ -8,5 +8,7 @@ android {
 
 dependencies {
     api(project(":foc-cache"))
-    implementation(libs.kotlinx.datetime)
+    // `Instant` appears in MediaItem/Attestation signatures, so consumers must be able to see
+    // it. As `implementation` this compiled here but broke any module that touched createdAt.
+    api(libs.kotlinx.datetime)
 }

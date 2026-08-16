@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import haven.mobile.core.domain.HavenChain
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -20,6 +21,8 @@ class SettingsRepositoryImpl @Inject constructor(
         private val QUOTA_BYTES_KEY = stringPreferencesKey("cache.quota_bytes")
         private val TTL_DAYS_KEY = stringPreferencesKey("cache.ttl_days")
         private val CLEAR_ON_DISCONNECT_KEY = stringPreferencesKey("cache.clear_on_disconnect")
+        private val ENABLED_CHAINS_KEY = stringPreferencesKey("access.enabled_chains")
+        private const val SEPARATOR = ","
         private val DEFAULT_QUOTA_BYTES = 2L * 1024 * 1024 * 1024
         private val DEFAULT_TTL_DAYS = 30
         private val DEFAULT_CLEAR_ON_DISCONNECT = true
@@ -35,6 +38,22 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val clearOnDisconnect: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[CLEAR_ON_DISCONNECT_KEY]?.toBoolean() ?: DEFAULT_CLEAR_ON_DISCONNECT
+    }
+
+    override val enabledChains: Flow<Set<HavenChain>> = context.settingsDataStore.data.map { prefs ->
+        val stored = prefs[ENABLED_CHAINS_KEY]
+            ?.split(SEPARATOR)
+            ?.mapNotNull { name -> HavenChain.entries.firstOrNull { it.name == name } }
+            ?.toSet()
+        // Empty or unreadable falls back to the defaults: a stored value that no longer parses (a chain
+        // removed from the enum, say) must not leave a reader with nothing checked and no explanation.
+        stored?.takeIf { it.isNotEmpty() } ?: HavenChain.mainnets.toSet()
+    }
+
+    override suspend fun setEnabledChains(chains: Set<HavenChain>) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[ENABLED_CHAINS_KEY] = chains.joinToString(SEPARATOR) { it.name }
+        }
     }
 
     override suspend fun setCacheQuotaBytes(bytes: Long) {

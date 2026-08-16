@@ -1,19 +1,59 @@
 appId: haven.mobile
-name: "Haven Mobile — FILE Save to device + Open with — FR-FILE-1..4"
+name: "FILE — save to device + open with (FR-FILE-1..4)"
 tags: ["v1", "file"]
 ---
+# The only path where decrypted content leaves the app, so the flow checks the guard rails rather
+# than just the happy path: an explicit action, a one-time warning, and a hard block when the
+# item's integrity check did not hold.
+#
+# Requires a fixture item of kind FILE in the connected wallet's library.
+
 - launchApp
 - tapOn: "Library"
-# Pick a FILE kind item — requires fixture; search for FILE
-- tapOn: "FILE"
-# In Watch FileViewer
-- assertVisible: "Save to device"
-- tapOn: "Save to device"
-# One-time warning modal (FR-FILE-3)
-- assertVisible: "This file is now readable"
-- tapOn: "Continue"
-# System SAF picker appears — Maestro can't drive system picker; assert chooser launched via toast fallback
-- assertVisible:
-    text: "Saved to device|Save failed"
+
+# Filter to generic files. The chip is disabled when the count is zero, which is itself the signal
+# that the fixture is missing.
+- tapOn:
+    text: "Files.*"
     optional: true
+- tapOn:
+    text: ".*"
+    index: 0
+    optional: true
+
+# ── The FILE viewer explains itself before offering the action ────────────────────────────────
+- assertVisible:
+    text: "Haven can't display this type inline.*"
+- assertVisible:
+    text: "Save to device|Unlock and save"
+
+# "Open with…" is disabled until something has actually been saved — offering it earlier would
+# hand the chooser a URI that does not exist.
 - assertVisible: "Open with…"
+
+# ── One-time warning (FR-FILE-3) ─────────────────────────────────────────────────────────────
+- tapOn:
+    text: "Save to device|Unlock and save"
+- assertVisible: "Save this file?"
+- assertVisible:
+    text: ".*readable by any app on this phone.*"
+# Cancelling must not save.
+- tapOn: "Cancel"
+
+# Second attempt, accepted. The system SAF picker follows; Maestro cannot drive it, so the run
+# either completes the save or stops at the picker.
+- tapOn:
+    text: "Save to device|Unlock and save"
+- tapOn:
+    text: "Save anyway"
+    optional: true
+- assertVisible:
+    text: "Saving…|Saved to device|Save failed"
+    optional: true
+
+# ── FR-FILE-4: a failed check blocks export outright ──────────────────────────────────────────
+# Present only for an item whose content check did not hold; optional so the flow passes with a
+# healthy fixture.
+- assertVisible:
+    text: "Export is blocked.*FR-FILE-4.*"
+    optional: true

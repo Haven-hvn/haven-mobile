@@ -1,1 +1,25 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+          Background playback. `exported="true"` is required by Media3: the system media controls and
+          Android Auto/Assistant reach the session through this service, and they are separate
+          processes. The intent filter is what makes it discoverable as a media session rather than
+          an ordinary bound service.
+
+          The FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK permissions are declared in
+          the app module's manifest; the type below has to agree with them or startForeground throws
+          on API 34+.
+        -->
+        <service
+            android:name=".HavenPlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

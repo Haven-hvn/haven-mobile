@@ -18,7 +18,11 @@ class HavenAolImpl @Inject constructor(
 
     override suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray> {
         if (config.canisterId.isBlank() || config.icHost.isBlank()) {
-            return Result.failure(HavenError.CanisterCallFailed("HavenAol not configured — set haven.aol.canisterId / haven.aol.icHost in local.properties"))
+            // Rendered directly by the viewer's error state, so it says what the reader can conclude
+            // — not which build property is missing.
+            return Result.failure(
+                HavenError.CanisterCallFailed("This build of Haven can't unlock content."),
+            )
         }
         val address = session.address.value ?: return Result.failure(HavenError.WalletNotConnected("No wallet connected"))
         // Check in-memory AES key cache first (FR-ACL-2) — gate key survives for session until disconnect
@@ -49,16 +53,19 @@ class HavenAolImpl @Inject constructor(
             }
             val nonceNat = try { java.math.BigInteger(nonce) } catch (_: Exception) { java.math.BigInteger.ZERO }
             val thresholdNat = java.math.BigInteger.valueOf(gate.threshold.toLong().coerceAtLeast(0))
-            val eipChainId = java.math.BigInteger.ONE
-            val chainVariantName = when {
-                gate.chain.contains("11155111") || gate.chain.contains("Sepolia", true) -> "EthSepolia"
-                gate.chain.contains("42161") || gate.chain.contains("Arbitrum", true) -> "ArbitrumOne"
-                gate.chain.contains("8453") || gate.chain.contains("Base", true) -> "BaseMainnet"
-                gate.chain.contains("10") && gate.chain.contains("Optimism", true) -> "OptimismMainnet"
-                else -> "EthMainnet"
-            }
+            // The gate's own chain, not a guess. Previously this sniffed for substrings ("10" and
+            // "Optimism" both had to appear, so a plain "10" fell through to Ethereum) and defaulted
+            // to EthMainnet on no match — which checks a balance on the wrong chain and then answers
+            // confidently. An unparseable chain is now a refusal instead.
+            val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)
+                ?: return Result.failure(
+                    HavenError.UnsupportedGateMetadata(
+                        "This item is gated on a network Haven can't check.",
+                    ),
+                )
+            val eipChainId = java.math.BigInteger.valueOf(chain.chainId)
             val chainVariant = dev.ic.kotlin.candid.CandidValue.CandidVariant(
-                dev.ic.kotlin.candid.fieldId(chainVariantName), dev.ic.kotlin.candid.CandidValue.CandidNull
+                dev.ic.kotlin.candid.fieldId(chain.aolVariant), dev.ic.kotlin.candid.CandidValue.CandidNull
             )
             val record = dev.ic.kotlin.candid.CandidValue.CandidRecord(
                 mapOf(
@@ -98,7 +105,13 @@ class HavenAolImpl @Inject constructor(
                 is dev.ic.kotlin.agent.Reply.Rejected -> Result.failure(HavenError.CanisterCallFailed("Canister rejected $method: ${reply.message}"))
             }
         } catch (e: Exception) {
-            Result.failure(HavenError.CanisterCallFailed("HavenAol $config.canisterId unreachable: ${e.message} (signed ${json.length} chars with ${sig.take(10)}…)"))
+            // Reader-facing wording: this message is rendered directly by the viewer's error state,
+            // so it must not carry the canister id, the payload length or a signature prefix.
+            // Diagnostic detail belongs in the log, not on the screen.
+            timber.log.Timber.w(e, "HavenAol unreachable (canister=%s, v3=%s)", config.canisterId, isV3)
+            Result.failure(
+                HavenError.CanisterCallFailed("Haven couldn't reach the service that unlocks this item."),
+            )
         }
     }
 

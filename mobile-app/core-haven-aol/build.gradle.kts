@@ -56,6 +56,8 @@ dependencies {
     implementation("dev.ic.kotlin:ic-candid:0.1.0-SNAPSHOT")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)
+    // Failures here are reported to the reader in plain language; the detail goes to the log.
+    implementation("com.jakewharton.timber:timber:5.0.1")
     testImplementation(libs.junit)
     testImplementation("junit:junit:4.13.2")
     testImplementation(libs.mockk)
