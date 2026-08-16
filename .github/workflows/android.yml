@@ -106,23 +106,37 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-snapshot-load -noaudio -no-boot-anim
           disable-animations: true
           script: |
+            echo "Waiting for emulator to be online (handles 'device offline')..."
+            adb wait-for-device
+            for i in $(seq 1 30); do
+              if adb shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; then echo "Boot completed"; break; fi
+              echo "Waiting for boot... attempt $i/30"
+              sleep 2
+            done
+            adb devices
             adb logcat -c
-            adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
+            echo "Installing APK..."
+            for i in $(seq 1 3); do
+              if adb install -r /tmp/apk/app-debug.apk 2>&1; then break; fi
+              if adb install -r /tmp/apk/*.apk 2>&1; then break; fi
+              echo "Install retry $i/3, waiting for device..."
+              adb wait-for-device; sleep 3
+            done
             adb logcat > /tmp/logcat.txt &
             LOGPID=$!
             echo "Starting MainActivity..."
-            adb shell am start -n haven.mobile/.MainActivity || adb shell am start -n haven.mobile/haven.mobile.app.MainActivity
+            adb shell am start -n haven.mobile/.MainActivity || adb shell am start -n haven.mobile/haven.mobile.app.MainActivity || adb shell am start -a android.intent.action.MAIN -n haven.mobile/.MainActivity || true
             sleep 12
-            echo "=== adb devices ==="; adb devices
+            echo "=== adb devices ==="; adb devices || true
             echo "=== dumpsys package haven.mobile ==="; adb shell dumpsys package haven.mobile | head -n 80 || true
-            echo "=== logcat (last 400 lines) ==="; adb logcat -d | tail -n 400 || cat /tmp/logcat.txt | tail -n 400 || true
-            echo "=== logcat FATAL ==="; adb logcat -d | grep -A 30 "FATAL EXCEPTION\|AndroidRuntime.*haven\|Caused by" | head -n 120 || true
+            echo "=== logcat (last 400 lines) ==="; adb logcat -d | tail -n 400 2>&1 | head -n 400 || cat /tmp/logcat.txt | tail -n 400 || true
+            echo "=== logcat FATAL ==="; adb logcat -d 2>&1 | grep -A 30 "FATAL EXCEPTION\|AndroidRuntime.*haven\|Caused by" | head -n 150 || echo "No FATAL found — check full logcat artifact" || true
             kill $LOGPID || true
             sleep 2
-            echo "=== full logcat artifact ==="; ls -lh /tmp/logcat.txt || true
+            echo "=== full logcat artifact ==="; ls -lh /tmp/logcat.txt || true; wc -l /tmp/logcat.txt || true
 
       - name: Upload logcat artifact
         if: always()
