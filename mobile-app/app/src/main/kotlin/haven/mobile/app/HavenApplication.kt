@@ -12,36 +12,45 @@ import timber.log.Timber
 
 @HiltAndroidApp
 class HavenApplication : Application() {
+    override fun attachBaseContext(base: android.content.Context?) {
+        super.attachBaseContext(base)
+        try { if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree()) } catch (_: Exception) {}
+        try { EarlyCrashHandler.install(base ?: this) } catch (_: Exception) {}
+    }
+
     override fun onCreate() {
         super.onCreate()
-        if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
-        }
-        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            Timber.e(throwable, "Uncaught in ${thread.name} — capturing for diagnostics")
-            val crashText = "thread=${thread.name}\n${throwable.stackTraceToString()}\n"
+        // If previous launch crashed, show the crash immediately and skip risky init to break the crash loop
+        try {
+            val crashFile = getExternalFilesDir(null)?.resolve("haven_crash.log")?.takeIf { it.exists() }
+                ?: filesDir.resolve("haven_crash.log").takeIf { it.exists() }
+            if (crashFile != null && crashFile.length() > 0) {
+                val ageMs = System.currentTimeMillis() - crashFile.lastModified()
+                if (ageMs < 5 * 60 * 1000) {
+                    try {
+                        val text = crashFile.readText().take(12000)
+                        val intent = android.content.Intent(this, CrashActivity::class.java).apply {
+                            putExtra(CrashActivity.EXTRA_CRASH, text)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        }
+                        startActivity(intent)
+                        // Don't re-init Reown until user dismisses crash screen
+                        return
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+        try { EarlyCrashHandler.install(this) } catch (_: Exception) {}
+        // Wrap init so a Reown failure never kills the app before MainActivity can show onboarding
+        try { initReownIfNeeded() } catch (e: Throwable) {
+            try { Timber.e(e, "initReownIfNeeded crashed") } catch (_: Exception) {}
             try {
+                val crashText = "initReown: ${e.stackTraceToString()}\n"
                 val crashLog = getExternalFilesDir(null)?.resolve("haven_crash.log")
                     ?: filesDir.resolve("haven_crash.log")
                 crashLog.writeText(crashText)
             } catch (_: Exception) {}
-            // Try to show the crash immediately without needing a second launch
-            try {
-                val intent = android.content.Intent(this, CrashActivity::class.java).apply {
-                    putExtra(CrashActivity.EXTRA_CRASH, crashText.take(12000))
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                }
-                startActivity(intent)
-            } catch (_: Exception) {}
-            try {
-                previousHandler?.uncaughtException(thread, throwable)
-            } catch (_: Exception) {
-                android.os.Process.killProcess(android.os.Process.myPid())
-                kotlin.system.exitProcess(10)
-            }
         }
-        initReownIfNeeded()
     }
 
     private fun initReownIfNeeded() {

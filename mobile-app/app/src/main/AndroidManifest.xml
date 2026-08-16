@@ -27,6 +27,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Haven">
 
+        <provider
+            android:name=".EarlyCrashProvider"
+            android:authorities="${applicationId}.earlycrash"
+            android:exported="false"
+            android:initOrder="100" />
+
         <activity
             android:name=".CrashActivity"
             android:exported="false"
