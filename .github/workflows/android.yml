@@ -79,3 +79,55 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" haven-mobile/mobile-app/app/build/outputs/apk/debug/app-debug.apk --clobber --repo Haven-hvn/haven-mobile
+
+  startup-logcat:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: always() && needs.build.result != 'cancelled'
+    steps:
+      - name: Checkout haven-mobile
+        uses: actions/checkout@v4
+        with:
+          path: haven-mobile
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: /tmp/apk
+
+      - name: Show APK info
+        run: ls -lh /tmp/apk/*.apk && sha256sum /tmp/apk/*.apk || ls -R /tmp/apk
+
+      - name: Run startup logcat on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb logcat -c
+            adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
+            adb logcat > /tmp/logcat.txt &
+            LOGPID=$!
+            echo "Starting MainActivity..."
+            adb shell am start -n haven.mobile/.MainActivity || adb shell am start -n haven.mobile/haven.mobile.app.MainActivity
+            sleep 12
+            echo "=== adb devices ==="; adb devices
+            echo "=== dumpsys package haven.mobile ==="; adb shell dumpsys package haven.mobile | head -n 80 || true
+            echo "=== logcat (last 400 lines) ==="; adb logcat -d | tail -n 400 || cat /tmp/logcat.txt | tail -n 400 || true
+            echo "=== logcat FATAL ==="; adb logcat -d | grep -A 30 "FATAL EXCEPTION\|AndroidRuntime.*haven\|Caused by" | head -n 120 || true
+            kill $LOGPID || true
+            sleep 2
+            echo "=== full logcat artifact ==="; ls -lh /tmp/logcat.txt || true
+
+      - name: Upload logcat artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-logcat
+          path: /tmp/logcat.txt
+          if-no-files-found: warn
