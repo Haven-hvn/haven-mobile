@@ -46,17 +46,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x haven-mobile/mobile-app/gradlew foc-local-first-android/gradlew ic-kotlin/gradlew
 
+      - name: Patch heap for CI (override 768m low-end host setting)
+        run: echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> haven-mobile/mobile-app/gradle.properties && cat haven-mobile/mobile-app/gradle.properties
+
       - name: Run unit tests
         working-directory: haven-mobile/mobile-app
         run: ./gradlew testDebugUnitTest --continue
-        env:
-          GRADLE_OPTS: -Xmx4g -Dorg.gradle.jvmargs=-Xmx4g
 
       - name: Build debug APK
         working-directory: haven-mobile/mobile-app
         run: ./gradlew :app:assembleDebug
-        env:
-          GRADLE_OPTS: -Xmx4g -Dorg.gradle.jvmargs=-Xmx4g
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
