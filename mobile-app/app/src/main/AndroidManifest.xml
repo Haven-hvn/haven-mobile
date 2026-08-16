@@ -28,6 +28,11 @@
         android:theme="@style/Theme.Haven">
 
         <activity
+            android:name=".CrashActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Haven" />
+
+        <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"

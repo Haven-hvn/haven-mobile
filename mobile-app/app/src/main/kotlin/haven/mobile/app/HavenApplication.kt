@@ -20,16 +20,23 @@ class HavenApplication : Application() {
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Timber.e(throwable, "Uncaught in ${thread.name} — capturing for diagnostics")
+            val crashText = "thread=${thread.name}\n${throwable.stackTraceToString()}\n"
             try {
                 val crashLog = getExternalFilesDir(null)?.resolve("haven_crash.log")
                     ?: filesDir.resolve("haven_crash.log")
-                crashLog.writeText("thread=${thread.name}\n${throwable.stackTraceToString()}\n")
+                crashLog.writeText(crashText)
             } catch (_: Exception) {}
-            // Chain to the previous handler so the process terminates and MainActivity can show the dialog on next cold start
+            // Try to show the crash immediately without needing a second launch
+            try {
+                val intent = android.content.Intent(this, CrashActivity::class.java).apply {
+                    putExtra(CrashActivity.EXTRA_CRASH, crashText.take(12000))
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                startActivity(intent)
+            } catch (_: Exception) {}
             try {
                 previousHandler?.uncaughtException(thread, throwable)
             } catch (_: Exception) {
-                // Fall back to killing the process if the previous handler itself throws
                 android.os.Process.killProcess(android.os.Process.myPid())
                 kotlin.system.exitProcess(10)
             }
