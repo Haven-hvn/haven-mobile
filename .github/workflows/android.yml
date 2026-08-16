@@ -130,3 +130,61 @@ jobs:
           name: startup-logcat
           path: /tmp/logcat.txt
           if-no-files-found: warn
+
+  verify-release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout haven-mobile
+        uses: actions/checkout@v4
+
+      - name: Download release APK via public browser_download_url
+        run: |
+          curl -L -o /tmp/release.apk https://github.com/Haven-hvn/haven-mobile/releases/download/v0.1.0-45fa35e/app-debug.apk
+          ls -lh /tmp/release.apk
+          sha256sum /tmp/release.apk
+          aapt dump badging /tmp/release.apk | grep -E "package:|targetSdk" | head -n 5 || $ANDROID_SDK_ROOT/build-tools/36.0.0/aapt dump badging /tmp/release.apk | grep -E "package:|targetSdk" | head -n 5
+
+      - name: Verify reinstall via public intent and capture headless screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: false
+          script: |
+            echo "=== install release APK ==="
+            adb install -r /tmp/release.apk
+            echo "=== launch LauncherActivity (MAIN) ==="
+            adb shell am start -n haven.mobile/.LauncherActivity
+            sleep 8
+            echo "=== dumpsys window ==="
+            adb shell dumpsys window | head -n 40 || true
+            echo "=== launch MainActivity ==="
+            adb shell am start -n haven.mobile/.MainActivity
+            sleep 5
+            echo "=== drive bottom nav (Library/Feed/Communities/Settings) ==="
+            for i in 1 2 3 4; do adb shell input tap 100 1800 2>&1 | head -n 2; sleep 1; adb shell input tap 250 1800 2>&1 | head -n 2; sleep 1; done || true
+            echo "=== onboarding fallback check ==="
+            adb shell dumpsys window | grep -i haven || true
+            echo "=== capture HEADLESS screenshot ==="
+            adb exec-out screencap -p > /tmp/screen.png || adb shell screencap -p > /tmp/screen.png || true
+            ls -lh /tmp/screen.png || true
+            echo "=== logcat FATAL ==="
+            adb logcat -d 2>&1 | grep -A 5 "FATAL EXCEPTION" | head -n 20 || echo "no FATAL"
+            echo "=== ActivityTaskManager START ==="
+            adb logcat -d 2>&1 | grep -E "ActivityTaskManager.*haven|LauncherActivity|MainActivity" | head -n 20 || true
+            echo "=== Choreographer multi-frame ==="
+            adb logcat -d 2>&1 | grep Choreographer | head -n 10 || true
+            echo "=== upload screenshot ==="
+            ls -lh /tmp/screen.png
+
+      - name: Upload screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-release-screenshot
+          path: /tmp/screen.png
+          if-no-files-found: warn
