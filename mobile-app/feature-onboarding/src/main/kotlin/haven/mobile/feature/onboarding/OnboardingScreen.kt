@@ -77,12 +77,7 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val appKitState = try {
-        rememberAppKitState(navController = navController)
-    } catch (e: Exception) {
-        timber.log.Timber.w(e, "AppKit not initialised — wallet connect unavailable")
-        null
-    }
+    val appKitState = if (viewModel.isWalletConfigured) rememberAppKitState(navController = navController) else null
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) onNavigate()

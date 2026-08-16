@@ -3,6 +3,7 @@ package haven.mobile.feature.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import haven.mobile.core.wallet.WalletConfig
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +22,9 @@ sealed interface OnboardingUiState {
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val walletSession: WalletSession,
+    private val walletConfig: WalletConfig,
 ) : ViewModel() {
+    val isWalletConfigured: Boolean = walletConfig.projectId.isNotBlank() && !walletConfig.projectId.startsWith("dummy-")
 
     private val _uiState = MutableStateFlow<OnboardingUiState>(OnboardingUiState.Idle)
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
