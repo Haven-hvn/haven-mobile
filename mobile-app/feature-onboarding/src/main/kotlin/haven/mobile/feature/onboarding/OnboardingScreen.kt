@@ -77,7 +77,12 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val appKitState = rememberAppKitState(navController = navController)
+    val appKitState = try {
+        rememberAppKitState(navController = navController)
+    } catch (e: Exception) {
+        timber.log.Timber.w(e, "AppKit not initialised — wallet connect unavailable")
+        null
+    }
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) onNavigate()
@@ -230,15 +235,31 @@ fun OnboardingScreen(
         }
 
         if (uiState !is OnboardingUiState.Connected) {
-            // Reown owns this control: it enumerates installed wallets, handles the QR fallback
-            // and the deep-link hand-off. A bespoke button means reimplementing all three.
-            ConnectButton(state = appKitState, buttonSize = ConnectButtonSize.NORMAL)
-            Spacer(Modifier.height(HavenSpacing.md))
-            Text(
-                text = "MetaMask, Rainbow, Trust, or any WalletConnect v2 wallet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (appKitState != null) {
+                // Reown owns this control: it enumerates installed wallets, handles the QR fallback
+                // and the deep-link hand-off. A bespoke button means reimplementing all three.
+                ConnectButton(state = appKitState, buttonSize = ConnectButtonSize.NORMAL)
+                Spacer(Modifier.height(HavenSpacing.md))
+                Text(
+                    text = "MetaMask, Rainbow, Trust, or any WalletConnect v2 wallet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Spacer(Modifier.height(HavenSpacing.md))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape = MaterialTheme.shapes.medium)
+                        .padding(HavenSpacing.md),
+                ) {
+                    Text(
+                        text = "Wallet connect is not configured in this build. Install a debug build with a valid wallet.projectId to connect.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(HavenSpacing.xxxl))

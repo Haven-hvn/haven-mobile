@@ -17,6 +17,7 @@ class HavenApplication : Application() {
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Timber.e(throwable, "Uncaught in ${thread.name} — capturing for diagnostics")
             try {
@@ -24,15 +25,22 @@ class HavenApplication : Application() {
                     ?: filesDir.resolve("haven_crash.log")
                 crashLog.writeText("thread=${thread.name}\n${throwable.stackTraceToString()}\n")
             } catch (_: Exception) {}
-            // Let the system handle it after logging; a dialog is shown on next cold start via MainActivity
+            // Chain to the previous handler so the process terminates and MainActivity can show the dialog on next cold start
+            try {
+                previousHandler?.uncaughtException(thread, throwable)
+            } catch (_: Exception) {
+                // Fall back to killing the process if the previous handler itself throws
+                android.os.Process.killProcess(android.os.Process.myPid())
+                kotlin.system.exitProcess(10)
+            }
         }
         initReownIfNeeded()
     }
 
     private fun initReownIfNeeded() {
         val projectId = BuildConfig.WALLET_PROJECT_ID
-        if (projectId.isBlank()) {
-            Timber.w("WALLET_PROJECT_ID blank — Reown init skipped")
+        if (projectId.isBlank() || projectId.startsWith("dummy-")) {
+            Timber.w("WALLET_PROJECT_ID blank/dummy — Reown init skipped (projectId=$projectId)")
             return
         }
         try {
