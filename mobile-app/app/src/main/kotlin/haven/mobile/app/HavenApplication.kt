@@ -59,6 +59,21 @@ class HavenApplication : Application() {
             Timber.w("WALLET_PROJECT_ID blank/dummy — Reown init skipped (projectId=$projectId)")
             return
         }
+        // Physical-device guard: Reown/CoreClient needs Play Services; on devices without it it throws NoClassDefFoundError which Exception does not catch
+        try {
+            val clazz = Class.forName("com.google.android.gms.common.GoogleApiAvailability")
+            val getInstance = clazz.getMethod("getInstance")
+            val availability = getInstance.invoke(null)
+            val isAvailable = clazz.getMethod("isGooglePlayServicesAvailable", android.content.Context::class.java)
+            val psStatus = isAvailable.invoke(availability, this) as Int
+            if (psStatus != 0) { // ConnectionResult.SUCCESS = 0
+                Timber.w("Play Services not available ($psStatus) — Reown init skipped, onboarding will show fallback")
+                return
+            }
+        } catch (e: Throwable) {
+            Timber.w(e, "Play Services check failed — Reown init skipped")
+            return
+        }
         try {
             val appMetaData = Core.Model.AppMetaData(
                 name = "Haven",
@@ -80,9 +95,9 @@ class HavenApplication : Application() {
                 onError = { error -> Timber.e(error.throwable, "AppKit init error") }
             )
             AppKit.setChains(AppKitChainsPresets.ethChains.values.toList())
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             if (e.message?.contains("already", ignoreCase = true) != true) {
-                Timber.e(e, "Reown init failed")
+                Timber.e(e, "Reown init failed (Throwable)")
             }
         }
     }
