@@ -29,23 +29,12 @@ class MainActivity : ComponentActivity() {
         maybeShowCrashDialog()
 
         setContent {
-            try {
-                HavenTheme {
-                    val navController = rememberNavController()
-                    HavenApp(
-                        navController = navController,
-                        isDebugBuild = BuildConfig.DEBUG,
-                    )
-                }
-            } catch (e: Throwable) {
-                Timber.e(e, "Compose startup failed — showing fallback")
-                try {
-                    val crashLog = getExternalFilesDir(null)?.resolve("haven_crash.log")
-                        ?: filesDir.resolve("haven_crash.log")
-                    crashLog.writeText("startup=${e.stackTraceToString()}\n")
-                } catch (_: Exception) {}
-                // Fallback: let the system handler terminate so the crash dialog appears on next launch
-                throw e
+            HavenTheme {
+                val navController = rememberNavController()
+                HavenApp(
+                    navController = navController,
+                    isDebugBuild = BuildConfig.DEBUG,
+                )
             }
         }
     }
