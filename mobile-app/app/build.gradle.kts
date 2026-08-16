@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.work.runtime)
     implementation("com.google.dagger:hilt-android:2.60.1")

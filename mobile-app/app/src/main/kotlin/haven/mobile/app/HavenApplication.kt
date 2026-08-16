@@ -17,6 +17,15 @@ class HavenApplication : Application() {
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Timber.e(throwable, "Uncaught in ${thread.name} — capturing for diagnostics")
+            try {
+                val crashLog = getExternalFilesDir(null)?.resolve("haven_crash.log")
+                    ?: filesDir.resolve("haven_crash.log")
+                crashLog.writeText("thread=${thread.name}\n${throwable.stackTraceToString()}\n")
+            } catch (_: Exception) {}
+            // Let the system handle it after logging; a dialog is shown on next cold start via MainActivity
+        }
         initReownIfNeeded()
     }
 

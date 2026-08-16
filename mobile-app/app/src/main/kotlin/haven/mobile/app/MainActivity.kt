@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
 
         registerAppKit()
         handleDeepLink(intent)
+        maybeShowCrashDialog()
 
         setContent {
             HavenTheme {
@@ -73,6 +74,29 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             Timber.w(e, "Deep link ignored — AppKit not initialised")
+        }
+    }
+
+    private fun maybeShowCrashDialog() {
+        try {
+            val crashLog = (getExternalFilesDir(null)?.resolve("haven_crash.log")
+                ?: filesDir.resolve("haven_crash.log")).takeIf { it.exists() } ?: return
+            val text = crashLog.readText().take(4000)
+            crashLog.delete()
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Haven — previous crash")
+                .setMessage(text)
+                .setPositiveButton("Share") { _, _ ->
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, text)
+                    }
+                    startActivity(Intent.createChooser(intent, "Share crash log"))
+                }
+                .setNegativeButton("Dismiss", null)
+                .show()
+        } catch (e: Exception) {
+            Timber.w(e, "Crash dialog skipped")
         }
     }
 

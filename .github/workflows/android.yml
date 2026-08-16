@@ -49,6 +49,16 @@ jobs:
       - name: Patch heap for CI (override 768m low-end host setting)
         run: echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> haven-mobile/mobile-app/gradle.properties && cat haven-mobile/mobile-app/gradle.properties
 
+      - name: Create dummy local.properties for CI (avoid empty BuildConfig crash)
+        run: |
+          cat > haven-mobile/mobile-app/local.properties <<'EOF'
+          sdk.dir=/usr/local/lib/android/sdk
+          wallet.projectId=dummy-ci-project-id-for-build-only
+          haven.aol.canisterId=dummy-ci-canister
+          haven.aol.icHost=https://ic0.app
+          EOF
+          cat haven-mobile/mobile-app/local.properties
+
       - name: Run unit tests
         working-directory: haven-mobile/mobile-app
         run: ./gradlew testDebugUnitTest --continue
