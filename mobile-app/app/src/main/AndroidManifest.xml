@@ -39,6 +39,16 @@
             android:theme="@style/Theme.Haven" />
 
         <activity
+            android:name=".LauncherActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Haven">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
@@ -46,11 +56,6 @@
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.Haven"
             android:windowSoftInputMode="adjustResize">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
 
             <!--
               WalletConnect return leg. The wallet app sends the signed response back to
