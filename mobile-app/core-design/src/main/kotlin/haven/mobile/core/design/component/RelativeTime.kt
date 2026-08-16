@@ -1,7 +1,7 @@
 package haven.mobile.core.design.component
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /**
  * Dates as a person reads them.

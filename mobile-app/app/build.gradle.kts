@@ -14,12 +14,12 @@ val localProps = Properties().apply {
 
 android {
     namespace = "haven.mobile.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "haven.mobile"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

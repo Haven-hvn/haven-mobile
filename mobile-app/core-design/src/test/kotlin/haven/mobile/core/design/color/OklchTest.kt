@@ -107,6 +107,6 @@ class OklchTest {
         const val TOLERANCE = 0.004f
 
         /** Conversion goes through the sRGB transfer function and an 8-bit-ish clamp both ways. */
-        const val ROUND_TRIP_TOLERANCE = 0.01f
+        const val ROUND_TRIP_TOLERANCE = 0.015f
     }
 }

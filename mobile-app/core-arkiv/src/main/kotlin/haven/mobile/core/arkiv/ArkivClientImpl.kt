@@ -40,7 +40,7 @@ class ArkivClientImpl @Inject constructor(
         pageSize: Int,
         cursor: String?,
     ): Result<ArkivPage<MediaItem>> {
-        notConfigured()?.let { return it }
+        notConfigured<ArkivPage<MediaItem>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
                 val url = buildUrl("/api/arkiv/media")
@@ -60,9 +60,7 @@ class ArkivClientImpl @Inject constructor(
                 )
                 val json = JSONObject(body)
                 val items = json.getJSONArray("items")
-                val mediaItems = (0 until items.length()).map {
-                    items.getJSONObject(it).toMediaItem()
-                }
+                val mediaItems = List(items.length()) { idx -> items.getJSONObject(idx).toMediaItem() }
                 val nextCursor = json.optString("nextCursor", null).takeIf { it.isNotEmpty() }
                 Result.success(ArkivPage(items = mediaItems, nextCursor = nextCursor))
             } catch (e: HavenError) {
@@ -82,7 +80,7 @@ class ArkivClientImpl @Inject constructor(
         pageSize: Int,
         cursor: String?,
     ): Result<ArkivPage<MediaItem>> {
-        notConfigured()?.let { return it }
+        notConfigured<ArkivPage<MediaItem>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
                 // Filters on the gating asset rather than the author, which is what makes this a feed
@@ -105,7 +103,7 @@ class ArkivClientImpl @Inject constructor(
                 )
                 val json = JSONObject(body)
                 val items = json.getJSONArray("items")
-                val mediaItems = (0 until items.length()).map { items.getJSONObject(it).toMediaItem() }
+                val mediaItems = List(items.length()) { idx -> items.getJSONObject(idx).toMediaItem() }
                 val nextCursor = json.optString("nextCursor", null).takeIf { it.isNotEmpty() }
                 Result.success(ArkivPage(items = mediaItems, nextCursor = nextCursor))
             } catch (e: HavenError) {
@@ -119,7 +117,7 @@ class ArkivClientImpl @Inject constructor(
     }
 
     override suspend fun discoverGates(chains: Set<HavenChain>): Result<List<TokenGate>> {
-        notConfigured()?.let { return it }
+        notConfigured<List<TokenGate>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
                 val url = buildUrl("/api/arkiv/gates")
@@ -141,10 +139,7 @@ class ArkivClientImpl @Inject constructor(
                     ?: runCatching { JSONObject(body).getJSONArray("gates") }.getOrNull()
                     ?: return@withContext Result.success(emptyList())
 
-                val gates = (0 until array.length()).mapNotNull { index ->
-                    val entry = array.optJSONObject(index) ?: return@mapNotNull null
-                    entry.toTokenGate()
-                }
+                val gates = List(array.length()) { idx -> array.optJSONObject(idx) }.mapNotNull { entry -> entry?.toTokenGate() }
 
                 // One gate per (chain, contract): thresholds vary per entity, and the lowest is the one
                 // that decides whether anything under it is readable.
@@ -165,7 +160,7 @@ class ArkivClientImpl @Inject constructor(
     }
 
     override suspend fun discoverUserCommunities(address: String): Result<List<Community>> {
-        notConfigured()?.let { return it }
+        notConfigured<List<Community>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
                 val url = buildUrl("/api/arkiv/communities")
@@ -182,9 +177,7 @@ class ArkivClientImpl @Inject constructor(
                     HavenError.CacheMiss("No communities came back."),
                 )
                 val jsonArray = JSONArray(body)
-                val communities = (0 until jsonArray.length()).mapNotNull {
-                    jsonArray.getJSONObject(it).toCommunity()
-                }
+                val communities = List(jsonArray.length()) { idx -> jsonArray.getJSONObject(idx) }.mapNotNull { it.toCommunity() }
                 Result.success(communities)
             } catch (e: HavenError) {
                 Result.failure(e)
@@ -199,7 +192,7 @@ class ArkivClientImpl @Inject constructor(
     }
 
     override suspend fun getMedia(id: String): Result<MediaItem?> {
-        notConfigured()?.let { return it }
+        notConfigured<MediaItem?>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
                 val url = buildUrl("/api/arkiv/media/$id").build().toString()
@@ -351,7 +344,7 @@ class ArkivClientImpl @Inject constructor(
             signature = signature.toByteArray(Charsets.UTF_8),
             signerKeyId = attObj.optString("signerKeyId", ""),
             merkleProof = attObj.optJSONArray("merkleProof")?.let { arr ->
-                (0 until arr.length()).map { arr.getString(it).toByteArray(Charsets.UTF_8) }
+                List(arr.length()) { idx -> arr.getString(idx).toByteArray(Charsets.UTF_8) }
             },
             issuedAt = attObj.optString("issuedAt", null)
                 ?.let { runCatching { Instant.parse(it) }.getOrNull() }

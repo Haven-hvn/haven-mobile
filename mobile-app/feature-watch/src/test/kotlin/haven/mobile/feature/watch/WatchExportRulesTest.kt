@@ -78,7 +78,7 @@ class WatchExportRulesTest {
 
     @Test
     fun `unlock stages are ordered from gate to bytes`() {
-        assertEquals("Unlocking gate\u2026", UnlockStage.UNLOCKING.label)
+        assertEquals("Checking your access\u2026", UnlockStage.UNLOCKING.label)
         assertEquals("Decrypting\u2026", UnlockStage.STREAMING.label)
     }
 

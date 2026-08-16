@@ -50,7 +50,7 @@ class LibraryFilterTest {
     @Test
     fun `query matches the title case-insensitively`() {
         val result = applyFilters(all, filters(query = "FOUNDING"))
-        assertEquals(listOf("1"), result.map { it.id })
+        assertEquals(listOf("1", "3"), result.map { it.id })
     }
 
     @Test

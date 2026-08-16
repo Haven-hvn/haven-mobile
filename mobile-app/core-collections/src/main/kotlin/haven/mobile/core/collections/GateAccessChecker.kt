@@ -226,6 +226,7 @@ internal class EvmGateAccessChecker @Inject constructor(
     private enum class Field { BALANCE, DECIMALS }
 
     private companion object {
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         /** `balanceOf(address)` — the same call for ERC-20 and ERC-721. */
         const val SELECTOR_BALANCE_OF = "0x70a08231"
         const val SELECTOR_DECIMALS = "0x313ce567"
