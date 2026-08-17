@@ -87,8 +87,8 @@ dependencies {
     // compose convention plugin adds this for feature modules; :app uses the application convention,
     // so it needs the dependency explicitly.
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.6")
-    implementation("com.google.accompanist:accompanist-navigation-material:0.34.0")
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("com.google.accompanist:accompanist-navigation-material:0.32.0")
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)
