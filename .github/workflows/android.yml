@@ -175,12 +175,7 @@ jobs:
             adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
             sleep 2
             echo "=== dismiss System UI ANR Wait if present (tap Wait ~160,520) ==="
-            for _ in 1 2 3; do
-              # Wait button is at approx center-right of dialog; tapping it dismisses ANR
-              adb shell input tap 160 520 2>&1 | head -n 2 || true
-              adb shell input tap 200 500 2>&1 | head -n 2 || true
-              sleep 1
-            done || true
+            for i in 1 2 3; do adb shell input tap 160 520 2>&1 | head -n 2 || true; adb shell input tap 200 500 2>&1 | head -n 2 || true; sleep 1; done || true
             echo "=== launch LauncherActivity (haven.mobile.app.LauncherActivity) MAIN ==="
             adb shell am start -n haven.mobile.app.LauncherActivity || adb shell am start -n haven.mobile/.LauncherActivity || true
             sleep 10
