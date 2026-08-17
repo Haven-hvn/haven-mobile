@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 class LauncherActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try { StartupTracer.log(this, "LauncherActivity.onCreate") } catch (_: Exception) {}
         val crashFile = try {
             getExternalFilesDir(null)?.resolve("haven_crash.log")?.takeIf { it.exists() }
                 ?: filesDir.resolve("haven_crash.log").takeIf { it.exists() }
@@ -24,6 +25,7 @@ class LauncherActivity : AppCompatActivity() {
         if (hasRecentCrash) {
             try {
                 val text = crashFile!!.readText().take(12000)
+                try { StartupTracer.log(this, "Launcher showing CrashActivity", text.take(300)) } catch (_: Exception) {}
                 val intent = Intent(this, CrashActivity::class.java).apply {
                     putExtra(CrashActivity.EXTRA_CRASH, text)
                 }
@@ -34,11 +36,13 @@ class LauncherActivity : AppCompatActivity() {
         }
         // No recent crash — proceed to real app
         try {
+            try { StartupTracer.log(this, "Launcher starting MainActivity") } catch (_: Exception) {}
             startActivity(Intent(this, MainActivity::class.java))
         } catch (e: Throwable) {
             // If MainActivity itself can't start (Hilt crash), show the throw directly
             try {
-                val crashText = "Launcher -> MainActivity failed:\n${e.stackTraceToString()}\n"
+                try { StartupTracer.log(this, "Launcher MainActivity failed", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+                val crashText = "Launcher -> MainActivity failed:\n${e.stackTraceToString()}\n\nStartup:\n${StartupTracer.read(this)?.take(4000) ?: "no trace"}"
                 val crashLog = getExternalFilesDir(null)?.resolve("haven_crash.log")
                     ?: filesDir.resolve("haven_crash.log")
                 crashLog.writeText(crashText)

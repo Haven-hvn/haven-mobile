@@ -33,12 +33,19 @@ object EarlyCrashHandler {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try { Timber.e(throwable, "Uncaught in ${thread.name}") } catch (_: Exception) {}
-            val crashText = "thread=${thread.name}\n${throwable.stackTraceToString()}\n"
+            val startup = try { StartupTracer.read(app) } catch (_: Exception) { null }
+            val crashText = buildString {
+                append("thread=${thread.name}\n")
+                append(throwable.stackTraceToString())
+                append("\n\n--- Startup trace ---\n")
+                append(startup?.take(6000) ?: "no trace")
+            }
             try {
                 val crashLog = app.getExternalFilesDir(null)?.resolve("haven_crash.log")
                     ?: app.filesDir.resolve("haven_crash.log")
                 crashLog.writeText(crashText)
             } catch (_: Exception) {}
+            try { StartupTracer.log(app, "Uncaught ${thread.name} ${throwable::class.simpleName}", throwable.message?.take(300)) } catch (_: Exception) {}
             // Try to show CrashActivity directly — may be blocked on Android 10+ if in background, so also rely on file for next launch
             try {
                 val intent = android.content.Intent(app, CrashActivity::class.java).apply {

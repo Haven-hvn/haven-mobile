@@ -14,12 +14,14 @@ import timber.log.Timber
 class HavenApplication : Application() {
     override fun attachBaseContext(base: android.content.Context?) {
         super.attachBaseContext(base)
+        try { StartupTracer.log(base ?: this, "attachBaseContext") } catch (_: Exception) {}
         try { if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree()) } catch (_: Exception) {}
         try { EarlyCrashHandler.install(base ?: this) } catch (_: Exception) {}
     }
 
     override fun onCreate() {
         super.onCreate()
+        try { StartupTracer.log(this, "Application.onCreate start") } catch (_: Exception) {}
         // If previous launch crashed, show the crash immediately and skip risky init to break the crash loop
         try {
             val crashFile = getExternalFilesDir(null)?.resolve("haven_crash.log")?.takeIf { it.exists() }
@@ -29,6 +31,7 @@ class HavenApplication : Application() {
                 if (ageMs < 5 * 60 * 1000) {
                     try {
                         val text = crashFile.readText().take(12000)
+                        try { StartupTracer.log(this, "Application.onCreate showing CrashActivity from previous crash", text.take(400)) } catch (_: Exception) {}
                         val intent = android.content.Intent(this, CrashActivity::class.java).apply {
                             putExtra(CrashActivity.EXTRA_CRASH, text)
                             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -42,7 +45,9 @@ class HavenApplication : Application() {
         } catch (_: Exception) {}
         try { EarlyCrashHandler.install(this) } catch (_: Exception) {}
         // Wrap init so a Reown failure never kills the app before MainActivity can show onboarding
+        try { StartupTracer.log(this, "Application before initReown") } catch (_: Exception) {}
         try { initReownIfNeeded() } catch (e: Throwable) {
+            try { StartupTracer.log(this, "initReownIfNeeded Throwable", e.stackTraceToString().take(800)) } catch (_: Exception) {}
             try { Timber.e(e, "initReownIfNeeded crashed") } catch (_: Exception) {}
             try {
                 val crashText = "initReown: ${e.stackTraceToString()}\n"
@@ -51,10 +56,12 @@ class HavenApplication : Application() {
                 crashLog.writeText(crashText)
             } catch (_: Exception) {}
         }
+        try { StartupTracer.log(this, "Application.onCreate end") } catch (_: Exception) {}
     }
 
     private fun initReownIfNeeded() {
         val projectId = BuildConfig.WALLET_PROJECT_ID
+        try { StartupTracer.log(this, "initReown check projectId=$projectId") } catch (_: Exception) {}
         if (projectId.isBlank() || projectId.startsWith("dummy-")) {
             Timber.w("WALLET_PROJECT_ID blank/dummy — Reown init skipped (projectId=$projectId)")
             return

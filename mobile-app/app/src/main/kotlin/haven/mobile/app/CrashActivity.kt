@@ -19,6 +19,7 @@ class CrashActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val crashText = intent.getStringExtra(EXTRA_CRASH) ?: readCrashFile() ?: "No crash log available."
+        val startupText = StartupTracer.read(this)
 
         val title = TextView(this).apply {
             text = "Haven — startup crash"
@@ -26,8 +27,15 @@ class CrashActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
             setPadding(32, 48, 32, 16)
         }
+        val combined = buildString {
+            append(crashText.take(12000))
+            if (startupText != null) {
+                append("\n\n--- Startup trace ---\n")
+                append(startupText.take(6000))
+            }
+        }
         val body = TextView(this).apply {
-            text = crashText.take(12000)
+            text = combined
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             typeface = Typeface.MONOSPACE
             setPadding(32, 16, 32, 16)
@@ -40,7 +48,7 @@ class CrashActivity : AppCompatActivity() {
                 val send = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_SUBJECT, "Haven crash")
-                    putExtra(Intent.EXTRA_TEXT, crashText)
+                    putExtra(Intent.EXTRA_TEXT, combined)
                 }
                 startActivity(Intent.createChooser(send, "Share crash log"))
             }

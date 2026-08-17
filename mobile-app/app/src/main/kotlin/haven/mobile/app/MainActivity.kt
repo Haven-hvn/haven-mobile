@@ -19,24 +19,42 @@ import timber.log.Timber
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        try { StartupTracer.log(this, "MainActivity.onCreate start") } catch (_: Exception) {}
         // Draw behind the status and navigation bars; `Scaffold` in HavenScreen consumes the
         // insets, so content stays clear of them while the background runs edge to edge.
-        enableEdgeToEdge()
+        try { enableEdgeToEdge() } catch (e: Throwable) { try { StartupTracer.log(this, "enableEdgeToEdge failed", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
         super.onCreate(savedInstanceState)
+        try { StartupTracer.log(this, "MainActivity super.onCreate done") } catch (_: Exception) {}
 
-        registerAppKit()
-        handleDeepLink(intent)
-        maybeShowCrashDialog()
+        try { registerAppKit() } catch (e: Throwable) { try { StartupTracer.log(this, "registerAppKit Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
+        try { handleDeepLink(intent) } catch (e: Throwable) { try { StartupTracer.log(this, "handleDeepLink Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
+        try { maybeShowCrashDialog() } catch (e: Throwable) { try { StartupTracer.log(this, "maybeShowCrashDialog Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
 
+        try { StartupTracer.log(this, "MainActivity before setContent") } catch (_: Exception) {}
         setContent {
             HavenTheme {
                 val navController = rememberNavController()
-                HavenApp(
-                    navController = navController,
-                    isDebugBuild = BuildConfig.DEBUG,
-                )
+                androidx.compose.foundation.layout.Box(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
+                    // Error boundary: show startup trace instead of blank logo if HavenApp throws
+                    val startupTrace = try { StartupTracer.read(this@MainActivity) } catch (_: Exception) { null }
+                    try {
+                        HavenApp(
+                            navController = navController,
+                            isDebugBuild = BuildConfig.DEBUG,
+                        )
+                    } catch (e: Throwable) {
+                        val msg = "HavenApp compose failed:\n${e.stackTraceToString().take(4000)}\n\nStartup:\n${startupTrace?.take(4000) ?: "no trace"}"
+                        try { StartupTracer.log(this@MainActivity, "HavenApp compose Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+                        androidx.compose.material3.Text(
+                            text = msg,
+                            modifier = androidx.compose.ui.Modifier.padding(androidx.compose.ui.unit.dp(16)),
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             }
         }
+        try { StartupTracer.log(this, "MainActivity.onCreate end") } catch (_: Exception) {}
     }
 
     /**
@@ -48,8 +66,9 @@ class MainActivity : ComponentActivity() {
     private fun registerAppKit() {
         try {
             AppKit.register(this)
-        } catch (e: Exception) {
-            Timber.w(e, "AppKit.register skipped — wallet connect unavailable until configured")
+        } catch (e: Throwable) {
+            try { StartupTracer.log(this, "AppKit.register Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+            Timber.w(e as? Exception ?: Exception(e.message, e), "AppKit.register skipped — wallet connect unavailable until configured")
         }
     }
 
@@ -72,8 +91,9 @@ class MainActivity : ComponentActivity() {
                     ).show()
                 }
             }
-        } catch (e: Exception) {
-            Timber.w(e, "Deep link ignored — AppKit not initialised")
+        } catch (e: Throwable) {
+            try { StartupTracer.log(this, "handleDeepLink Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+            Timber.w(e as? Exception ?: Exception(e.message, e), "Deep link ignored — AppKit not initialised")
         }
     }
 
@@ -95,16 +115,18 @@ class MainActivity : ComponentActivity() {
                 }
                 .setNegativeButton("Dismiss", null)
                 .show()
-        } catch (e: Exception) {
-            Timber.w(e, "Crash dialog skipped")
+        } catch (e: Throwable) {
+            try { StartupTracer.log(this, "maybeShowCrashDialog Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+            Timber.w(e as? Exception ?: Exception(e.message, e), "Crash dialog skipped")
         }
     }
 
     override fun onDestroy() {
         try {
             AppKit.unregister()
-        } catch (e: Exception) {
-            Timber.v(e, "AppKit.unregister skipped")
+        } catch (e: Throwable) {
+            try { StartupTracer.log(this, "AppKit.unregister Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
+            Timber.v(e as? Exception ?: Exception(e.message, e), "AppKit.unregister skipped")
         }
         super.onDestroy()
     }
