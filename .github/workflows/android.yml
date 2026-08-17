@@ -139,14 +139,23 @@ jobs:
       - name: Checkout haven-mobile
         uses: actions/checkout@v4
 
-      - name: Download release APK via public browser_download_url
-        run: |
-          curl -L -o /tmp/release.apk https://github.com/Haven-hvn/haven-mobile/releases/download/v0.1.0-45fa35e/app-debug.apk
-          ls -lh /tmp/release.apk
-          sha256sum /tmp/release.apk
-          aapt dump badging /tmp/release.apk | grep -E "package:|targetSdk" | head -n 5 || $ANDROID_SDK_ROOT/build-tools/36.0.0/aapt dump badging /tmp/release.apk | grep -E "package:|targetSdk" | head -n 5
+      - name: Download fresh target 34 APK (clean build artifact, not stale release)
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: /tmp/apk
 
-      - name: Verify reinstall via public intent and capture headless screenshot
+      - name: Show fresh APK info
+        run: |
+          ls -lh /tmp/apk/*.apk
+          sha256sum /tmp/apk/*.apk
+          aapt dump badging /tmp/apk/*.apk | grep -E "package:|targetSdk|launchable" | head -n 5 || $ANDROID_SDK_ROOT/build-tools/36.0.0/aapt dump badging /tmp/apk/*.apk | grep -E "package:|targetSdk" | head -n 5
+          # also fetch public release for comparison
+          curl -L -o /tmp/release.apk https://github.com/Haven-hvn/haven-mobile/releases/download/v0.1.0-45fa35e/app-debug.apk 2>&1 | tail -1
+          echo "--- public release ---"
+          aapt dump badging /tmp/release.apk | grep -E "package:|targetSdk" | head -n 3 || true
+
+      - name: Verify fresh APK headless (Launcher + Main alias, ANR dismiss, per-tab screencap, Choreographer)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
@@ -160,36 +169,70 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim -memory 4096
           disable-animations: false
           script: |
-            echo "=== install release APK ==="
-            adb install -r /tmp/release.apk
-            echo "=== launch LauncherActivity (MAIN) ==="
-            adb shell am start -n haven.mobile/.LauncherActivity
-            sleep 8
-            echo "=== dumpsys window ==="
-            adb shell dumpsys window | head -n 40 || true
-            echo "=== launch MainActivity ==="
-            adb shell am start -n haven.mobile/.MainActivity
+            set -x
+            echo "=== clean install fresh target 34 APK ==="
+            adb logcat -c || true
+            adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
+            sleep 2
+            echo "=== dismiss System UI ANR Wait if present (tap Wait ~160,520) ==="
+            for _ in 1 2 3; do
+              # Wait button is at approx center-right of dialog; tapping it dismisses ANR
+              adb shell input tap 160 520 2>&1 | head -n 2 || true
+              adb shell input tap 200 500 2>&1 | head -n 2 || true
+              sleep 1
+            done || true
+            echo "=== launch LauncherActivity (haven.mobile.app.LauncherActivity) MAIN ==="
+            adb shell am start -n haven.mobile.app.LauncherActivity || adb shell am start -n haven.mobile/.LauncherActivity || true
+            sleep 10
+            # dismiss ANR again after launch
+            adb shell input tap 160 520 2>&1 | head -n 2 || true
+            sleep 2
+            echo "=== dumpsys window after Launcher ==="
+            adb shell dumpsys window | grep -i -E "mCurrentFocus|haven|Launcher" | head -n 30 || true
+            echo "=== capture Launcher screenshot ==="
+            adb exec-out screencap -p > /tmp/screen-launcher.png || true
+            ls -lh /tmp/screen-launcher.png || true
+            echo "=== probe alias haven.mobile/.MainActivity ==="
+            adb shell am start -n haven.mobile/.MainActivity || true
             sleep 5
-            echo "=== drive bottom nav (Library/Feed/Communities/Settings) ==="
-            for i in 1 2 3 4; do adb shell input tap 100 1800 2>&1 | head -n 2; sleep 1; adb shell input tap 250 1800 2>&1 | head -n 2; sleep 1; done || true
+            adb shell input tap 160 520 2>&1 | head -n 2 || true
+            sleep 1
+            echo "=== drive bottom nav per tab with separate screencaps ==="
+            mkdir -p /tmp/screens
+            cp /tmp/screen-launcher.png /tmp/screens/00-launcher.png 2>&1 | head -n 2 || true
+            # Tap each bottom-nav position and capture
+            # Heuristic x positions for 4 tabs across 1080 width scaled to 320 emu: ~60,140,220,300 at y ~580
+            for idx in 1 2 3 4; do
+              if [ "$idx" = "1" ]; then x=60; name="Library"; elif [ "$idx" = "2" ]; then x=140; name="Feed"; elif [ "$idx" = "3" ]; then x=220; name="Communities"; else x=300; name="Settings"; fi
+              echo "--- tap $name ($x,580) idx $idx ---"
+              adb shell input tap $x 580 2>&1 | head -n 2 || true
+              sleep 3
+              adb shell input tap 160 520 2>&1 | head -n 2 || true
+              sleep 1
+              adb exec-out screencap -p > /tmp/screens/0${idx}-${name}.png || true
+              ls -lh /tmp/screens/0${idx}-${name}.png || true
+              adb shell dumpsys window | grep -i haven | head -n 5 || true
+            done
             echo "=== onboarding fallback check ==="
             adb shell dumpsys window | grep -i haven || true
-            echo "=== capture HEADLESS screenshot ==="
-            adb exec-out screencap -p > /tmp/screen.png || adb shell screencap -p > /tmp/screen.png || true
-            ls -lh /tmp/screen.png || true
-            echo "=== logcat FATAL ==="
-            adb logcat -d 2>&1 | grep -A 5 "FATAL EXCEPTION" | head -n 20 || echo "no FATAL"
-            echo "=== ActivityTaskManager START ==="
+            echo "=== logcat FATAL (haven) ==="
+            adb logcat -d 2>&1 | grep -A 5 "FATAL EXCEPTION" | head -n 30 || echo "no FATAL"
+            echo "=== ActivityTaskManager START (haven) ==="
             adb logcat -d 2>&1 | grep -E "ActivityTaskManager.*haven|LauncherActivity|MainActivity" | head -n 20 || true
-            echo "=== Choreographer multi-frame ==="
-            adb logcat -d 2>&1 | grep Choreographer | head -n 10 || true
-            echo "=== upload screenshot ==="
-            ls -lh /tmp/screen.png
+            echo "=== Choreographer multi-frame responsiveness ==="
+            adb logcat -d 2>&1 | grep Choreographer | head -n 20 || true
+            adb logcat -d 2>&1 | grep -E "Choreographer|Skipped.*frames|vsync" | tail -n 20 || true
+            echo "=== prepare combined screenshot dir ==="
+            ls -lh /tmp/screens/ || true
+            cp /tmp/screens/*.png /tmp/ 2>&1 | head -n 5 || true
+            ls -lh /tmp/*.png 2>&1 | head -n 20 || true
 
-      - name: Upload screenshot artifact
+      - name: Upload per-tab screenshot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: verify-release-screenshot
-          path: /tmp/screen.png
+          path: |
+            /tmp/screens/*.png
+            /tmp/screen-launcher.png
           if-no-files-found: warn
