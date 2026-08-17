@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.reown.appkit.ui.appKitGraph
 import haven.mobile.feature.collections.collectionsRoute
 import haven.mobile.feature.community.communityRoute
 import haven.mobile.feature.library.libraryRoute
@@ -43,12 +44,6 @@ fun AppNavGraph(
         )
         composable(AppRoute.Debug.route()) { DebugRoute() }
 
-        // Reown modal disabled: appKitGraph requires a BottomSheetNavigator which
-        // crashes with 'Could not find Navigator with name bottomSheet' on
-        // plain rememberNavController() (seen in verify 31993732753). Wallet
-        // connect still works via HavenApplication/AppKit.register(); the
-        // modal sheet will be re-added with ModalBottomSheetLayout +
-        // rememberNavController(bottomSheetNavigator) in a follow-up.
-        // appKitGraph(navController) // disabled
+        appKitGraph(navController)
     }
 }

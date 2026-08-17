@@ -49,14 +49,19 @@ fun HavenApp(
             }
         },
     ) { innerPadding ->
-        // One Scaffold for the whole app (the Now-in-Android pattern). Screens draw their own
-        // top bar inside this area rather than nesting a second Scaffold — `consumeWindowInsets`
-        // is what stops those top bars from adding the status-bar inset a second time.
+        // When bottomBar is hidden (onboarding/watch) don't reserve its height — otherwise
+        // Scaffold still emits a bottom inset that shows as a white strip.
+        val contentPadding = if (showNavigationBar) innerPadding else androidx.compose.foundation.layout.PaddingValues(
+            top = innerPadding.calculateTopPadding(),
+            start = innerPadding.calculateStartPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+            end = innerPadding.calculateEndPadding(androidx.compose.ui.unit.LayoutDirection.Ltr),
+            bottom = 0.dp
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
+                .padding(contentPadding)
+                .consumeWindowInsets(contentPadding),
         ) {
             AppNavGraph(
                 navController = navController,

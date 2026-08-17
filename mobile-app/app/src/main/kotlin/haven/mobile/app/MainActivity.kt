@@ -7,7 +7,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.navigation.compose.rememberNavController
+import com.google.accompanist.navigation.material.BottomSheetNavigator
+import com.google.accompanist.navigation.material.ModalBottomSheetLayout
+import com.google.accompanist.navigation.material.rememberBottomSheetNavigator
 import com.reown.appkit.client.AppKit
 import dagger.hilt.android.AndroidEntryPoint
 import haven.mobile.app.ui.theme.HavenTheme
@@ -43,11 +47,18 @@ class MainActivity : ComponentActivity() {
         try {
             setContent {
                 HavenTheme {
-                    val navController = rememberNavController()
-                    HavenApp(
-                        navController = navController,
-                        isDebugBuild = BuildConfig.DEBUG,
-                    )
+                    @OptIn(ExperimentalMaterialApi::class)
+                    val bottomSheetNavigator = rememberBottomSheetNavigator()
+                    val navController = rememberNavController(bottomSheetNavigator)
+                    ModalBottomSheetLayout(
+                        bottomSheetNavigator = bottomSheetNavigator,
+                        sheetBackgroundColor = androidx.compose.material.MaterialTheme.colors.surface,
+                    ) {
+                        HavenApp(
+                            navController = navController,
+                            isDebugBuild = BuildConfig.DEBUG,
+                        )
+                    }
                 }
             }
         } catch (e: Throwable) {
