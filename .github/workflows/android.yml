@@ -221,3 +221,49 @@ jobs:
             /tmp/screens/*.png
             /tmp/screen-launcher.png
           if-no-files-found: warn
+
+  firebase-test-lab:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always() && needs.build.result == 'success'
+    steps:
+      - name: Checkout haven-mobile
+        uses: actions/checkout@v4
+        with:
+          path: haven-mobile
+
+      - name: Download fresh APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: /tmp/apk
+
+      - name: Auth to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set GCP project
+        run: gcloud config set project test2026-e3159
+
+      - name: Run Robo test on ARM (panther, API 34)
+        run: |
+          set -x
+          ls -lh /tmp/apk/*.apk
+          aapt dump badging /tmp/apk/*.apk | grep -E "package:|targetSdk" | head -n 3 || true
+          gcloud firebase test android run \
+            --type=robo \
+            --app /tmp/apk/app-debug.apk \
+            --device model=panther,version=34,locale=en,orientation=portrait \
+            --timeout 10m \
+            --results-dir haven-${{ github.run_id }} \
+            || echo "Firebase Test Lab run finished with status $?"
+          echo "View results: https://console.firebase.google.com/project/test2026-e3159/testlab/histories"
+
+      - name: Show gcloud results
+        if: always()
+        run: gcloud firebase test android matrices list --limit 5 || true
