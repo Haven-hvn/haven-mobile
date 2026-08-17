@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+@OptIn(ExperimentalMaterialApi::class)
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -47,7 +48,6 @@ class MainActivity : ComponentActivity() {
         try {
             setContent {
                 HavenTheme {
-                    @OptIn(ExperimentalMaterialApi::class)
                     val bottomSheetNavigator = rememberBottomSheetNavigator()
                     val navController = rememberNavController(bottomSheetNavigator)
                     ModalBottomSheetLayout(
