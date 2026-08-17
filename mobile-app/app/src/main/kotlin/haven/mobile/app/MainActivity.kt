@@ -14,6 +14,10 @@ import haven.mobile.app.ui.theme.HavenTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -34,23 +38,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             HavenTheme {
                 val navController = rememberNavController()
-                androidx.compose.foundation.layout.Box(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
-                    // Error boundary: show startup trace instead of blank logo if HavenApp throws
-                    val startupTrace = try { StartupTracer.read(this@MainActivity) } catch (_: Exception) { null }
-                    try {
-                        HavenApp(
-                            navController = navController,
-                            isDebugBuild = BuildConfig.DEBUG,
-                        )
-                    } catch (e: Throwable) {
-                        val msg = "HavenApp compose failed:\n${e.stackTraceToString().take(4000)}\n\nStartup:\n${startupTrace?.take(4000) ?: "no trace"}"
-                        try { StartupTracer.log(this@MainActivity, "HavenApp compose Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {}
-                        androidx.compose.material3.Text(
-                            text = msg,
-                            modifier = androidx.compose.ui.Modifier.padding(androidx.compose.ui.unit.dp(16)),
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall
-                        )
-                    }
+                androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+                    HavenApp(
+                        navController = navController,
+                        isDebugBuild = BuildConfig.DEBUG,
+                    )
                 }
             }
         }
