@@ -35,16 +35,41 @@ class MainActivity : ComponentActivity() {
         try { maybeShowCrashDialog() } catch (e: Throwable) { try { StartupTracer.log(this, "maybeShowCrashDialog Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
 
         try { StartupTracer.log(this, "MainActivity before setContent") } catch (_: Exception) {}
-        setContent {
-            HavenTheme {
-                val navController = rememberNavController()
-                androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
-                    HavenApp(
-                        navController = navController,
-                        isDebugBuild = BuildConfig.DEBUG,
-                    )
+        // Pixel Tablet fix: never let a Compose/Hilt crash become a blank "keeps stopping" — show the trace text
+        val startupFallback = try { StartupTracer.read(this)?.take(6000) } catch (_: Exception) { null }
+        try {
+            setContent {
+                HavenTheme {
+                    val navController = rememberNavController()
+                    // Error boundary: if HavenApp/NavGraph/Hilt crashes, show selectable trace instead of dying
+                    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+                        try {
+                            HavenApp(
+                                navController = navController,
+                                isDebugBuild = BuildConfig.DEBUG,
+                            )
+                        } catch (e: Throwable) {
+                            try { StartupTracer.log(this@MainActivity, "HavenApp Throwable", e.stackTraceToString().take(800)) } catch (_: Exception) {}
+                            val msg = "Haven startup failed:\n${e.stackTraceToString().take(8000)}\n\n--- Startup ---\n${startupFallback ?: "no trace"}"
+                            androidx.compose.material3.Text(
+                                text = msg,
+                                modifier = Modifier.padding(16.dp),
+                                style = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 10.sp)
+                            )
+                        }
+                    }
                 }
             }
+        } catch (e: Throwable) {
+            try { StartupTracer.log(this, "setContent Throwable", e.stackTraceToString().take(800)) } catch (_: Exception) {}
+            // Last resort: plain View so user can Share the log even if Compose is broken
+            val crashText = "setContent failed:\n${e.stackTraceToString().take(8000)}\n\nStartup:\n${startupFallback ?: "no trace"}"
+            try {
+                val f = getExternalFilesDir(null)?.resolve("haven_crash.log") ?: filesDir.resolve("haven_crash.log")
+                f.writeText(crashText)
+            } catch (_: Exception) {}
+            val tv = android.widget.TextView(this).apply { text = crashText; setTextIsSelectable(true); setPadding(32,32,32,32) }
+            setContentView(tv)
         }
         try { StartupTracer.log(this, "MainActivity.onCreate end") } catch (_: Exception) {}
     }
