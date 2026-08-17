@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -35,29 +36,18 @@ class MainActivity : ComponentActivity() {
         try { maybeShowCrashDialog() } catch (e: Throwable) { try { StartupTracer.log(this, "maybeShowCrashDialog Throwable", e.stackTraceToString().take(600)) } catch (_: Exception) {} }
 
         try { StartupTracer.log(this, "MainActivity before setContent") } catch (_: Exception) {}
-        // Pixel Tablet fix: never let a Compose/Hilt crash become a blank "keeps stopping" — show the trace text
+        // Pixel Tablet fix: rely on EarlyCrashHandler + LauncherActivity CrashActivity for
+        // compose crashes (try/catch around @Composable calls is not supported by the compiler).
+        // setContent outer catch shows a plain TextView if Compose itself fails to inflate.
         val startupFallback = try { StartupTracer.read(this)?.take(6000) } catch (_: Exception) { null }
         try {
             setContent {
                 HavenTheme {
                     val navController = rememberNavController()
-                    // Error boundary: if HavenApp/NavGraph/Hilt crashes, show selectable trace instead of dying
-                    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
-                        try {
-                            HavenApp(
-                                navController = navController,
-                                isDebugBuild = BuildConfig.DEBUG,
-                            )
-                        } catch (e: Throwable) {
-                            try { StartupTracer.log(this@MainActivity, "HavenApp Throwable", e.stackTraceToString().take(800)) } catch (_: Exception) {}
-                            val msg = "Haven startup failed:\n${e.stackTraceToString().take(8000)}\n\n--- Startup ---\n${startupFallback ?: "no trace"}"
-                            androidx.compose.material3.Text(
-                                text = msg,
-                                modifier = Modifier.padding(16.dp),
-                                style = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 10.sp)
-                            )
-                        }
-                    }
+                    HavenApp(
+                        navController = navController,
+                        isDebugBuild = BuildConfig.DEBUG,
+                    )
                 }
             }
         } catch (e: Throwable) {
