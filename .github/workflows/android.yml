@@ -114,7 +114,7 @@ jobs:
             adb logcat > /tmp/logcat.txt &
             LOGPID=$!
             echo "Starting MainActivity..."
-            adb shell am start -n haven.mobile/.MainActivity || true
+            adb shell am start -n haven.mobile/haven.mobile.app.MainActivity || true
             sleep 12
             echo "=== adb devices ==="; adb devices || true
             echo "=== dumpsys package haven.mobile ==="; adb shell dumpsys package haven.mobile | head -n 80 || true
@@ -177,7 +177,7 @@ jobs:
             echo "=== dismiss System UI ANR Wait if present (tap Wait ~160,520) ==="
             for i in 1 2 3; do adb shell input tap 160 520 2>&1 | head -n 2 || true; adb shell input tap 200 500 2>&1 | head -n 2 || true; sleep 1; done || true
             echo "=== launch LauncherActivity (haven.mobile.app.LauncherActivity) MAIN ==="
-            adb shell am start -n haven.mobile.app.LauncherActivity || adb shell am start -n haven.mobile/.LauncherActivity || true
+            adb shell am start -n haven.mobile/haven.mobile.app.LauncherActivity || adb shell am start -n haven.mobile/haven.mobile.app.LauncherActivity || true
             sleep 10
             # dismiss ANR again after launch
             adb shell input tap 160 520 2>&1 | head -n 2 || true
@@ -188,7 +188,7 @@ jobs:
             adb exec-out screencap -p > /tmp/screen-launcher.png || true
             ls -lh /tmp/screen-launcher.png || true
             echo "=== probe alias haven.mobile/.MainActivity ==="
-            adb shell am start -n haven.mobile/.MainActivity || true
+            adb shell am start -n haven.mobile/haven.mobile.app.MainActivity || true
             sleep 5
             adb shell input tap 160 520 2>&1 | head -n 2 || true
             sleep 1
@@ -197,17 +197,7 @@ jobs:
             cp /tmp/screen-launcher.png /tmp/screens/00-launcher.png 2>&1 | head -n 2 || true
             # Tap each bottom-nav position and capture
             # Heuristic x positions for 4 tabs across 1080 width scaled to 320 emu: ~60,140,220,300 at y ~580
-            for idx in 1 2 3 4; do
-              if [ "$idx" = "1" ]; then x=60; name="Library"; elif [ "$idx" = "2" ]; then x=140; name="Feed"; elif [ "$idx" = "3" ]; then x=220; name="Communities"; else x=300; name="Settings"; fi
-              echo "--- tap $name ($x,580) idx $idx ---"
-              adb shell input tap $x 580 2>&1 | head -n 2 || true
-              sleep 3
-              adb shell input tap 160 520 2>&1 | head -n 2 || true
-              sleep 1
-              adb exec-out screencap -p > /tmp/screens/0${idx}-${name}.png || true
-              ls -lh /tmp/screens/0${idx}-${name}.png || true
-              adb shell dumpsys window | grep -i haven | head -n 5 || true
-            done
+            for idx in 1 2 3 4; do if [ "$idx" = "1" ]; then x=60; name="Library"; elif [ "$idx" = "2" ]; then x=140; name="Feed"; elif [ "$idx" = "3" ]; then x=220; name="Communities"; else x=300; name="Settings"; fi; echo "--- tap $name ($x,580) idx $idx ---"; adb shell input tap $x 580 2>&1 | head -n 2 || true; sleep 3; adb shell input tap 160 520 2>&1 | head -n 2 || true; sleep 1; adb exec-out screencap -p > /tmp/screens/0${idx}-${name}.png || true; ls -lh /tmp/screens/0${idx}-${name}.png || true; adb shell dumpsys window | grep -i haven | head -n 5 || true; done
             echo "=== onboarding fallback check ==="
             adb shell dumpsys window | grep -i haven || true
             echo "=== logcat FATAL (haven) ==="
