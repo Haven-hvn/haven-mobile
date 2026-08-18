@@ -36,11 +36,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import com.reown.appkit.ui.components.button.ConnectButton
-import com.reown.appkit.ui.components.button.ConnectButtonSize
-import com.reown.appkit.ui.components.button.rememberAppKitState
 import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
 import haven.mobile.core.design.component.Explain
@@ -77,7 +76,6 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val appKitState = if (viewModel.isWalletConfigured) rememberAppKitState(navController = navController) else null
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) onNavigate()
@@ -230,17 +228,7 @@ fun OnboardingScreen(
         }
 
         if (uiState !is OnboardingUiState.Connected) {
-            if (appKitState != null) {
-                // Reown owns this control: it enumerates installed wallets, handles the QR fallback
-                // and the deep-link hand-off. A bespoke button means reimplementing all three.
-                ConnectButton(state = appKitState, buttonSize = ConnectButtonSize.NORMAL)
-                Spacer(Modifier.height(HavenSpacing.md))
-                Text(
-                    text = "MetaMask, Rainbow, Trust, or any WalletConnect v2 wallet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
+            if (!viewModel.isWalletConfigured) {
                 Spacer(Modifier.height(HavenSpacing.md))
                 Box(
                     modifier = Modifier
@@ -254,6 +242,29 @@ fun OnboardingScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            } else {
+                Button(
+                    onClick = { viewModel.connect() },
+                    enabled = uiState !is OnboardingUiState.Connecting,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                ) {
+                    Text(
+                        text = if (uiState is OnboardingUiState.Connecting) "Connecting…" else "Connect wallet",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                Spacer(Modifier.height(HavenSpacing.md))
+                Text(
+                    text = "MetaMask, Rainbow, Trust, or any WalletConnect v2 wallet. No gas, no transaction — just a signature.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 

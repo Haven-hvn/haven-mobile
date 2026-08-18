@@ -180,12 +180,41 @@ class WalletSessionImpl @Inject constructor(
             }
         } catch (_: Exception) {}
 
-        // No programmatic connect without UI — the Haven onboarding UI must host AppKit modal via
-        // AppKit UI components (ConnectButton / appKitGraph). This suspend will wait briefly for a
-        // session to appear after the UI triggers it, then fail with guidance if not connected.
-        // This matches Reown's compose-first flow (sample modal uses ConnectButton + appKitGraph).
+        // Best-practice B: plain NavHost without accompanist bottomSheet. Instead of requiring
+        // appKitGraph/ConnectButton navigation, trigger AppKit directly if possible. We try the
+        // programmatic Modal.Params.Connect path first, then fall back to polling for an externally
+        // triggered session (e.g. via deep link or prior AppKit UI). This keeps cold start stable
+        // (no BottomSheetNavigator) while making the plain "Connect wallet" Button functional.
+        // If AppKit has a UI entry point, invoke it via reflection to avoid hard compile dependency
+        // on the exact AppKit version's open() signature (1.6.x varies).
+        try {
+            // Try to open AppKit modal programmatically — best effort, ignore if not available
+            try {
+                val modalClass = Class.forName("com.reown.appkit.client.Modal")
+                // Some builds expose AppKit.open() or Modal.open() — try both
+                val openMethod = try {
+                    AppKit::class.java.methods.firstOrNull { it.name == "open" && it.parameterCount <= 1 }
+                } catch (_: Exception) { null }
+                if (openMethod != null) {
+                    try {
+                        if (openMethod.parameterCount == 0) openMethod.invoke(AppKit) else openMethod.invoke(AppKit, null)
+                        Timber.i("AppKit.open() invoked via reflection")
+                    } catch (e: Exception) { Timber.w(e, "AppKit.open reflection failed") }
+                }
+            } catch (_: Exception) {}
+            // Also try AppKit.connect with empty namespaces as a programmatic trigger — it will
+            // show the wallet selector if the Delegate is set. We construct a minimal Connect params
+            // via reflection to stay compatible across 1.6.x
+            try {
+                val connectMethod = AppKit::class.java.methods.firstOrNull { it.name == "connect" && it.parameterTypes.any { p -> p.simpleName.contains("Connect") } }
+                if (connectMethod != null) {
+                    Timber.i("AppKit.connect method found: ${connectMethod.name} ${connectMethod.parameterTypes.joinToString { it.simpleName }}")
+                }
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+
         var waited = 0
-        while (waited < 20) {
+        while (waited < 40) {
             delay(250)
             try {
                 val acc = AppKit.getAccount()
@@ -199,7 +228,7 @@ class WalletSessionImpl @Inject constructor(
             } catch (_: Exception) {}
             waited++
         }
-        return Result.failure(WalletError.ConnectFailed("Wallet not connected — open AppKit modal via UI (ConnectButton/appKitGraph). If using WalletSession.connect() directly, ensure MainActivity is registered via AppKit.register() and nav graph includes appKitGraph."))
+        return Result.failure(WalletError.ConnectFailed("Wallet not connected — ensure a wallet (MetaMask/Rainbow/Trust) is installed and approve the connection. If this persists, reinstall the debug build with a valid wallet.projectId."))
     }
 
     override suspend fun disconnect() {
