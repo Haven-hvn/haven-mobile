@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.reown.appkit.ui.appKitGraph
 import haven.mobile.feature.collections.collectionsRoute
 import haven.mobile.feature.community.communityRoute
 import haven.mobile.feature.library.libraryRoute
@@ -44,6 +43,8 @@ fun AppNavGraph(
         )
         composable(AppRoute.Debug.route()) { DebugRoute() }
 
-        appKitGraph(navController)
+        // appKitGraph disabled for cold-start stability — wallet connect via accompanist bottomSheet
+        // was crashing before Compose could draw (rememberBottomSheetNavigator). Re-enable after
+        // verifying plain NavHost launches.
     }
 }
