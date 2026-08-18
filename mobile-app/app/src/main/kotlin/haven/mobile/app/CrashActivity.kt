@@ -55,13 +55,40 @@ class CrashActivity : AppCompatActivity() {
         }
         val dismiss = Button(this).apply {
             text = "Close"
-            setOnClickListener { finishAffinity() }
+            setOnClickListener {
+                try {
+                    getExternalFilesDir(null)?.resolve("haven_crash.log")?.delete()
+                    filesDir.resolve("haven_crash.log").delete()
+                    StartupTracer.clear(this@CrashActivity)
+                } catch (_: Exception) {}
+                val intent = Intent(this@CrashActivity, LauncherActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                startActivity(intent)
+                finishAffinity()
+            }
+        }
+        val clear = Button(this).apply {
+            text = "Clear & retry"
+            setOnClickListener {
+                try {
+                    getExternalFilesDir(null)?.resolve("haven_crash.log")?.delete()
+                    filesDir.resolve("haven_crash.log").delete()
+                    StartupTracer.clear(this@CrashActivity)
+                } catch (_: Exception) {}
+                val intent = Intent(this@CrashActivity, LauncherActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                startActivity(intent)
+                finishAffinity()
+            }
         }
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(32, 16, 32, 32)
             addView(share)
+            addView(clear)
             addView(dismiss)
         }
         val root = LinearLayout(this).apply {

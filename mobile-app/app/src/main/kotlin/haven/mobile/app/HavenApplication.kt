@@ -22,27 +22,6 @@ class HavenApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         try { StartupTracer.log(this, "Application.onCreate start") } catch (_: Exception) {}
-        // If previous launch crashed, show the crash immediately and skip risky init to break the crash loop
-        try {
-            val crashFile = getExternalFilesDir(null)?.resolve("haven_crash.log")?.takeIf { it.exists() }
-                ?: filesDir.resolve("haven_crash.log").takeIf { it.exists() }
-            if (crashFile != null && crashFile.length() > 0) {
-                val ageMs = System.currentTimeMillis() - crashFile.lastModified()
-                if (ageMs < 5 * 60 * 1000) {
-                    try {
-                        val text = crashFile.readText().take(12000)
-                        try { StartupTracer.log(this, "Application.onCreate showing CrashActivity from previous crash", text.take(400)) } catch (_: Exception) {}
-                        val intent = android.content.Intent(this, CrashActivity::class.java).apply {
-                            putExtra(CrashActivity.EXTRA_CRASH, text)
-                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                        }
-                        startActivity(intent)
-                        // Don't re-init Reown until user dismisses crash screen
-                        return
-                    } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
         try { EarlyCrashHandler.install(this) } catch (_: Exception) {}
         // Wrap init so a Reown failure never kills the app before MainActivity can show onboarding
         try { StartupTracer.log(this, "Application before initReown") } catch (_: Exception) {}
