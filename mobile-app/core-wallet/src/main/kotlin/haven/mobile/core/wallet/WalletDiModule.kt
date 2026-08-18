@@ -27,17 +27,12 @@ object WalletDataStoreModule {
     @Provides
     @Singleton
     fun provideWalletConfig(): WalletConfig {
-        val fromCore = try { haven.mobile.core.wallet.BuildConfig.WALLET_PROJECT_ID } catch (_: Exception) { "" }
-        val fromApp = try { Class.forName("haven.mobile.app.BuildConfig").getField("WALLET_PROJECT_ID").get(null) as? String ?: "" } catch (_: Exception) { "" }
-        // Hard fallback to the Haven Cloud projectId so debug builds never show "Wallet connections aren't available"
-        // (app/build.gradle.kts also sets this from local.properties wallet.projectId, but core-wallet's BuildConfig is separate)
-        val pid = when {
-            fromCore.isNotBlank() && !fromCore.startsWith("dummy-") -> fromCore
-            fromApp.isNotBlank() && !fromApp.startsWith("dummy-") -> fromApp
-            else -> "02760a75be7577c92e7d39f1de04db31"
-        }
+        // Hardcode Haven Cloud projectId for now — ensures v0.1.5 never shows
+        // "Wallet connections aren't available" regardless of BuildConfig reflection.
+        // app/build.gradle.kts still sets BuildConfig.WALLET_PROJECT_ID from local.properties,
+        // but we don't rely on it at runtime.
         return WalletConfig(
-            projectId = pid,
+            projectId = "02760a75be7577c92e7d39f1de04db31",
             appName = "Haven",
             appDescription = "Haven — gated media",
             appIconUrl = "",
