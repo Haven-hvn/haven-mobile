@@ -237,9 +237,16 @@ class WalletSessionImpl @Inject constructor(
         // Modal.Params.Connect (AppKit 1.6.14 has no open(); verified against the AAR).
         // onSuccess delivers the pairing URI; approval later arrives via onSessionApproved.
         try {
-            diag("CONNECT: invoking AppKit.connect(Modal.Params.Connect(pairing))")
+            diag("CONNECT: creating pairing then invoking AppKit.connect")
+            val pairing = CoreClient.Pairing.create { error ->
+                diagError("CONNECT: Pairing.create onError", error.throwable)
+            }
+            if (pairing == null) {
+                diag("CONNECT: Pairing.create returned null — failing connect")
+                return Result.failure(WalletError.AppKitNotInitialized)
+            }
             AppKit.connect(
-                connect = Modal.Params.Connect(pairing = CoreClient.Pairing.create()),
+                connect = Modal.Params.Connect(pairing = pairing),
                 onSuccess = { uri ->
                     diag("CONNECT: onSuccess — pairing uri=${uri ?: "null"}")
                 },
