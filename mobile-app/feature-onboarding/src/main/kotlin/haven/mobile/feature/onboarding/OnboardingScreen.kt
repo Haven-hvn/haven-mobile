@@ -76,6 +76,7 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val diagnostics by viewModel.diagnostics.collectAsState()
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) onNavigate()
@@ -265,6 +266,32 @@ fun OnboardingScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+
+        if (uiState !is OnboardingUiState.Connected && diagnostics.isNotEmpty()) {
+            Spacer(Modifier.height(HavenSpacing.lg))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape = MaterialTheme.shapes.medium)
+                    .padding(HavenSpacing.md),
+            ) {
+                Column {
+                    Text(
+                        text = "Wallet diagnostics",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(HavenSpacing.xs))
+                    diagnostics.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                            color = if (line.startsWith("✗")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
 

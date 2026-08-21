@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -39,22 +40,40 @@ class WalletSessionImpl @Inject constructor(
     private val _address = MutableStateFlow<String?>(null)
     override val address: StateFlow<String?> = _address.asStateFlow()
 
+    private val _diagnostics = MutableStateFlow<List<String>>(emptyList())
+    override val diagnostics: StateFlow<List<String>> = _diagnostics.asStateFlow()
+
+    private fun diag(line: String) {
+        Timber.i("[WS] %s", line)
+        _diagnostics.update { (it + line).takeLast(14) }
+    }
+
+    private fun diagError(stage: String, e: Throwable) {
+        Timber.e(e, "[WS] %s", stage)
+        _diagnostics.update { (it + "✗ $stage — ${e.javaClass.simpleName}: ${e.message ?: "no message"}").takeLast(14) }
+    }
+
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private var isInitialized = false
 
     init {
+        diag("init: projectId=${mask(config.projectId)} redirect=${config.redirectUrl}")
         initializeReownIfNeeded()
         restoreSession()
         observeReownDelegate()
     }
 
+    private fun mask(value: String): String =
+        if (value.length <= 8) "(blank/short)" else value.take(6) + "…" + value.takeLast(2)
+
     private fun initializeReownIfNeeded() {
         if (config.projectId.isBlank()) {
-            Timber.w("WalletConfig projectId blank — Reown not initialized, wallet connect will fail until local.properties wallet.projectId is set")
+            Timber.w("[WS][INIT] projectId blank — Reown not initialized, wallet connect will fail until local.properties wallet.projectId is set")
             return
         }
         if (isInitialized) return
+        diag("INIT: starting CoreClient+AppKit initialization")
         try {
             val appMetaData = Core.Model.AppMetaData(
                 name = config.appName.ifBlank { "Haven" },
@@ -71,19 +90,21 @@ class WalletSessionImpl @Inject constructor(
                 application = context.applicationContext as android.app.Application,
                 metaData = appMetaData
             ) { error ->
-                Timber.e(error.throwable, "CoreClient initialize error")
+                diagError("INIT: CoreClient initialize error", error.throwable)
             }
+            diag("INIT: CoreClient.initialize returned, calling AppKit.initialize")
             AppKit.initialize(
                 init = Modal.Params.Init(core = CoreClient),
                 onSuccess = {
                     isInitialized = true
-                    Timber.i("AppKit initialized")
+                    diag("INIT: AppKit initialized OK (async onSuccess)")
                 },
                 onError = { error ->
-                    Timber.e(error.throwable, "AppKit initialize error")
+                    diagError("INIT: AppKit initialize error", error.throwable)
                 }
             )
             AppKit.setChains(AppKitChainsPresets.ethChains.values.toList())
+            diag("INIT: setChains applied (${AppKitChainsPresets.ethChains.values.size} chains); isInitialized=true")
             // Optional SIWE auth params for Haven — use ethChains ids
             // Haven signs GateRequest via eth_signTypedData_v4, not SIWE, so no auth payload needed.
             isInitialized = true
@@ -91,8 +112,9 @@ class WalletSessionImpl @Inject constructor(
             // CoreClient may already be initialized (e.g., second process)
             if (e.message?.contains("already") == true || e is IllegalStateException) {
                 isInitialized = true
+                diagError("INIT: Reown already-initialized path", e)
             } else {
-                Timber.e(e, "Reown init failed")
+                diagError("INIT: Reown init failed", e)
             }
         }
     }
@@ -102,6 +124,7 @@ class WalletSessionImpl @Inject constructor(
             // Load persisted address synchronously then reconcile with AppKit
             val persisted = try { walletDataStore.loadPersistedAddress() } catch (_: Exception) { null }
             val account: Account? = try { if (isInitialized) AppKit.getAccount() else null } catch (_: Exception) { null }
+            diag("RESTORE: persisted=${persisted ?: "null"} liveAccount=${account?.address ?: "null"}")
             val reconciled = when {
                 account != null -> {
                     // AppKit has live session — persist it
@@ -112,12 +135,14 @@ class WalletSessionImpl @Inject constructor(
                 }
                 persisted != null && account == null -> {
                     // Persisted but AppKit session gone — clear (per spec)
+                    diag("RESTORE: persisted address exists but AppKit session gone — clearing")
                     walletDataStore.clearAll()
                     null
                 }
                 else -> persisted
             }
             _address.value = reconciled
+            diag("RESTORE: reconciled address=${reconciled ?: "null"}")
         }
     }
 
@@ -128,90 +153,103 @@ class WalletSessionImpl @Inject constructor(
             try {
                 AppKit.setDelegate(object : AppKit.ModalDelegate {
                     override fun onSessionApproved(approvedSession: Modal.Model.ApprovedSession) {
-                        val addr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
+                        diag("DELEGATE: onSessionApproved")
+                        val addr = try { AppKit.getAccount()?.address } catch (e: Exception) {
+                            diagError("DELEGATE: getAccount after approve failed", e); null
+                        }
                         if (addr != null) {
                             scope.launch {
                                 walletDataStore.saveAddress(addr)
                                 val conn = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
                                 walletDataStore.saveLastConnector(conn)
                                 _address.value = addr
+                                diag("DELEGATE: approved → address emitted: $addr")
                             }
+                        } else {
+                            diag("DELEGATE: approved but getAccount() returned null")
                         }
                     }
-                    override fun onSessionRejected(rejectedSession: Modal.Model.RejectedSession) {}
+                    override fun onSessionRejected(rejectedSession: Modal.Model.RejectedSession) {
+                        diag("DELEGATE: onSessionRejected")
+                    }
                     override fun onSessionUpdate(updatedSession: Modal.Model.UpdatedSession) {
+                        Timber.i("[WS][DELEGATE] onSessionUpdate: %s", updatedSession)
                         val addr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
                         scope.launch { _address.value = addr; if (addr != null) walletDataStore.saveAddress(addr) }
                     }
-                    override fun onSessionEvent(sessionEvent: Modal.Model.SessionEvent) {}
-                    override fun onSessionExtend(session: Modal.Model.Session) {}
+                    override fun onSessionEvent(sessionEvent: Modal.Model.SessionEvent) {
+                        Timber.d("[WS][DELEGATE] onSessionEvent: %s", sessionEvent)
+                    }
+                    override fun onSessionExtend(session: Modal.Model.Session) {
+                        Timber.d("[WS][DELEGATE] onSessionExtend")
+                    }
                     override fun onSessionDelete(deletedSession: Modal.Model.DeletedSession) {
+                        diag("DELEGATE: onSessionDelete — clearing")
                         scope.launch {
                             walletDataStore.clearAll()
                             _address.value = null
                         }
                     }
                     override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {}
-                    override fun onProposalExpired(proposal: Modal.Model.ExpiredProposal) {}
-                    override fun onRequestExpired(request: Modal.Model.ExpiredRequest) {}
-                    override fun onConnectionStateChange(state: Modal.Model.ConnectionState) {}
+                    override fun onProposalExpired(proposal: Modal.Model.ExpiredProposal) {
+                        diag("DELEGATE: onProposalExpired")
+                    }
+                    override fun onRequestExpired(request: Modal.Model.ExpiredRequest) {
+                        diag("DELEGATE: onRequestExpired")
+                    }
+                    override fun onConnectionStateChange(state: Modal.Model.ConnectionState) {
+                        diag("DELEGATE: relay ${if (state.isAvailable) "online" else "offline"}")
+                    }
                     override fun onError(error: Modal.Model.Error) {
-                        Timber.e(error.throwable, "AppKit delegate error")
+                        diagError("DELEGATE: AppKit delegate error", error.throwable)
                     }
                 })
-            } catch (_: Exception) {
-                // AppKit not yet initialized
+                diag("DELEGATE: registered OK")
+            } catch (e: Exception) {
+                diagError("DELEGATE: registration failed (AppKit not initialized?)", e)
             }
         }
     }
 
     override suspend fun connect(): Result<String> {
+        diag("CONNECT: enter (projectId=${mask(config.projectId)}, isInitialized=$isInitialized)")
         if (config.projectId.isBlank()) {
+            diag("CONNECT: fail-fast — projectId blank")
             return Result.failure(WalletError.AppKitNotInitialized)
         }
         initializeReownIfNeeded()
         // If already connected, return immediately
         try {
-            AppKit.getAccount()?.let { acc ->
-                walletDataStore.saveAddress(acc.address)
+            val existing = AppKit.getAccount()
+            if (existing != null) {
+                diag("CONNECT: already connected as ${existing.address}")
+                walletDataStore.saveAddress(existing.address)
                 walletDataStore.saveLastConnector("WalletConnect")
-                _address.value = acc.address
-                return Result.success(acc.address)
+                _address.value = existing.address
+                return Result.success(existing.address)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            diagError("CONNECT: pre-check getAccount() threw", e)
+        }
 
         // Best-practice B: plain NavHost without accompanist bottomSheet. Instead of requiring
-        // appKitGraph/ConnectButton navigation, trigger AppKit directly if possible. We try the
-        // programmatic Modal.Params.Connect path first, then fall back to polling for an externally
-        // triggered session (e.g. via deep link or prior AppKit UI). This keeps cold start stable
-        // (no BottomSheetNavigator) while making the plain "Connect wallet" Button functional.
-        // If AppKit has a UI entry point, invoke it via reflection to avoid hard compile dependency
-        // on the exact AppKit version's open() signature (1.6.x varies).
+        // appKitGraph/ConnectButton navigation, trigger AppKit programmatically via
+        // Modal.Params.Connect (AppKit 1.6.14 has no open(); verified against the AAR).
+        // onSuccess delivers the pairing URI; approval later arrives via onSessionApproved.
         try {
-            // Try to open AppKit modal programmatically — best effort, ignore if not available
-            try {
-                val modalClass = Class.forName("com.reown.appkit.client.Modal")
-                // Some builds expose AppKit.open() or Modal.open() — try both
-                val openMethod = try {
-                    AppKit::class.java.methods.firstOrNull { it.name == "open" && it.parameterCount <= 1 }
-                } catch (_: Exception) { null }
-                if (openMethod != null) {
-                    try {
-                        if (openMethod.parameterCount == 0) openMethod.invoke(AppKit) else openMethod.invoke(AppKit, null)
-                        Timber.i("AppKit.open() invoked via reflection")
-                    } catch (e: Exception) { Timber.w(e, "AppKit.open reflection failed") }
+            diag("CONNECT: invoking AppKit.connect(Modal.Params.Connect())")
+            AppKit.connect(
+                connect = Modal.Params.Connect(),
+                onSuccess = { uri ->
+                    diag("CONNECT: onSuccess — pairing uri=${uri ?: "null"}")
+                },
+                onError = { error ->
+                    diagError("CONNECT: AppKit.connect onError", error.throwable)
                 }
-            } catch (_: Exception) {}
-            // Also try AppKit.connect with empty namespaces as a programmatic trigger — it will
-            // show the wallet selector if the Delegate is set. We construct a minimal Connect params
-            // via reflection to stay compatible across 1.6.x
-            try {
-                val connectMethod = AppKit::class.java.methods.firstOrNull { it.name == "connect" && it.parameterTypes.any { p -> p.simpleName.contains("Connect") } }
-                if (connectMethod != null) {
-                    Timber.i("AppKit.connect method found: ${connectMethod.name} ${connectMethod.parameterTypes.joinToString { it.simpleName }}")
-                }
-            } catch (_: Exception) {}
-        } catch (_: Exception) {}
+            )
+        } catch (e: Exception) {
+            diagError("CONNECT: AppKit.connect threw synchronously", e)
+        }
 
         var waited = 0
         while (waited < 40) {
@@ -219,15 +257,20 @@ class WalletSessionImpl @Inject constructor(
             try {
                 val acc = AppKit.getAccount()
                 if (acc != null) {
+                    diag("CONNECT: poll $waited — account appeared ${acc.address}")
                     walletDataStore.saveAddress(acc.address)
                     val connector = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
                     walletDataStore.saveLastConnector(connector)
                     _address.value = acc.address
                     return Result.success(acc.address)
                 }
-            } catch (_: Exception) {}
+                if (waited % 4 == 0) diag("CONNECT: poll $waited/40 — waiting for approval")
+            } catch (e: Exception) {
+                diagError("CONNECT: poll $waited getAccount() threw", e)
+            }
             waited++
         }
+        diag("CONNECT: timed out after 10s — no session approved (see INIT/DELEGATE lines above)")
         return Result.failure(WalletError.ConnectFailed("Wallet not connected — ensure a wallet (MetaMask/Rainbow/Trust) is installed and approve the connection. If this persists, reinstall the debug build with a valid wallet.projectId."))
     }
 

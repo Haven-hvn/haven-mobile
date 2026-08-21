@@ -29,6 +29,8 @@ class OnboardingViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<OnboardingUiState>(OnboardingUiState.Idle)
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
 
+    val diagnostics: StateFlow<List<String>> = walletSession.diagnostics
+
     init {
         observeWallet()
     }
