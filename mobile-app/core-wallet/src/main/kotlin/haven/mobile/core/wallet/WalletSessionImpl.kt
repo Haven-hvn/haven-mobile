@@ -7,6 +7,7 @@ import com.reown.appkit.client.Modal
 import com.reown.appkit.client.models.Account
 import com.reown.appkit.client.models.request.Request
 import com.reown.appkit.client.models.request.SentRequestResult
+import com.reown.appkit.presets.AppKitChainsPresets
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -219,10 +220,8 @@ class WalletSessionImpl @Inject constructor(
             diagError("CONNECT: pre-check getAccount() threw", e)
         }
 
-        // Best-practice B: plain NavHost without accompanist bottomSheet. Instead of requiring
-        // appKitGraph/ConnectButton navigation, trigger AppKit programmatically via
-        // Modal.Params.Connect (AppKit 1.6.14 has no open(); verified against the AAR).
-        // onSuccess delivers the pairing URI; approval later arrives via onSessionApproved.
+        // Trigger AppKit programmatically (AppKit 1.6.14 has no open()). onSuccess delivers the
+        // pairing URI; approval later arrives via onSessionApproved / getAccount().
         try {
             diag("CONNECT: creating pairing then invoking AppKit.connect")
             _pairingUri.value = null
@@ -233,8 +232,21 @@ class WalletSessionImpl @Inject constructor(
                 diag("CONNECT: Pairing.create returned null — failing connect")
                 return Result.failure(WalletError.AppKitNotInitialized)
             }
+            // A session proposal with no namespaces is approved by the wallet but never settles —
+            // the wallet must be offered concrete chains/methods/events to grant.
+            val chains = AppKitChainsPresets.ethChains.values.toList()
+            val chainRefs = chains.map { "${it.chainNamespace}:${it.chainReference}" }
+            val proposal = Modal.Model.Namespace.Proposal(
+                chains = chainRefs,
+                methods = (chains.flatMap { it.requiredMethods } + listOf("personal_sign", "eth_signTypedData_v4")).distinct(),
+                events = (chains.flatMap { it.events } + listOf("chainChanged", "accountsChanged")).distinct()
+            )
+            diag("CONNECT: proposing ${chainRefs.size} chains (${chainRefs.first()}…)")
             AppKit.connect(
-                connect = Modal.Params.Connect(pairing = pairing),
+                connect = Modal.Params.ConnectParams(
+                    sessionNamespaces = mapOf(proposal.chains.first().substringBefore(":") to proposal),
+                    pairing = pairing
+                ),
                 onSuccess = { uri ->
                     diag("CONNECT: onSuccess — pairing uri=${uri ?: "null"}")
                     if (uri != null) {
@@ -251,12 +263,12 @@ class WalletSessionImpl @Inject constructor(
         }
 
         var waited = 0
-        while (waited < 40) {
-            delay(250)
+        while (waited < 240) {
+            delay(500)
             try {
                 val acc = AppKit.getAccount()
                 if (acc != null) {
-                    diag("CONNECT: poll $waited — account appeared ${acc.address}")
+                    diag("CONNECT: poll ${waited / 2}s — account appeared ${acc.address}")
                     walletDataStore.saveAddress(acc.address)
                     val connector = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
                     walletDataStore.saveLastConnector(connector)
@@ -264,13 +276,13 @@ class WalletSessionImpl @Inject constructor(
                     _pairingUri.value = null
                     return Result.success(acc.address)
                 }
-                if (waited % 4 == 0) diag("CONNECT: poll $waited/40 — waiting for approval")
+                if (waited % 8 == 0) diag("CONNECT: poll ${waited / 2}s/120s — waiting for approval")
             } catch (e: Exception) {
                 diagError("CONNECT: poll $waited getAccount() threw", e)
             }
             waited++
         }
-        diag("CONNECT: timed out after 10s — no session approved (see INIT/DELEGATE lines above)")
+        diag("CONNECT: timed out after 120s — no session approved (see INIT/DELEGATE lines above)")
         return Result.failure(WalletError.ConnectFailed("Wallet not connected — ensure a wallet (MetaMask/Rainbow/Trust) is installed and approve the connection. If this persists, reinstall the debug build with a valid wallet.projectId."))
     }
 
