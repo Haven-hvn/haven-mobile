@@ -59,7 +59,48 @@ class DebugViewModel @Inject constructor(
     fun signFixtureEip712() {
         viewModelScope.launch {
             _log.update { it + "Sign fixture EIP-712: called" }
-            val payload = """{"types":{"EIP712Domain":[]},"primaryType":"GateRequest","domain":{"name":"Haven-AOL"},"message":{"itemId":"fixture"}}"""
+            // Same shape GateRequestBuilder.buildV1Request emits, with fixture values —
+            // primaryType must have a matching definition or wallets reject the payload.
+            val payload = """
+                {
+                  "types": {
+                    "EIP712Domain": [
+                      {"name": "name", "type": "string"},
+                      {"name": "version", "type": "string"},
+                      {"name": "chainId", "type": "uint256"},
+                      {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "GateRequest": [
+                      {"name": "itemId", "type": "string"},
+                      {"name": "gate", "type": "Gate"},
+                      {"name": "nonce", "type": "string"}
+                    ],
+                    "Gate": [
+                      {"name": "chain", "type": "string"},
+                      {"name": "tokenAddress", "type": "address"},
+                      {"name": "threshold", "type": "uint256"},
+                      {"name": "tokenStandard", "type": "string"}
+                    ]
+                  },
+                  "primaryType": "GateRequest",
+                  "domain": {
+                    "name": "Haven-AOL",
+                    "version": "1",
+                    "chainId": "0x1",
+                    "verifyingContract": "0x0000000000000000000000000000000000000000"
+                  },
+                  "message": {
+                    "itemId": "fixture",
+                    "gate": {
+                      "chain": "eip155:1",
+                      "tokenAddress": "0x0000000000000000000000000000000000000000",
+                      "threshold": "1",
+                      "tokenStandard": "ERC20"
+                    },
+                    "nonce": "fixture-nonce"
+                  }
+                }
+            """.trimIndent()
             val result = walletSession.signTypedDataV4(payload)
             if (result.isSuccess) {
                 _log.update { it + "Sign fixture EIP-712: success — ${result.getOrNull()?.take(20)}..." }
