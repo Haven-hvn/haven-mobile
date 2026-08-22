@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import timber.log.Timber
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -237,7 +238,18 @@ class WalletSessionImpl @Inject constructor(
             val chainRefs = chains.map { "${it.chainNamespace}:${it.chainReference}" }
             val proposal = Modal.Model.Namespace.Proposal(
                 chains = chainRefs,
-                methods = (chains.flatMap { it.requiredMethods } + listOf("personal_sign", "eth_signTypedData_v4")).distinct(),
+                // Methods mirror reown-kotlin's sample Info.Eth.defaultMethods plus v4 alias.
+                // Notably eth_signTypedData (unsuffixed) must be requested: MetaMask mobile
+                // routes signing requests under that name.
+                methods = (
+                    chains.flatMap { it.requiredMethods } + listOf(
+                        "eth_sendTransaction",
+                        "personal_sign",
+                        "eth_sign",
+                        "eth_signTypedData",
+                        "eth_signTypedData_v4"
+                    )
+                    ).distinct(),
                 events = (chains.flatMap { it.events } + listOf("chainChanged", "accountsChanged")).distinct()
             )
             diag("CONNECT: proposing ${chainRefs.size} chains (${chainRefs.first()}…)")
@@ -313,14 +325,18 @@ class WalletSessionImpl @Inject constructor(
             ?: return@withContext Result.failure(WalletError.NoAddressReturned)
         if (json.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
 
-        // Build eth_signTypedData_v4 params as [address, typedData]. The typed data must be
-        // inserted RAW (not stringified): MetaMask mobile rejects the string form with
-        // "json parse error: unexpected character '\'" because it expects a JSON object here,
-        // matching the reference dapp sample in reown-kotlin.
-        val params = "[\"$addr\",$json]"
+        // Build eth_signTypedData params as [address, typedDataJsonString] and send under the
+        // UNSUFFIXED method name: MetaMask mobile's WalletConnect router routes eth_signTypedData
+        // (matches reown-kotlin's reference dapp sample); the _v4 name is dropped there — with a
+        // stringified param it 500s ("unexpected character '\'"), with an object it silently
+        // no-ops. EIP-712 hashing is identical for both, so signatures verify the same.
+        val params = JSONArray().apply {
+            put(addr)
+            put(json)
+        }.toString()
 
         val request = Request(
-            method = "eth_signTypedData_v4",
+            method = "eth_signTypedData",
             params = params,
             chainId = "eip155:1"
         )
