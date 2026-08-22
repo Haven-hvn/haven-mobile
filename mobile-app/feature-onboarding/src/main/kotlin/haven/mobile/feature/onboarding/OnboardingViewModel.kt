@@ -31,6 +31,8 @@ class OnboardingViewModel @Inject constructor(
 
     val diagnostics: StateFlow<List<String>> = walletSession.diagnostics
 
+    val pairingUri: StateFlow<String?> = walletSession.pairingUri
+
     init {
         observeWallet()
     }

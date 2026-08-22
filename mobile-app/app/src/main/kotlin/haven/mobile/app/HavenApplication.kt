@@ -1,13 +1,8 @@
 package haven.mobile.app
 
 import android.app.Application
-import com.reown.android.Core
-import com.reown.android.CoreClient
-import com.reown.android.relay.ConnectionType
-import com.reown.appkit.client.AppKit
-import com.reown.appkit.client.Modal
-import com.reown.appkit.presets.AppKitChainsPresets
 import dagger.hilt.android.HiltAndroidApp
+import haven.mobile.core.wallet.ReownBootstrap
 import timber.log.Timber
 
 @HiltAndroidApp
@@ -41,50 +36,14 @@ class HavenApplication : Application() {
     private fun initReownIfNeeded() {
         val projectId = BuildConfig.WALLET_PROJECT_ID
         try { StartupTracer.log(this, "initReown check projectId=$projectId") } catch (_: Exception) {}
-        if (projectId.isBlank() || projectId.startsWith("dummy-")) {
-            Timber.w("WALLET_PROJECT_ID blank/dummy — Reown init skipped (projectId=$projectId)")
-            return
-        }
-        // Physical-device guard: Reown/CoreClient needs Play Services; on devices without it it throws NoClassDefFoundError which Exception does not catch
-        try {
-            val clazz = Class.forName("com.google.android.gms.common.GoogleApiAvailability")
-            val getInstance = clazz.getMethod("getInstance")
-            val availability = getInstance.invoke(null)
-            val isAvailable = clazz.getMethod("isGooglePlayServicesAvailable", android.content.Context::class.java)
-            val psStatus = isAvailable.invoke(availability, this) as Int
-            if (psStatus != 0) { // ConnectionResult.SUCCESS = 0
-                Timber.w("Play Services not available ($psStatus) — Reown init skipped, onboarding will show fallback")
-                return
-            }
-        } catch (e: Throwable) {
-            Timber.w(e, "Play Services check failed — Reown init skipped")
-            return
-        }
-        try {
-            val appMetaData = Core.Model.AppMetaData(
-                name = "Haven",
-                description = "Haven — gated media",
-                url = "https://haven",
-                icons = emptyList(),
-                redirect = "haven://connect",
-                appLink = "https://haven"
-            )
-            CoreClient.initialize(
-                projectId = projectId,
-                connectionType = ConnectionType.AUTOMATIC,
-                application = this,
-                metaData = appMetaData
-            ) { error -> Timber.e(error.throwable, "CoreClient init error") }
-            AppKit.initialize(
-                init = Modal.Params.Init(core = CoreClient),
-                onSuccess = { Timber.i("AppKit initialized in HavenApplication") },
-                onError = { error -> Timber.e(error.throwable, "AppKit init error") }
-            )
-            AppKit.setChains(AppKitChainsPresets.ethChains.values.toList())
-        } catch (e: Throwable) {
-            if (e.message?.contains("already", ignoreCase = true) != true) {
-                Timber.e(e, "Reown init failed (Throwable)")
-            }
-        }
+        val ok = ReownBootstrap.initialize(
+            projectId = projectId,
+            application = this,
+            appName = "Haven",
+            appDescription = "Haven — gated media",
+            appIconUrl = "",
+            redirectUrl = "haven://connect"
+        )
+        if (!ok) Timber.w("Reown init skipped (blank/dummy projectId or no Play Services)")
     }
 }

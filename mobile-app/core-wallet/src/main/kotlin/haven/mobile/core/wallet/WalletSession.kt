@@ -12,6 +12,12 @@ interface WalletSession {
      */
     val diagnostics: StateFlow<List<String>>
 
+    /**
+     * Latest WalletConnect pairing URI (wc:…) awaiting wallet approval, if any. Surfaced so the
+     * UI can offer a QR / copy fallback when no installed wallet picks up the deep link.
+     */
+    val pairingUri: StateFlow<String?>
+
     suspend fun connect(): Result<String>
     suspend fun disconnect()
     suspend fun signTypedDataV4(json: String): Result<String>

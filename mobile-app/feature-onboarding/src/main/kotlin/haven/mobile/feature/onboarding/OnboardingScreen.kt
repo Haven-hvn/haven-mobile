@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -191,20 +192,7 @@ fun OnboardingScreen(
         when (val state = uiState) {
             OnboardingUiState.Idle -> Unit
 
-            OnboardingUiState.Connecting -> Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = HavenSpacing.lg),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(HavenSpacing.md))
-                Text(
-                    text = "Waiting for your wallet\u2026",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            OnboardingUiState.Connecting -> ConnectingStatus(viewModel = viewModel)
 
             is OnboardingUiState.Connected -> Column {
                 Text(
@@ -296,6 +284,63 @@ fun OnboardingScreen(
         }
 
         Spacer(Modifier.height(HavenSpacing.xxxl))
+    }
+}
+
+/**
+ * The connecting state: spinner plus, once a pairing URI exists, a fallback path — re-open the
+ * wallet chooser or copy the URI — for when the automatic hand-off to a wallet app did not happen
+ * (no wallet installed yet, or the user dismissed it).
+ */
+@Composable
+private fun ConnectingStatus(viewModel: OnboardingViewModel) {
+    val pairingUri by viewModel.pairingUri.collectAsState()
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = HavenSpacing.lg)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(HavenSpacing.md))
+            Text(
+                text = "Waiting for your wallet\u2026",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (pairingUri != null) {
+            Spacer(Modifier.height(HavenSpacing.md))
+            Text(
+                text = "If your wallet did not open, tap below and pick it. You can also copy the " +
+                    "connection link into any WalletConnect wallet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row {
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(pairingUri))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (_: Exception) {}
+                }) {
+                    Text("Open wallet app")
+                }
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as? android.content.ClipboardManager
+                    clipboard?.setPrimaryClip(
+                        android.content.ClipData.newPlainText("WalletConnect", pairingUri ?: return@TextButton)
+                    )
+                }) {
+                    Text("Copy link")
+                }
+            }
+        }
     }
 }
 

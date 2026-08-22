@@ -1,15 +1,12 @@
 package haven.mobile.core.wallet
 
 import android.content.Context
-import com.reown.android.Core
 import com.reown.android.CoreClient
-import com.reown.android.relay.ConnectionType
 import com.reown.appkit.client.AppKit
 import com.reown.appkit.client.Modal
 import com.reown.appkit.client.models.Account
 import com.reown.appkit.client.models.request.Request
 import com.reown.appkit.client.models.request.SentRequestResult
-import com.reown.appkit.presets.AppKitChainsPresets
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,6 +37,9 @@ class WalletSessionImpl @Inject constructor(
     private val _address = MutableStateFlow<String?>(null)
     override val address: StateFlow<String?> = _address.asStateFlow()
 
+    private val _pairingUri = MutableStateFlow<String?>(null)
+    override val pairingUri: StateFlow<String?> = _pairingUri.asStateFlow()
+
     private val _diagnostics = MutableStateFlow<List<String>>(emptyList())
     override val diagnostics: StateFlow<List<String>> = _diagnostics.asStateFlow()
 
@@ -51,6 +51,26 @@ class WalletSessionImpl @Inject constructor(
     private fun diagError(stage: String, e: Throwable) {
         Timber.e(e, "[WS] %s", stage)
         _diagnostics.update { (it + "✗ $stage — ${e.javaClass.simpleName}: ${e.message ?: "no message"}").takeLast(14) }
+    }
+
+    /**
+     * Hands a freshly created WalletConnect pairing URI (wc:) to installed wallet apps via
+     * ACTION_VIEW. Without this the URI is only logged and nothing wallet-related ever appears
+     * on screen. When no wallet handles the scheme the URI stays on [pairingUri] so the
+     * onboarding UI can offer it as a fallback.
+     */
+    private fun openInWallet(uri: String) {
+        try {
+            context.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            diag("CONNECT: handed pairing uri to installed wallets")
+        } catch (e: android.content.ActivityNotFoundException) {
+            diag("CONNECT: no wallet app handles wc: uris — use the copy/QR fallback in the UI")
+        } catch (e: Exception) {
+            diagError("CONNECT: opening wallet intent failed", e)
+        }
     }
 
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
@@ -74,49 +94,16 @@ class WalletSessionImpl @Inject constructor(
         }
         if (isInitialized) return
         diag("INIT: starting CoreClient+AppKit initialization")
-        try {
-            val appMetaData = Core.Model.AppMetaData(
-                name = config.appName.ifBlank { "Haven" },
-                description = config.appDescription.ifBlank { "Haven — gated media" },
-                url = "https://haven",
-                icons = listOfNotNull(config.appIconUrl.takeIf { it.isNotBlank() }),
-                redirect = config.redirectUrl.ifBlank { "haven://connect" },
-                appLink = config.redirectUrl.ifBlank { "https://haven" }
-            )
-            // Use Application context for CoreClient
-            CoreClient.initialize(
-                projectId = config.projectId,
-                connectionType = ConnectionType.AUTOMATIC,
-                application = context.applicationContext as android.app.Application,
-                metaData = appMetaData
-            ) { error ->
-                diagError("INIT: CoreClient initialize error", error.throwable)
-            }
-            diag("INIT: CoreClient.initialize returned, calling AppKit.initialize")
-            AppKit.initialize(
-                init = Modal.Params.Init(core = CoreClient),
-                onSuccess = {
-                    isInitialized = true
-                    diag("INIT: AppKit initialized OK (async onSuccess)")
-                },
-                onError = { error ->
-                    diagError("INIT: AppKit initialize error", error.throwable)
-                }
-            )
-            AppKit.setChains(AppKitChainsPresets.ethChains.values.toList())
-            diag("INIT: setChains applied (${AppKitChainsPresets.ethChains.values.size} chains); isInitialized=true")
-            // Optional SIWE auth params for Haven — use ethChains ids
-            // Haven signs GateRequest via eth_signTypedData_v4, not SIWE, so no auth payload needed.
-            isInitialized = true
-        } catch (e: Exception) {
-            // CoreClient may already be initialized (e.g., second process)
-            if (e.message?.contains("already") == true || e is IllegalStateException) {
-                isInitialized = true
-                diagError("INIT: Reown already-initialized path", e)
-            } else {
-                diagError("INIT: Reown init failed", e)
-            }
-        }
+        isInitialized = ReownBootstrap.initialize(
+            projectId = config.projectId,
+            application = context.applicationContext as android.app.Application,
+            appName = config.appName,
+            appDescription = config.appDescription,
+            appIconUrl = config.appIconUrl,
+            redirectUrl = config.redirectUrl,
+            log = { line -> diag(line) },
+            logError = { stage, e -> diagError(stage, e) }
+        )
     }
 
     private fun restoreSession() {
@@ -238,6 +225,7 @@ class WalletSessionImpl @Inject constructor(
         // onSuccess delivers the pairing URI; approval later arrives via onSessionApproved.
         try {
             diag("CONNECT: creating pairing then invoking AppKit.connect")
+            _pairingUri.value = null
             val pairing = CoreClient.Pairing.create { error ->
                 diagError("CONNECT: Pairing.create onError", error.throwable)
             }
@@ -249,6 +237,10 @@ class WalletSessionImpl @Inject constructor(
                 connect = Modal.Params.Connect(pairing = pairing),
                 onSuccess = { uri ->
                     diag("CONNECT: onSuccess — pairing uri=${uri ?: "null"}")
+                    if (uri != null) {
+                        _pairingUri.value = uri
+                        openInWallet(uri)
+                    }
                 },
                 onError = { error ->
                     diagError("CONNECT: AppKit.connect onError", error.throwable)
@@ -269,6 +261,7 @@ class WalletSessionImpl @Inject constructor(
                     val connector = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
                     walletDataStore.saveLastConnector(connector)
                     _address.value = acc.address
+                    _pairingUri.value = null
                     return Result.success(acc.address)
                 }
                 if (waited % 4 == 0) diag("CONNECT: poll $waited/40 — waiting for approval")
@@ -298,6 +291,7 @@ class WalletSessionImpl @Inject constructor(
         } catch (_: Exception) {}
         walletDataStore.clearAll()
         _address.value = null
+        _pairingUri.value = null
     }
 
     override suspend fun signTypedDataV4(json: String): Result<String> = withContext(ioDispatcher) {
