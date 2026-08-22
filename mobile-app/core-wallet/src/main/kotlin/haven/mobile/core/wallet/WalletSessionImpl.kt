@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import timber.log.Timber
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -314,12 +313,11 @@ class WalletSessionImpl @Inject constructor(
             ?: return@withContext Result.failure(WalletError.NoAddressReturned)
         if (json.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
 
-        // Build eth_signTypedData_v4 params as [address, typedDataJsonString]
-        // Reown expects second element to be the JSON string for EIP-712 data.
-        val params = JSONArray().apply {
-            put(addr)
-            put(json)
-        }.toString()
+        // Build eth_signTypedData_v4 params as [address, typedData]. The typed data must be
+        // inserted RAW (not stringified): MetaMask mobile rejects the string form with
+        // "json parse error: unexpected character '\'" because it expects a JSON object here,
+        // matching the reference dapp sample in reown-kotlin.
+        val params = "[\"$addr\",$json]"
 
         val request = Request(
             method = "eth_signTypedData_v4",
