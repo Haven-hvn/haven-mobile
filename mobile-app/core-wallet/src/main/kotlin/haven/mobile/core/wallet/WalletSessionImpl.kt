@@ -243,8 +243,8 @@ class WalletSessionImpl @Inject constructor(
             )
             diag("CONNECT: proposing ${chainRefs.size} chains (${chainRefs.first()}…)")
             AppKit.connect(
-                connect = Modal.Params.ConnectParams(
-                    sessionNamespaces = mapOf(proposal.chains.first().substringBefore(":") to proposal),
+                connectParams = Modal.Params.ConnectParams(
+                    sessionNamespaces = mapOf(chainRefs.first().substringBefore(":") to proposal),
                     pairing = pairing
                 ),
                 onSuccess = { uri ->
