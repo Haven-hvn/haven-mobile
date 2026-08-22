@@ -3,6 +3,7 @@
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import haven.mobile.core.haven.aol.HavenAolConfig
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ data class DebugLogEntry(
 @HiltViewModel
 class DebugViewModel @Inject constructor(
     private val walletSession: WalletSession,
+    private val havenAolConfig: HavenAolConfig,
 ) : ViewModel() {
 
     private val _log = MutableStateFlow<List<String>>(emptyList())
@@ -28,7 +30,10 @@ class DebugViewModel @Inject constructor(
         viewModelScope.launch {
             _log.update { it + "Ping canister: called" }
             try {
-                _log.update { it + "Ping canister: havenAol=HavenAol — no canisterId configured (offline mode)" }
+                _log.update { it + "Ping canister: canisterId=${havenAolConfig.canisterId} host=${havenAolConfig.icHost}" }
+                if (havenAolConfig.canisterId.isBlank()) {
+                    _log.update { it + "Ping canister: no canister id configured (offline mode)" }
+                }
             } catch (e: Exception) {
                 _log.update { it + "Ping canister: failed — ${e.message}" }
             }
