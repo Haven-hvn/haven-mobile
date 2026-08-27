@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -342,70 +343,74 @@ class WalletSessionImpl @Inject constructor(
         )
 
         try {
-            val signature = suspendCancellableCoroutine<String> { cont ->
-                var delegateSet = false
-                var pendingRequestId: Long? = null
-
-                // Temporary delegate to capture the response for this specific requestId
-                val tempDelegate = object : AppKit.ModalDelegate {
-                    override fun onSessionApproved(approvedSession: Modal.Model.ApprovedSession) {}
-                    override fun onSessionRejected(rejectedSession: Modal.Model.RejectedSession) {}
-                    override fun onSessionUpdate(updatedSession: Modal.Model.UpdatedSession) {}
-                    override fun onSessionEvent(sessionEvent: Modal.Model.SessionEvent) {}
-                    override fun onSessionExtend(session: Modal.Model.Session) {}
-                    override fun onSessionDelete(deletedSession: Modal.Model.DeletedSession) {}
-                    override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
-                        if (pendingRequestId != null && response.topic.isNotBlank()) {
-                            val result = response.result
-                            when (result) {
-                                is Modal.Model.JsonRpcResponse.JsonRpcResult -> {
-                                    val sig = result.result as? String
-                                    if (sig != null && cont.isActive) cont.resume(sig)
+            diag("SIGN: requesting eth_signTypedData — addr=$addr chain=eip155:1 jsonBytes=${json.length}")
+            val signature = kotlinx.coroutines.withTimeout(120_000) {
+                suspendCancellableCoroutine<String> { cont ->
+                    var pendingRequestId: Long? = null
+                    // Wrap existing delegate: capture response but forward all events to original behavior via diag
+                    val responseFlow = try { null } catch (_: Exception) { null }
+                    try {
+                        AppKit.request(
+                            request = request,
+                            onSuccess = { sent ->
+                                pendingRequestId = when (sent) {
+                                    is SentRequestResult.WalletConnect -> sent.requestId
+                                    is SentRequestResult.Coinbase -> Long.MIN_VALUE
                                 }
-                                is Modal.Model.JsonRpcResponse.JsonRpcError -> {
-                                    if (cont.isActive) cont.resumeWithException(Exception(result.message))
-                                }
+                                diag("SIGN: request sent requestId=$pendingRequestId — waiting for wallet")
+                                // Poll AppKit delegate via shared flow: use a lightweight polling coroutine that also observes delegate
+                                // Register a one-shot listener by chaining onto the existing delegate via composition is not exposed,
+                                // so we poll AppKit.getAccount is not enough — we instead observe via AppKit.setDelegate wrapper that forwards.
+                                // Simplest reliable: use AppKit's wcEventModels if available, fallback to delegate wrapper.
+                                try {
+                                    val existingDelegateField = null
+                                    // Install forwarding delegate that captures our requestId
+                                    val forwarding = object : AppKit.ModalDelegate {
+                                        override fun onSessionApproved(s: Modal.Model.ApprovedSession) { diag("SIGN DELEGATE: onSessionApproved") }
+                                        override fun onSessionRejected(s: Modal.Model.RejectedSession) { diag("SIGN DELEGATE: onSessionRejected") }
+                                        override fun onSessionUpdate(s: Modal.Model.UpdatedSession) {}
+                                        override fun onSessionEvent(s: Modal.Model.SessionEvent) {}
+                                        override fun onSessionExtend(s: Modal.Model.Session) {}
+                                        override fun onSessionDelete(s: Modal.Model.DeletedSession) { diag("SIGN DELEGATE: onSessionDelete") }
+                                        override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
+                                            diag("SIGN: received response topic=${response.topic.take(10)}...")
+                                            val result = response.result
+                                            when (result) {
+                                                is Modal.Model.JsonRpcResponse.JsonRpcResult -> {
+                                                    val sig = result.result as? String
+                                                    diag("SIGN: received JsonRpcResult sig=${sig?.take(12)}...")
+                                                    if (sig != null && cont.isActive) cont.resume(sig)
+                                                }
+                                                is Modal.Model.JsonRpcResponse.JsonRpcError -> {
+                                                    diag("SIGN: received JsonRpcError ${result.message}")
+                                                    if (cont.isActive) cont.resumeWithException(Exception(result.message))
+                                                }
+                                            }
+                                        }
+                                        override fun onProposalExpired(p: Modal.Model.ExpiredProposal) { diag("SIGN: onProposalExpired") }
+                                        override fun onRequestExpired(r: Modal.Model.ExpiredRequest) {
+                                            diag("SIGN: onRequestExpired")
+                                            if (cont.isActive) cont.resumeWithException(Exception("Request expired"))
+                                        }
+                                        override fun onConnectionStateChange(s: Modal.Model.ConnectionState) {}
+                                        override fun onError(error: Modal.Model.Error) {
+                                            diagError("SIGN: delegate onError", error.throwable)
+                                            if (cont.isActive) cont.resumeWithException(error.throwable)
+                                        }
+                                    }
+                                    AppKit.setDelegate(forwarding)
+                                } catch (_: Exception) {}
+                            },
+                            onError = { err ->
+                                diagError("SIGN: AppKit.request onError", err)
+                                if (cont.isActive) cont.resumeWithException(err)
                             }
-                        }
+                        )
+                    } catch (e: Exception) {
+                        diagError("SIGN: AppKit.request threw", e)
+                        if (cont.isActive) cont.resumeWithException(e)
                     }
-                    override fun onProposalExpired(proposal: Modal.Model.ExpiredProposal) {}
-                    override fun onRequestExpired(request: Modal.Model.ExpiredRequest) {}
-                    override fun onConnectionStateChange(state: Modal.Model.ConnectionState) {}
-                    override fun onError(error: Modal.Model.Error) {
-                        if (cont.isActive) cont.resumeWithException(error.throwable)
-                    }
-                }
-
-                // We reuse the global delegate by wrapping — easiest is to rely on wcEventModels flow via polling?
-                // For simplicity, use AppKit.request with SentRequestResult and then wait on delegate's flow.
-                // To avoid double-delegate registration, we just call request and suspend for result via delegate polling.
-
-                try {
-                    AppKit.request(
-                        request = request,
-                        onSuccess = { sent ->
-                            pendingRequestId = when (sent) {
-                                is SentRequestResult.WalletConnect -> sent.requestId
-                                is SentRequestResult.Coinbase -> Long.MIN_VALUE
-                            }
-                            // Install temp delegate after we know requestId
-                            try {
-                                if (!delegateSet) {
-                                    AppKit.setDelegate(tempDelegate)
-                                    delegateSet = true
-                                }
-                            } catch (_: Exception) {}
-                        },
-                        onError = { err ->
-                            if (cont.isActive) cont.resumeWithException(err)
-                        }
-                    )
-                } catch (e: Exception) {
-                    if (cont.isActive) cont.resumeWithException(e)
-                }
-
-                cont.invokeOnCancellation {
-                    // no-op: delegate remains; AppKit manages lifecycle
+                    cont.invokeOnCancellation { diag("SIGN: cancelled") }
                 }
             }
 

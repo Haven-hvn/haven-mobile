@@ -101,7 +101,9 @@ class DebugViewModel @Inject constructor(
                   }
                 }
             """.trimIndent()
+             _log.update { it + "Sign fixture EIP-712: awaiting wallet response..." }
             val result = walletSession.signTypedDataV4(payload)
+            _log.update { it + "Sign fixture EIP-712: received — ${if (result.isSuccess) "ok" else "error"}" }
             if (result.isSuccess) {
                 _log.update { it + "Sign fixture EIP-712: success — ${result.getOrNull()?.take(20)}..." }
             } else {
