@@ -382,8 +382,8 @@ class WalletSessionImpl @Inject constructor(
                                                     if (sig != null && cont.isActive) cont.resume(sig)
                                                 }
                                                 is Modal.Model.JsonRpcResponse.JsonRpcError -> {
-                                                    diag("SIGN: received JsonRpcError ${result.message}")
-                                                    if (cont.isActive) cont.resumeWithException(Exception(result.message))
+                                                    diag("SIGN: received JsonRpcError code=${result.code} msg=${result.message}")
+                                                    if (cont.isActive) cont.resumeWithException(Exception("${result.code}: ${result.message}"))
                                                 }
                                             }
                                         }
