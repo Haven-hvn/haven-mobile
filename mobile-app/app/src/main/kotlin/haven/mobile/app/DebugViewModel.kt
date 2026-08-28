@@ -86,7 +86,7 @@ class DebugViewModel @Inject constructor(
                   "domain": {
                     "name": "Haven-AOL",
                     "version": "1",
-                    "chainId": "0x1",
+                    "chainId": 1,
                     "verifyingContract": "0x0000000000000000000000000000000000000000"
                   },
                   "message": {
@@ -94,10 +94,10 @@ class DebugViewModel @Inject constructor(
                     "gate": {
                       "chain": "eip155:1",
                       "tokenAddress": "0x0000000000000000000000000000000000000000",
-                      "threshold": "1",
+                      "threshold": 1,
                       "tokenStandard": "ERC20"
                     },
-                    "nonce": "fixture-nonce"
+                    "nonce": 123
                   }
                 }
             """.trimIndent()

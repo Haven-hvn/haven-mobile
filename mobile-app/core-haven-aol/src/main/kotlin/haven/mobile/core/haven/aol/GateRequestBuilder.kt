@@ -24,7 +24,7 @@ class GateRequestBuilder {
                     "GateRequest": [
                         {"name": "itemId", "type": "string"},
                         {"name": "gate", "type": "Gate"},
-                        {"name": "nonce", "type": "string"}
+                        {"name": "nonce", "type": "uint256"}
                     ],
                     "Gate": [
                         {"name": "chain", "type": "string"},
@@ -37,7 +37,7 @@ class GateRequestBuilder {
                 "domain": {
                     "name": "Haven-AOL",
                     "version": "1",
-                    "chainId": "0x1",
+                    "chainId": 1,
                     "verifyingContract": "${gate.tokenAddress}"
                 },
                 "message": {
@@ -45,10 +45,10 @@ class GateRequestBuilder {
                     "gate": {
                         "chain": "${gate.chain}",
                         "tokenAddress": "${gate.tokenAddress}",
-                        "threshold": "${gate.threshold}",
+                        "threshold": ${gate.threshold},
                         "tokenStandard": "${gate.tokenStandard.name}"
                     },
-                    "nonce": "$nonce"
+                    "nonce": $nonce
                 }
             }
         """.trimIndent()
@@ -72,7 +72,7 @@ class GateRequestBuilder {
                     "GateRequestV3": [
                         {"name": "itemId", "type": "string"},
                         {"name": "gate", "type": "Gate"},
-                        {"name": "nonce", "type": "string"},
+                        {"name": "nonce", "type": "uint256"},
                         {"name": "epoch", "type": "uint256"}
                     ],
                     "Gate": [
@@ -86,7 +86,7 @@ class GateRequestBuilder {
                 "domain": {
                     "name": "Haven-AOL",
                     "version": "3",
-                    "chainId": "0x1",
+                    "chainId": 1,
                     "verifyingContract": "${gate.tokenAddress}"
                 },
                 "message": {
@@ -94,11 +94,11 @@ class GateRequestBuilder {
                     "gate": {
                         "chain": "${gate.chain}",
                         "tokenAddress": "${gate.tokenAddress}",
-                        "threshold": "${gate.threshold}",
+                        "threshold": ${gate.threshold},
                         "tokenStandard": "${gate.tokenStandard.name}"
                     },
-                    "nonce": "$nonce",
-                    "epoch": "${item.createdAtBlock ?: 0}"
+                    "nonce": $nonce,
+                    "epoch": ${item.createdAtBlock ?: 0}
                 }
             }
         """.trimIndent()
