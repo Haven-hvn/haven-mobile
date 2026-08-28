@@ -73,7 +73,7 @@ class DebugViewModel @Inject constructor(
                     "GateRequest": [
                       {"name": "itemId", "type": "string"},
                       {"name": "gate", "type": "Gate"},
-                      {"name": "nonce", "type": "string"}
+                      {"name": "nonce", "type": "uint256"}
                     ],
                     "Gate": [
                       {"name": "chain", "type": "string"},
