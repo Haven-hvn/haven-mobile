@@ -38,7 +38,7 @@ class GateRequestBuilder {
                     "name": "Haven-AOL",
                     "version": "1",
                     "chainId": 1,
-                    "verifyingContract": "${gate.tokenAddress}"
+                    "verifyingContract": "0x0000000000000000000000000000000000000001"
                 },
                 "message": {
                     "itemId": "${item.id}",
@@ -87,7 +87,7 @@ class GateRequestBuilder {
                     "name": "Haven-AOL",
                     "version": "3",
                     "chainId": 1,
-                    "verifyingContract": "${gate.tokenAddress}"
+                    "verifyingContract": "0x0000000000000000000000000000000000000001"
                 },
                 "message": {
                     "itemId": "${item.id}",
