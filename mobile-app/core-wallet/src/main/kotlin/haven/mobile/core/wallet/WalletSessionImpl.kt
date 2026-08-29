@@ -326,24 +326,19 @@ class WalletSessionImpl @Inject constructor(
             ?: return@withContext Result.failure(WalletError.NoAddressReturned)
         if (json.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
 
-        // Build eth_signTypedData params as [address, typedDataJsonString] and send under the
-        // UNSUFFIXED method name: MetaMask mobile's WalletConnect router routes eth_signTypedData
-        // (matches reown-kotlin's reference dapp sample); the _v4 name is dropped there — with a
-        // stringified param it 500s ("unexpected character '\'"), with an object it silently
-        // no-ops. EIP-712 hashing is identical for both, so signatures verify the same.
         val params = JSONArray().apply {
             put(addr)
-            put(json)
+            put(org.json.JSONObject(json))
         }.toString()
 
         val request = Request(
-            method = "eth_signTypedData",
+            method = "eth_signTypedData_v4",
             params = params,
             chainId = "eip155:1"
         )
 
         try {
-            diag("SIGN: requesting eth_signTypedData — addr=$addr chain=eip155:1 jsonBytes=${json.length}")
+            diag("SIGN: requesting eth_signTypedData_v4 — addr=$addr chain=eip155:1 jsonBytes=${json.length}")
             val signature = kotlinx.coroutines.withTimeout(120_000) {
                 suspendCancellableCoroutine<String> { cont ->
                     var pendingRequestId: Long? = null
