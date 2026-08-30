@@ -94,8 +94,13 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          emulator-boot-timeout: 1800
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
           disable-animations: true
+          cores: 2
+          ram-size: 4096M
+          heap-size: 512M
+          disk-size: 4096M
           script: |
             adb logcat -c
             adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
@@ -118,6 +123,7 @@ jobs:
           name: startup-logcat
           path: /tmp/logcat.txt
           if-no-files-found: warn
+
 
   verify-release:
     needs: build
