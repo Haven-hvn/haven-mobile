@@ -328,7 +328,7 @@ class WalletSessionImpl @Inject constructor(
 
         val params = JSONArray().apply {
             put(addr)
-            put(org.json.JSONObject(json))
+            put(json)
         }.toString()
 
         val request = Request(

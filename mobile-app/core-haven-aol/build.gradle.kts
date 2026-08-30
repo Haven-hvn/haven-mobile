@@ -52,8 +52,8 @@ dependencies {
     implementation(project(":core-crypto"))
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")
-    implementation("dev.ic.kotlin:ic-agent:0.1.0-SNAPSHOT")
-    implementation("dev.ic.kotlin:ic-candid:0.1.0-SNAPSHOT")
+    implementation("io.github.haven-hvn:ic-agent:0.1.0")
+    implementation("io.github.haven-hvn:ic-kotlin:0.1.0")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)
     // Failures here are reported to the reader in plain language; the detail goes to the log.

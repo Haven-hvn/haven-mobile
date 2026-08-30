@@ -19,11 +19,14 @@ android {
     defaultConfig {
         buildConfigField("String", "WALLET_PROJECT_ID", "\"${localProps.getProperty("wallet.projectId", "")}\"")
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
     implementation(project(":core-domain"))
-    implementation(project(":foc-cache"))
+    implementation("io.github.haven-hvn:foc-cache:0.1.0")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.androidx.datastore.preferences)
     implementation("com.google.dagger:hilt-android:2.60.1")

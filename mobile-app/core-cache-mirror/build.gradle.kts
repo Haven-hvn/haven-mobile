@@ -15,7 +15,7 @@ dependencies {
     // The reader's communities come from what the wallet holds, not from what it published.
     implementation(project(":core-collections"))
     implementation(project(":core-wallet"))
-    implementation(project(":foc-cache"))
+    implementation("io.github.haven-hvn:foc-cache:0.1.0")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.kotlinx.datetime)
     implementation(libs.androidx.room.runtime)

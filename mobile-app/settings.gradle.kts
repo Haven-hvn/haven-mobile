@@ -46,8 +46,3 @@ include(":feature-collections")
 include(":feature-settings")
 
 includeBuild("build-logic")
-include(":foc-cache")
-project(":foc-cache").projectDir = File("../../foc-local-first-android/foc-cache")
-
-includeBuild("../../ic-kotlin")
-// includeBuild("../../reown-kotlin-develop") // enabled for local dev when offline; online uses Maven Central (1.6.14)
