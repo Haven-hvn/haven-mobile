@@ -20,7 +20,7 @@ android {
         buildConfigField("String", "WALLET_PROJECT_ID", "\"${localProps.getProperty("wallet.projectId", "")}\"")
     }
     testOptions {
-        unitTests.isIncludeAndroidResources = true
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -35,4 +35,6 @@ dependencies {
     implementation("com.reown:android-core")
     implementation("com.reown:appkit")
     implementation("com.jakewharton.timber:timber:5.0.1")
+
+    testImplementation("org.json:json:20231013")
 }
