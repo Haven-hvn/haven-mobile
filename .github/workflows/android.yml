@@ -164,9 +164,21 @@ jobs:
           disable-animations: false
           script: |
             set -x
+            echo "=== wait for package service (boot may still be in progress) ==="
+            for i in $(seq 1 60); do
+              if adb shell pm path android 2>/dev/null | grep -q '/system/framework/framework-res.apk'; then
+                echo "package service ready after ${i}s"
+                break
+              fi
+              sleep 2
+            done
             echo "=== clean install fresh target 34 APK ==="
             adb logcat -c || true
-            adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
+            for i in 1 2 3 4 5; do
+              adb install -r /tmp/apk/app-debug.apk && break
+              echo "install attempt $i failed, retrying in 5s"
+              sleep 5
+            done
             sleep 2
             echo "=== dismiss System UI ANR Wait if present (tap Wait ~160,520) ==="
             for i in 1 2 3; do adb shell input tap 150 400 2>&1 | head -n 2 || true; adb shell input tap 150 380 2>&1 | head -n 2 || true; sleep 1; done || true
