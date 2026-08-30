@@ -165,20 +165,12 @@ jobs:
           script: |
             set -x
             echo "=== wait for package service (boot may still be in progress) ==="
-            for i in $(seq 1 60); do
-              if adb shell pm path android 2>/dev/null | grep -q '/system/framework/framework-res.apk'; then
-                echo "package service ready after ${i}s"
-                break
-              fi
-              sleep 2
-            done
+            package_ready=0
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do if adb shell pm path android 2>/dev/null | grep -q '/system/framework/framework-res.apk'; then echo "package service ready after $((i * 2))s"; package_ready=1; break; fi; sleep 2; done
+            if [ "$package_ready" != "1" ]; then echo "ERROR: package service did not come up after 120s — boot likely failed"; adb shell getprop sys.boot_completed 2>&1 || true; adb shell getprop init.svc.bootanim 2>&1 || true; exit 1; fi
             echo "=== clean install fresh target 34 APK ==="
             adb logcat -c || true
-            for i in 1 2 3 4 5; do
-              adb install -r /tmp/apk/app-debug.apk && break
-              echo "install attempt $i failed, retrying in 5s"
-              sleep 5
-            done
+            for i in 1 2 3 4 5; do adb install -r /tmp/apk/app-debug.apk && break; echo "install attempt $i failed, retrying in 5s"; sleep 5; done
             sleep 2
             echo "=== dismiss System UI ANR Wait if present (tap Wait ~160,520) ==="
             for i in 1 2 3; do adb shell input tap 150 400 2>&1 | head -n 2 || true; adb shell input tap 150 380 2>&1 | head -n 2 || true; sleep 1; done || true
