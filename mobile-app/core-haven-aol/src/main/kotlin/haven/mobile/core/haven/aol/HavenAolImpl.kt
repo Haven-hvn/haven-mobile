@@ -28,10 +28,17 @@ class HavenAolImpl @Inject constructor(
         // Check in-memory AES key cache first (FR-ACL-2) — gate key survives for session until disconnect
         val cacheKey = "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
+        val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
         val isV3 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V3 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V3
         val nonce = nonceManager.getNonce(address, config.canisterId)
-        val json = if (isV3) gateRequestBuilder.buildV3Request(item, nonce, address) else gateRequestBuilder.buildV1Request(item, nonce, address)
-        val sig = session.signTypedDataV4(json).getOrElse { return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}")) }
+        val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)
+            ?: return Result.failure(
+                HavenError.UnsupportedGateMetadata(
+                    "This item is gated on a network Haven can't check.",
+                ),
+            )
+        val json = if (isV3) gateRequestBuilder.buildV3Request(item, nonce, address, chain.chainId) else gateRequestBuilder.buildV1Request(item, nonce, address, chain.chainId)
+        val sig = session.signTypedDataV4(json, chain.chainId).getOrElse { return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}")) }
         // Live VetKD flow via ic-kotlin (parity with haven-aol-decrypt.ts / haven-aol-decrypt-v3.ts):
         // Agent call is attempted; on offline / --offline build no network is hit at compile time,
         // and at runtime an offline host returns a typed failure that callers surface as haven error.
@@ -40,8 +47,6 @@ class HavenAolImpl @Inject constructor(
             val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val method = if (isV3) "requestDecryptionKeyV3" else "requestDecryptionKey"
-            // Typed GateRequest Candid (haven-dapp haven-aol/canister.ts GateRequestType) — no more emptyList value
-            val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
             val cid = item.pieceRef?.pieceCid ?: item.id
             val transportPub = run {
                 val b = ByteArray(32); java.security.SecureRandom().nextBytes(b); b
@@ -53,16 +58,6 @@ class HavenAolImpl @Inject constructor(
             }
             val nonceNat = try { java.math.BigInteger(nonce) } catch (_: Exception) { java.math.BigInteger.ZERO }
             val thresholdNat = java.math.BigInteger.valueOf(gate.threshold.toLong().coerceAtLeast(0))
-            // The gate's own chain, not a guess. Previously this sniffed for substrings ("10" and
-            // "Optimism" both had to appear, so a plain "10" fell through to Ethereum) and defaulted
-            // to EthMainnet on no match — which checks a balance on the wrong chain and then answers
-            // confidently. An unparseable chain is now a refusal instead.
-            val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)
-                ?: return Result.failure(
-                    HavenError.UnsupportedGateMetadata(
-                        "This item is gated on a network Haven can't check.",
-                    ),
-                )
             val eipChainId = java.math.BigInteger.valueOf(chain.chainId)
             val chainVariant = dev.ic.kotlin.candid.CandidValue.CandidVariant(
                 dev.ic.kotlin.candid.fieldId(chain.aolVariant), dev.ic.kotlin.candid.CandidValue.CandidNull

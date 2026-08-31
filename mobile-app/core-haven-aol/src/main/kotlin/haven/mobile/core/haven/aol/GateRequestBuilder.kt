@@ -9,9 +9,11 @@ class GateRequestBuilder {
     fun buildV1Request(
         item: MediaItem,
         nonce: String,
-        walletAddress: String
+        walletAddress: String,
+        chainId: Long
     ): String {
         val gate = item.gate!!
+        val threshold = gate.threshold.toLong().toString()
         return """
             {
                 "types": {
@@ -37,7 +39,7 @@ class GateRequestBuilder {
                 "domain": {
                     "name": "Haven-AOL",
                     "version": "1",
-                    "chainId": 1,
+                    "chainId": $chainId,
                     "verifyingContract": "0x0000000000000000000000000000000000000001"
                 },
                 "message": {
@@ -45,7 +47,7 @@ class GateRequestBuilder {
                     "gate": {
                         "chain": "${gate.chain}",
                         "tokenAddress": "${gate.tokenAddress}",
-                        "threshold": ${gate.threshold},
+                        "threshold": $threshold,
                         "tokenStandard": "${gate.tokenStandard.name}"
                     },
                     "nonce": $nonce
@@ -57,9 +59,11 @@ class GateRequestBuilder {
     fun buildV3Request(
         item: MediaItem,
         nonce: String,
-        walletAddress: String
+        walletAddress: String,
+        chainId: Long
     ): String {
         val gate = item.gate!!
+        val threshold = gate.threshold.toLong().toString()
         return """
             {
                 "types": {
@@ -86,7 +90,7 @@ class GateRequestBuilder {
                 "domain": {
                     "name": "Haven-AOL",
                     "version": "3",
-                    "chainId": 1,
+                    "chainId": $chainId,
                     "verifyingContract": "0x0000000000000000000000000000000000000001"
                 },
                 "message": {
@@ -94,7 +98,7 @@ class GateRequestBuilder {
                     "gate": {
                         "chain": "${gate.chain}",
                         "tokenAddress": "${gate.tokenAddress}",
-                        "threshold": ${gate.threshold},
+                        "threshold": $threshold,
                         "tokenStandard": "${gate.tokenStandard.name}"
                     },
                     "nonce": $nonce,

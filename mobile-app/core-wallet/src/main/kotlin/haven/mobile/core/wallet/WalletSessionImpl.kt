@@ -318,7 +318,7 @@ class WalletSessionImpl @Inject constructor(
         _pairingUri.value = null
     }
 
-    override suspend fun signTypedDataV4(json: String): Result<String> = withContext(ioDispatcher) {
+    override suspend fun signTypedDataV4(json: String, chainId: Long): Result<String> = withContext(ioDispatcher) {
         if (config.projectId.isBlank()) {
             return@withContext Result.failure(WalletError.AppKitNotInitialized)
         }
@@ -334,11 +334,11 @@ class WalletSessionImpl @Inject constructor(
         val request = Request(
             method = "eth_signTypedData_v4",
             params = params,
-            chainId = "eip155:1"
+            chainId = "eip155:$chainId"
         )
 
         try {
-            diag("SIGN: requesting eth_signTypedData_v4 — addr=$addr chain=eip155:1 jsonBytes=${json.length}")
+            diag("SIGN: requesting eth_signTypedData_v4 — addr=$addr chain=eip155:$chainId jsonBytes=${json.length}")
             val signature = kotlinx.coroutines.withTimeout(120_000) {
                 suspendCancellableCoroutine<String> { cont ->
                     var pendingRequestId: Long? = null

@@ -20,5 +20,5 @@ interface WalletSession {
 
     suspend fun connect(): Result<String>
     suspend fun disconnect()
-    suspend fun signTypedDataV4(json: String): Result<String>
+    suspend fun signTypedDataV4(json: String, chainId: Long): Result<String>
 }
