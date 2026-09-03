@@ -87,7 +87,7 @@ class DebugViewModel @Inject constructor(
                     "name": "Haven-AOL",
                     "version": "1",
                     "chainId": 1,
-                    "verifyingContract": "0x0000000000000000000000000000000000000000"
+                    "verifyingContract": "0x0000000000000000000000000000000000000001"
                   },
                   "message": {
                     "itemId": "fixture",

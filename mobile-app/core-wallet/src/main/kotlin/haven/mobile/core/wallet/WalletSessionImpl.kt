@@ -139,8 +139,18 @@ class WalletSessionImpl @Inject constructor(
         scope.launch {
             // Poll AppKit account periodically to keep StateFlow in sync when delegate events arrive
             // The sample uses AppKitDelegate.wcEventModels — we bridge via getAccount polling plus delegate hook
-            try {
-                AppKit.setDelegate(object : AppKit.ModalDelegate {
+            registerSessionDelegate()
+        }
+    }
+
+    /**
+     * Base session-lifecycle delegate. Re-installed after each sign round-trip because
+     * [signTypedDataV4] temporarily swaps in a response-capturing delegate
+     * (AppKit supports a single delegate via setDelegate).
+     */
+    private fun registerSessionDelegate() {
+        try {
+            AppKit.setDelegate(object : AppKit.ModalDelegate {
                     override fun onSessionApproved(approvedSession: Modal.Model.ApprovedSession) {
                         diag("DELEGATE: onSessionApproved")
                         val addr = try { AppKit.getAccount()?.address } catch (e: Exception) {
@@ -194,9 +204,8 @@ class WalletSessionImpl @Inject constructor(
                     }
                 })
                 diag("DELEGATE: registered OK")
-            } catch (e: Exception) {
-                diagError("DELEGATE: registration failed (AppKit not initialized?)", e)
-            }
+        } catch (e: Exception) {
+            diagError("DELEGATE: registration failed (AppKit not initialized?)", e)
         }
     }
 
@@ -326,9 +335,19 @@ class WalletSessionImpl @Inject constructor(
             ?: return@withContext Result.failure(WalletError.NoAddressReturned)
         if (json.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
 
+        // EIP-712 / WalletConnect: eth_signTypedData_v4 params MUST be [address, typedDataObject].
+        // A stringified second element (escaped JSON string) is rejected by strict wallets:
+        // Trust Wallet cannot process it, MetaMask answers -32603 "unexpected character '\'".
+        // 4dfcd30 had the object form; 167b506 regressed it to the string form — restore objects.
+        val typedData = try {
+            org.json.JSONObject(json)
+        } catch (e: Exception) {
+            diagError("SIGN: typed-data JSON malformed", e)
+            return@withContext Result.failure(WalletError.InvalidSignatureFormat)
+        }
         val params = JSONArray().apply {
             put(addr)
-            put(json)
+            put(typedData)
         }.toString()
 
         val request = Request(
@@ -339,74 +358,104 @@ class WalletSessionImpl @Inject constructor(
 
         try {
             diag("SIGN: requesting eth_signTypedData_v4 — addr=$addr chain=eip155:$chainId jsonBytes=${json.length}")
-            val signature = kotlinx.coroutines.withTimeout(120_000) {
-                suspendCancellableCoroutine<String> { cont ->
-                    var pendingRequestId: Long? = null
-                    // Wrap existing delegate: capture response but forward all events to original behavior via diag
-                    val responseFlow = try { null } catch (_: Exception) { null }
-                    try {
-                        AppKit.request(
-                            request = request,
-                            onSuccess = { sent ->
-                                pendingRequestId = when (sent) {
-                                    is SentRequestResult.WalletConnect -> sent.requestId
-                                    is SentRequestResult.Coinbase -> Long.MIN_VALUE
+            val signature: String
+            try {
+                signature = kotlinx.coroutines.withTimeout(120_000) {
+                    suspendCancellableCoroutine<String> { cont ->
+                        // Install the response-capturing delegate BEFORE sending: setDelegate
+                        // replaces the previous delegate, so installing first avoids losing a
+                        // fast response, and the base delegate is restored in the finally below.
+                        // Session-lifecycle events arriving mid-sign are handled like the base
+                        // delegate so connect/session state stays in sync.
+                        val forwarding = object : AppKit.ModalDelegate {
+                            override fun onSessionApproved(s: Modal.Model.ApprovedSession) {
+                                diag("SIGN DELEGATE: onSessionApproved")
+                                val approvedAddr = try { AppKit.getAccount()?.address } catch (e: Exception) {
+                                    diagError("SIGN DELEGATE: getAccount after approve failed", e); null
                                 }
-                                diag("SIGN: request sent requestId=$pendingRequestId — waiting for wallet")
-                                // Poll AppKit delegate via shared flow: use a lightweight polling coroutine that also observes delegate
-                                // Register a one-shot listener by chaining onto the existing delegate via composition is not exposed,
-                                // so we poll AppKit.getAccount is not enough — we instead observe via AppKit.setDelegate wrapper that forwards.
-                                // Simplest reliable: use AppKit's wcEventModels if available, fallback to delegate wrapper.
-                                try {
-                                    val existingDelegateField = null
-                                    // Install forwarding delegate that captures our requestId
-                                    val forwarding = object : AppKit.ModalDelegate {
-                                        override fun onSessionApproved(s: Modal.Model.ApprovedSession) { diag("SIGN DELEGATE: onSessionApproved") }
-                                        override fun onSessionRejected(s: Modal.Model.RejectedSession) { diag("SIGN DELEGATE: onSessionRejected") }
-                                        override fun onSessionUpdate(s: Modal.Model.UpdatedSession) {}
-                                        override fun onSessionEvent(s: Modal.Model.SessionEvent) {}
-                                        override fun onSessionExtend(s: Modal.Model.Session) {}
-                                        override fun onSessionDelete(s: Modal.Model.DeletedSession) { diag("SIGN DELEGATE: onSessionDelete") }
-                                        override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
-                                            diag("SIGN: received response topic=${response.topic.take(10)}...")
-                                            val result = response.result
-                                            when (result) {
-                                                is Modal.Model.JsonRpcResponse.JsonRpcResult -> {
-                                                    val sig = result.result as? String
-                                                    diag("SIGN: received JsonRpcResult sig=${sig?.take(12)}...")
-                                                    if (sig != null && cont.isActive) cont.resume(sig)
-                                                }
-                                                is Modal.Model.JsonRpcResponse.JsonRpcError -> {
-                                                    diag("SIGN: received JsonRpcError code=${result.code} msg=${result.message}")
-                                                    if (cont.isActive) cont.resumeWithException(Exception("${result.code}: ${result.message}"))
-                                                }
-                                            }
-                                        }
-                                        override fun onProposalExpired(p: Modal.Model.ExpiredProposal) { diag("SIGN: onProposalExpired") }
-                                        override fun onRequestExpired(r: Modal.Model.ExpiredRequest) {
-                                            diag("SIGN: onRequestExpired")
-                                            if (cont.isActive) cont.resumeWithException(Exception("Request expired"))
-                                        }
-                                        override fun onConnectionStateChange(s: Modal.Model.ConnectionState) {}
-                                        override fun onError(error: Modal.Model.Error) {
-                                            diagError("SIGN: delegate onError", error.throwable)
-                                            if (cont.isActive) cont.resumeWithException(error.throwable)
-                                        }
+                                if (approvedAddr != null) {
+                                    scope.launch {
+                                        walletDataStore.saveAddress(approvedAddr)
+                                        _address.value = approvedAddr
                                     }
-                                    AppKit.setDelegate(forwarding)
-                                } catch (_: Exception) {}
-                            },
-                            onError = { err ->
-                                diagError("SIGN: AppKit.request onError", err)
-                                if (cont.isActive) cont.resumeWithException(err)
+                                }
                             }
-                        )
-                    } catch (e: Exception) {
-                        diagError("SIGN: AppKit.request threw", e)
-                        if (cont.isActive) cont.resumeWithException(e)
+                            override fun onSessionRejected(s: Modal.Model.RejectedSession) { diag("SIGN DELEGATE: onSessionRejected") }
+                            override fun onSessionUpdate(s: Modal.Model.UpdatedSession) {
+                                val updatedAddr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
+                                scope.launch { _address.value = updatedAddr; if (updatedAddr != null) walletDataStore.saveAddress(updatedAddr) }
+                            }
+                            override fun onSessionEvent(s: Modal.Model.SessionEvent) {}
+                            override fun onSessionExtend(s: Modal.Model.Session) {}
+                            override fun onSessionDelete(s: Modal.Model.DeletedSession) {
+                                diag("SIGN DELEGATE: onSessionDelete — clearing")
+                                scope.launch {
+                                    walletDataStore.clearAll()
+                                    _address.value = null
+                                }
+                            }
+                            override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
+                                diag("SIGN: received response topic=${response.topic.take(10)}...")
+                                val result = response.result
+                                when (result) {
+                                    is Modal.Model.JsonRpcResponse.JsonRpcResult -> {
+                                        val sig = result.result as? String
+                                        diag("SIGN: received JsonRpcResult sig=${sig?.take(12)}...")
+                                        if (sig != null && cont.isActive) cont.resume(sig)
+                                    }
+                                    is Modal.Model.JsonRpcResponse.JsonRpcError -> {
+                                        diag("SIGN: received JsonRpcError code=${result.code} msg=${result.message}")
+                                        if (cont.isActive) cont.resumeWithException(Exception("${result.code}: ${result.message}"))
+                                    }
+                                }
+                            }
+                            override fun onProposalExpired(p: Modal.Model.ExpiredProposal) { diag("SIGN: onProposalExpired") }
+                            override fun onRequestExpired(r: Modal.Model.ExpiredRequest) {
+                                diag("SIGN: onRequestExpired")
+                                if (cont.isActive) cont.resumeWithException(Exception("Request expired"))
+                            }
+                            override fun onConnectionStateChange(s: Modal.Model.ConnectionState) {
+                                diag("SIGN DELEGATE: relay ${if (s.isAvailable) "online" else "offline"}")
+                            }
+                            override fun onError(error: Modal.Model.Error) {
+                                diagError("SIGN: delegate onError", error.throwable)
+                                if (cont.isActive) cont.resumeWithException(error.throwable)
+                            }
+                        }
+                        try {
+                            AppKit.setDelegate(forwarding)
+                        } catch (e: Exception) {
+                            diagError("SIGN: setDelegate threw", e)
+                            if (cont.isActive) cont.resumeWithException(e)
+                            return@suspendCancellableCoroutine
+                        }
+                        try {
+                            AppKit.request(
+                                request = request,
+                                onSuccess = { sent ->
+                                    val requestId = when (sent) {
+                                        is SentRequestResult.WalletConnect -> sent.requestId
+                                        is SentRequestResult.Coinbase -> Long.MIN_VALUE
+                                    }
+                                    diag("SIGN: request sent requestId=$requestId — waiting for wallet")
+                                },
+                                onError = { err ->
+                                    diagError("SIGN: AppKit.request onError", err)
+                                    if (cont.isActive) cont.resumeWithException(err)
+                                }
+                            )
+                        } catch (e: Exception) {
+                            diagError("SIGN: AppKit.request threw", e)
+                            if (cont.isActive) cont.resumeWithException(e)
+                        }
+                        cont.invokeOnCancellation { diag("SIGN: cancelled") }
                     }
-                    cont.invokeOnCancellation { diag("SIGN: cancelled") }
                 }
+            } finally {
+                try {
+                    registerSessionDelegate()
+                } catch (_: Exception) {}
+                diag("SIGN: base delegate restored")
             }
 
             if (signature.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
