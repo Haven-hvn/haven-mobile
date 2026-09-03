@@ -81,6 +81,3 @@ and never restored the base session delegate (clobbers future
   harmless per schema, but if the wallet's security analyzer chokes, try `"1"`.
 - Zero-address `tokenAddress` in the fixture: fine for a fixture, but Trust
   Wallet risk analysis may flag it; a non-zero fixture token would isolate that.
-- Fallback: `personal_sign` of the EIP-712 hash (wallets universally support
-  it) with off-chain `ecrecover` parity check — changes verifier expectations,
-  needs canister-side agreement.
