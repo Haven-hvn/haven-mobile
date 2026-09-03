@@ -24,7 +24,7 @@ data class MediaItem(
     val owner: String,
     val title: String,
     val description: String?,
-    /** `content_mime_type`. */
+    /** Attribute `mime` (shared enum int), resolved to a MIME string. */
     val mimeType: String?,
     /** Derived from the MIME type or source URI; entities carry no filename. */
     val fileExtension: String?,
@@ -36,6 +36,7 @@ data class MediaItem(
     val expiresAtBlock: Long?,
     val pieceRef: PieceRef?,
     val filecoinCid: String?,
+    /** 2.0 never indexes the encrypted locator — always null (kept for API stability). */
     val encryptedCid: String?,
     val cidHash: String?,
     val gate: TokenGate?,
@@ -48,13 +49,12 @@ data class MediaItem(
     val lastAccessedAt: Instant?,
 
     /**
-     * Runtime in seconds. `duration` is both an attribute and a payload key, and the dapp reads it —
-     * this model used to drop it, so a media library could not say how long anything was.
+     * Runtime in seconds. Attribute `dur_s` (whole seconds, 0/omit = unknown).
      */
     val durationSeconds: Long? = null,
 
     /**
-     * The publisher's own name for themselves (`creator_handle`).
+     * The publisher's own name for themselves (payload `creator`).
      *
      * Read by the dapp and worth having here: the feed can credit "moth.eth" instead of a hex address,
      * which is both friendlier and the only human identity an entity carries.

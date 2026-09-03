@@ -245,29 +245,43 @@ class ArkivClientImpl @Inject constructor(
     }
 
     /**
-     * Entity -> `MediaItem`, against the keys `haven-dapp` actually reads.
+     * Entity -> `MediaItem`, against ARKIV_FORMAT 2.0.0 canonical keys.
      *
-     * `lib/parse-arkiv-video.ts` is the spec: it merges `entity.attributes` with the decoded payload and
-     * reads `snake_case` keys off the result. Anything it does not read does not exist in practice —
-     * which ruled out two fields this parser previously invented, and one it required:
+     * `lib/parse-arkiv-video.ts` (haven-dapp) is the spec: it merges `entity.attributes` with the
+     * decoded payload and reads canonical `snake_case` keys off the result. Anything it does not read
+     * does not exist in practice — which ruled out two fields this parser previously invented, and one
+     * it required:
      *
      *  - **`size_bytes`** — no entity carries a size. `PieceRef.size` is the size of record once foc
      *    resolves the piece, so nothing is read here and [MediaItem.sizeBytes] stays null until then.
-     *  - **`thumbnail_cid`** — in `MEDIA_CONTENT_SPEC.md`, absent from the dapp's read path, written by
-     *    nothing. Removed rather than carried as a permanently null column.
+     *  - **`thumbnail_cid`** — absent from the dapp's read path, written by nothing. Removed rather
+     *    than carried as a permanently null column.
      *  - **`arkivStatus` / `contentCacheStatus` / `createdAt` / `title` / `owner`** — all were read with
      *    `getString`, which throws. The dapp hard-codes status to "active", cache state is local, and
      *    title/owner have documented fallbacks. Nothing here is required now.
+     *
+     * 2.0 key map (old -> new): `content_mime_type` -> `mime` (enum int),
+     * `filecoin_root_cid` -> `fcid`, `piece_cid` -> `piece`, `cid_hash` -> `sha256_ct`,
+     * `duration` -> `dur_s`, `creator_handle` -> `creator`, `source_uri` -> `src`,
+     * `encryption_metadata` -> `gate`, `cid_encryption_metadata` -> `cid_gate`,
+     * `segment_metadata` -> `seg`, `attestation` -> `attn`. Deleted with no replacement:
+     * `is_encrypted` (gate presence decides), `encrypted_cid` (never indexed),
+     * `created_at`/`updated_at` (system fields), `project`/`type`/`category`/`tags`
+     * (replaced by `grp`).
      *
      * The camelCase spellings are accepted alongside the canonical ones because the HTTP gateway in
      * front of Arkiv may already be reshaping them.
      */
     private fun JSONObject.toMediaItem(): MediaItem {
-        val mimeType = firstString("content_mime_type", "contentMimeType", "mimeType", "mime")
-        val sourceUri = firstString("source_uri", "sourceUri")
+        val mimeType = firstMime("mime", "mimeType", "contentMimeType")
+        val sourceUri = firstString("src", "sourceUri")
         val extension = deriveExtension(mimeType, sourceUri)
         val title = firstString("title") ?: "Untitled"
-        val pieceCid = firstString("piece_cid", "pieceCid")
+        val pieceCid = firstString("piece", "pieceCid")
+
+        // Gate presence decides encryption — 2.0 carries no is_encrypted flag.
+        val gateMetadata = parseGateMetadata("gate")
+        val cidGateMetadata = parseGateMetadata("cid_gate", "cidGate")
 
         return MediaItem(
             // `key` is the entity id in Arkiv; `id` is what a gateway usually renames it to.
@@ -301,14 +315,14 @@ class ArkivClientImpl @Inject constructor(
                     trustlessGateways = emptyList(),
                 )
             },
-            filecoinCid = firstString("filecoin_root_cid", "filecoinRootCid", "filecoinCid"),
-            encryptedCid = firstString("encrypted_cid", "encryptedCid"),
-            cidHash = firstString("cid_hash", "cidHash"),
+            filecoinCid = firstString("fcid", "filecoinCid"),
+            // 2.0 never indexes the encrypted locator — always null (kept on the model for API stability).
+            encryptedCid = null,
+            cidHash = firstString("sha256_ct", "cidHash"),
             gate = toTokenGate(),
-            // Attribute is `1`/`0`, payload is a boolean; both spellings appear.
-            isEncrypted = firstBoolean("is_encrypted", "isEncrypted") ?: false,
-            encryptionMetadata = parseGateMetadata("encryption_metadata", "encryptionMetadata"),
-            cidEncryptionMetadata = parseGateMetadata("cid_encryption_metadata", "cidEncryptionMetadata"),
+            isEncrypted = gateMetadata != null,
+            encryptionMetadata = gateMetadata,
+            cidEncryptionMetadata = cidGateMetadata,
             attestation = parseAttestationOrNull(),
             // The dapp hard-codes "active"; expiry is decided from `expires_at_block` against the head,
             // not from a status the entity carries.
@@ -316,8 +330,8 @@ class ArkivClientImpl @Inject constructor(
             // Local state. The mirror resolves it against the content cache immediately after this.
             contentCacheStatus = ContentCacheStatus.UNCACHED,
             lastAccessedAt = null,
-            durationSeconds = firstLong("duration"),
-            creatorHandle = firstString("creator_handle", "creatorHandle"),
+            durationSeconds = firstLong("dur_s"),
+            creatorHandle = firstString("creator", "creatorHandle"),
         )
     }
 
@@ -336,7 +350,7 @@ class ArkivClientImpl @Inject constructor(
 
     /** Attestations come from the canister, not the entity, so absence is normal. */
     private fun JSONObject.parseAttestationOrNull(): Attestation? {
-        val attObj = optJSONObject("attestation") ?: return null
+        val attObj = optJSONObject("attn") ?: optJSONObject("attestation") ?: return null
         val subject = attObj.optString("subject", null)?.takeIf { it.isNotEmpty() } ?: return null
         val signature = attObj.optString("signature", null)?.takeIf { it.isNotEmpty() } ?: return null
         return Attestation(
@@ -391,12 +405,13 @@ class ArkivClientImpl @Inject constructor(
      * A gate condition as stored on Arkiv.
      *
      * Attribute names follow the entity spec (`gate_chain`, `gate_token`, `gate_threshold`); the camelCase
-     * spellings are accepted too because the gateway's JSON shape has used both. A row missing either the
-     * chain or the contract is skipped rather than defaulted — a gate with a guessed chain checks the wrong
-     * balance and answers confidently.
+     * spellings are accepted too because the gateway's JSON shape has used both. `gate_chain` is the
+     * EIP-155 id in 2.0 (a JSON number) — [HavenChain.parse] already accepts bare ids, so numbers are
+     * read directly. A row missing either the chain or the contract is skipped rather than defaulted —
+     * a gate with a guessed chain checks the wrong balance and answers confidently.
      */
     private fun JSONObject.toTokenGate(): TokenGate? {
-        val rawChain = firstString("gateChain", "gate_chain", "chain") ?: return null
+        val rawChain = firstChain("gate_chain", "gateChain", "chain") ?: return null
         val token = firstString("gateTokenAddress", "gate_token", "tokenAddress") ?: return null
         val chain = HavenChain.parse(rawChain) ?: return null
         val threshold = firstDouble("gateThreshold", "gate_threshold", "threshold") ?: 1.0
@@ -418,6 +433,54 @@ class ArkivClientImpl @Inject constructor(
         .mapNotNull { key -> optString(key, null)?.takeIf { it.isNotEmpty() } }
         .firstOrNull()
 
+    /** Chain as stored (`gate_chain` EIP id number in 2.0) or gateway-shaped string. */
+    private fun JSONObject.firstChain(vararg keys: String): String? = keys
+        .asSequence()
+        .filter { has(it) && !isNull(it) }
+        .mapNotNull { key ->
+            when (val value = opt(key)) {
+                is Number -> value.toLong().toString()
+                is String -> value.takeIf { it.isNotEmpty() }
+                else -> null
+            }
+        }
+        .firstOrNull()
+
+    /**
+     * Shared MIME enum (ARKIV_FORMAT 2.0.0 §MIME enum — mirrors
+     * `haven_cli.services.arkiv_sync.MIME_TO_ENUM` and dapp `lib/mime-enum`).
+     * The `mime` attribute stores the enum int; gateway-reshaped responses
+     * may already carry a MIME string, which passes through untouched.
+     */
+    private fun JSONObject.firstMime(vararg keys: String): String? {
+        for (key in keys) {
+            if (isNull(key)) continue
+            when (val value = opt(key)) {
+                is Number -> mimeEnumToMime(value.toInt())?.let { return it }
+                is String -> value.takeIf { it.isNotEmpty() }?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun mimeEnumToMime(id: Int): String? = when (id) {
+        1 -> "video/mp4"
+        2 -> "video/webm"
+        3 -> "video/quicktime"
+        4 -> "audio/mpeg"
+        5 -> "audio/wav"
+        6 -> "audio/ogg"
+        7 -> "image/png"
+        8 -> "image/jpeg"
+        9 -> "image/webp"
+        10 -> "image/gif"
+        11 -> "image/svg+xml"
+        12 -> "text/plain"
+        13 -> "text/markdown"
+        14 -> "application/pdf"
+        else -> null
+    }
+
     private fun JSONObject.firstDouble(vararg keys: String): Double? = keys
         .asSequence()
         .filter { has(it) && !isNull(it) }
@@ -431,41 +494,23 @@ class ArkivClientImpl @Inject constructor(
         .map { optLong(it) }
         .firstOrNull { it > 0 }
 
-    /** `is_encrypted` is `1`/`0` as an attribute and a boolean in the payload. Both are accepted. */
-    private fun JSONObject.firstBoolean(vararg keys: String): Boolean? = keys
-        .asSequence()
-        .filter { has(it) && !isNull(it) }
-        .map { key ->
-            when (val value = opt(key)) {
-                is Boolean -> value
-                is Number -> value.toInt() != 0
-                is String -> value.equals("true", ignoreCase = true) || value == "1"
-                else -> false
-            }
-        }
-        .firstOrNull()
-
     /**
-     * `encryption_metadata` and `cid_encryption_metadata`, any version.
+     * The content gate (`gate`) and CID-layer gate (`cid_gate`), any version.
      *
      * The spec allows a JSON object or a string, and the version is decided by content rather than by
      * which key it arrived under: v4 records carry `marketCapTarget` (+ epoch), v3 records carry an
      * epoch (`epoch`/`epochId`), v1 records a nonce.
-     * The Arkiv-level marker is `gate_type` (ATTR_UINT 1|3|4 = per-file/per-epoch/per-marketcap).
+     * The Arkiv-level marker is `gate_type` (1|3|4 = per-file/per-epoch/per-marketcap).
      * Numeric only — no `gate_version` fallback.
      */
-    private fun JSONObject.parseGateType(): Long? {
-        for (key in arrayOf("gate_type", "gateType")) {
-            if (has(key) && !isNull(key)) {
-                val v = optLong(key)
-                if (v in 1..4) return v
-            }
-        }
-        return null
-    }
-
     private fun JSONObject.parseGateMetadata(vararg keys: String): GateMetadata? {
-        val obj = keys.asSequence().mapNotNull { optJSONObject(it) }.firstOrNull() ?: return null
+        val obj = keys.asSequence().mapNotNull { key ->
+            // The gateway may pass the gate blob through as a JSON string
+            // (how writers store it) or as a decoded object (reshaped).
+            optJSONObject(key) ?: optString(key, null)?.takeIf { it.isNotEmpty() }?.let {
+                runCatching { JSONObject(it) }.getOrNull()
+            }
+        }.firstOrNull() ?: return null
 
         val wrappedKey = obj.firstString("wrappedKey", "wrapped_key", "ciphertext")
             ?.toByteArray(Charsets.UTF_8)
