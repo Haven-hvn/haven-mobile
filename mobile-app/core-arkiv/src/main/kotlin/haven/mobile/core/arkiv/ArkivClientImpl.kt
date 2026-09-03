@@ -446,13 +446,24 @@ class ArkivClientImpl @Inject constructor(
         .firstOrNull()
 
     /**
-     * `encryption_metadata` and `cid_encryption_metadata`, either version.
+     * `encryption_metadata` and `cid_encryption_metadata`, any version.
      *
      * The spec allows a JSON object or a string, and the version is decided by content rather than by
-     * which key it arrived under: v3 records carry an epoch (`epoch`/`epochId`), v1 records a nonce.
-     * The previous implementation looked for separate `…V1`/`…V3` keys, which do not exist — so both
-     * always parsed as null and every gate lost its metadata on the way in.
+     * which key it arrived under: v4 records carry `marketCapTarget` (+ epoch), v3 records carry an
+     * epoch (`epoch`/`epochId`), v1 records a nonce.
+     * The Arkiv-level marker is `gate_type` (ATTR_UINT 1|3|4 = per-file/per-epoch/per-marketcap).
+     * Numeric only — no `gate_version` fallback.
      */
+    private fun JSONObject.parseGateType(): Long? {
+        for (key in arrayOf("gate_type", "gateType")) {
+            if (has(key) && !isNull(key)) {
+                val v = optLong(key)
+                if (v in 1..4) return v
+            }
+        }
+        return null
+    }
+
     private fun JSONObject.parseGateMetadata(vararg keys: String): GateMetadata? {
         val obj = keys.asSequence().mapNotNull { optJSONObject(it) }.firstOrNull() ?: return null
 
@@ -460,7 +471,16 @@ class ArkivClientImpl @Inject constructor(
             ?.toByteArray(Charsets.UTF_8)
             ?: return null
 
+        val marketCapTarget = obj.firstLong("marketCapTarget", "market_cap_target", "marketCapTargetUsd", "market_cap_target_usd")
         val epoch = obj.firstLong("epoch", "epochId", "epoch_id")
+        if (marketCapTarget != null && epoch != null) {
+            return GateMetadata.V4(
+                epochId = epoch,
+                marketCapTargetUsd = marketCapTarget,
+                wrappedKey = wrappedKey,
+                gateReference = obj.firstString("gateReference", "gate_reference", "gate") ?: "",
+            )
+        }
         if (epoch != null) {
             return GateMetadata.V3(
                 epochId = epoch,

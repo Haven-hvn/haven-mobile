@@ -29,6 +29,16 @@ class HavenAolImpl @Inject constructor(
         val cacheKey = "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
         val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
+        val isV4 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V4 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V4
+        if (isV4) {
+            // gate_type=4 (per-marketcap drip) has no mobile decrypt path yet (needs
+            // requestDecryptionKeyV4 + market-cap gate). Fail closed, never derive a v3 key for v4 content.
+            return Result.failure(
+                HavenError.UnsupportedGateMetadata(
+                    "This item uses a market-cap drip gate (gate_type 4) this build can't unlock yet.",
+                ),
+            )
+        }
         val isV3 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V3 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V3
         val nonce = nonceManager.getNonce(address, config.canisterId)
         val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)
