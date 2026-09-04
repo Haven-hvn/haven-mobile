@@ -117,48 +117,60 @@ fun WatchScreen(
 
             is WatchUiState.Ready -> {
                 val media = state.item
+                val pump = media.dripPump()
 
-                if (media.kind.rendersInline()) {
-                    LaunchedEffect(media.id) { viewModel.prepare(media) }
-                }
-
-                when (val content = state.content) {
-                    ContentState.Idle ->
-                        if (media.kind == MediaKind.FILE) {
-                            FileViewer(media = media, staged = null, viewModel = viewModel)
-                        } else {
-                            ProgressBlock(label = "Preparing\u2026")
-                        }
-
-                    is ContentState.Working -> ProgressBlock(
-                        label = content.stage.label,
-                        progress = content.progress,
-                    )
-
-                    is ContentState.Failed -> ErrorState(
-                        title = "Couldn't open this",
-                        message = content.message,
+                if (pump != null) {
+                    // Method 4 (gate_type 4): the chunk unlocks collectively when the gate
+                    // token is pumped to its market-cap target. Say so up front with the
+                    // buy link — never send viewers into a decrypt that cannot succeed.
+                    DripPumpScreen(
+                        media = media,
+                        pump = pump,
                         onRetry = { viewModel.retry(media) },
                     )
+                } else {
+                    if (media.kind.rendersInline()) {
+                        LaunchedEffect(media.id) { viewModel.prepare(media) }
+                    }
 
-                    is ContentState.Ready -> when (media.kind) {
-                        MediaKind.VIDEO -> PlayerViewer(
-                            media = media,
-                            file = content.file,
-                            aspect = 16f / 9f,
+                    when (val content = state.content) {
+                        ContentState.Idle ->
+                            if (media.kind == MediaKind.FILE) {
+                                FileViewer(media = media, staged = null, viewModel = viewModel)
+                            } else {
+                                ProgressBlock(label = "Preparing\u2026")
+                            }
+
+                        is ContentState.Working -> ProgressBlock(
+                            label = content.stage.label,
+                            progress = content.progress,
                         )
-                        MediaKind.AUDIO -> PlayerViewer(
-                            media = media,
-                            file = content.file,
-                            aspect = null,
+
+                        is ContentState.Failed -> ErrorState(
+                            title = "Couldn't open this",
+                            message = content.message,
+                            onRetry = { viewModel.retry(media) },
                         )
-                        MediaKind.IMAGE -> ImageViewer(media = media, file = content.file)
-                        MediaKind.DOCUMENT -> DocumentViewer(media = media, file = content.file)
-                        MediaKind.FILE -> FileViewer(
-                            media = media,
-                            staged = content.file,
-                            viewModel = viewModel,
-                        )
+
+                        is ContentState.Ready -> when (media.kind) {
+                            MediaKind.VIDEO -> PlayerViewer(
+                                media = media,
+                                file = content.file,
+                                aspect = 16f / 9f,
+                            )
+                            MediaKind.AUDIO -> PlayerViewer(
+                                media = media,
+                                file = content.file,
+                                aspect = null,
+                            )
+                            MediaKind.IMAGE -> ImageViewer(media = media, file = content.file)
+                            MediaKind.DOCUMENT -> DocumentViewer(media = media, file = content.file)
+                            MediaKind.FILE -> FileViewer(
+                                media = media,
+                                staged = content.file,
+                                viewModel = viewModel,
+                            )
+                        }
                     }
                 }
             }

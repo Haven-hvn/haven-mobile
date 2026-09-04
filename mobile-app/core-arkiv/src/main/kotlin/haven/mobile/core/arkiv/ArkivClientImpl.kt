@@ -524,6 +524,10 @@ class ArkivClientImpl @Inject constructor(
                 marketCapTargetUsd = marketCapTarget,
                 wrappedKey = wrappedKey,
                 gateReference = obj.firstString("gateReference", "gate_reference", "gate") ?: "",
+                // v4 gate JSON carries the pump target token (`tokenAddress`) and its
+                // chain (`chain`, Haven-AOL variant) — the buy-link inputs.
+                tokenAddress = obj.firstString("tokenAddress", "token_address") ?: "",
+                chain = obj.firstChain("chain", "gate_chain", "gateChain") ?: "",
             )
         }
         if (epoch != null) {

@@ -18,12 +18,14 @@ enum class HavenChain(
     val chainId: Long,
     val label: String,
     val isTestnet: Boolean = false,
+    /** mint.club / TrustWallet network key for trade and token URLs (mirrors dapp `gate-chains`). */
+    val mintClubKey: String,
 ) {
-    ETH_MAINNET("EthMainnet", 1, "Ethereum"),
-    BASE_MAINNET("BaseMainnet", 8453, "Base"),
-    ARBITRUM_ONE("ArbitrumOne", 42161, "Arbitrum"),
-    OPTIMISM_MAINNET("OptimismMainnet", 10, "Optimism"),
-    ETH_SEPOLIA("EthSepolia", 11155111, "Sepolia", isTestnet = true),
+    ETH_MAINNET("EthMainnet", 1, "Ethereum", false, "ethereum"),
+    BASE_MAINNET("BaseMainnet", 8453, "Base", false, "base"),
+    ARBITRUM_ONE("ArbitrumOne", 42161, "Arbitrum", false, "arbitrum"),
+    OPTIMISM_MAINNET("OptimismMainnet", 10, "Optimism", false, "optimism"),
+    ETH_SEPOLIA("EthSepolia", 11155111, "Sepolia", true, "sepolia"),
     ;
 
     /** CAIP-2, the form used in `TokenGate.chain` when it is written canonically. */

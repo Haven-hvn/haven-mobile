@@ -18,6 +18,10 @@ sealed interface GateMetadata {
         val epochId: Long,
         val marketCapTargetUsd: Long,
         val wrappedKey: ByteArray,
-        val gateReference: String
+        val gateReference: String,
+        /** ERC-20 gate token from the v4 gate JSON (`tokenAddress`) — the token to pump. */
+        val tokenAddress: String = "",
+        /** Chain carrying the gate token (`chain` in the v4 gate JSON, any spelling). */
+        val chain: String = "",
     ) : GateMetadata
 }

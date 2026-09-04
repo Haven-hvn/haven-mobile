@@ -385,6 +385,15 @@ class MediaRepositoryImpl @Inject constructor(
                 obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
                 obj.put("gateReference", metadata.gateReference)
             }
+            is GateMetadata.V4 -> {
+                obj.put("type", "V4")
+                obj.put("epochId", metadata.epochId)
+                obj.put("marketCapTargetUsd", metadata.marketCapTargetUsd)
+                obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
+                obj.put("gateReference", metadata.gateReference)
+                obj.put("tokenAddress", metadata.tokenAddress)
+                obj.put("chain", metadata.chain)
+            }
         }
         return obj.toString()
     }
@@ -419,6 +428,15 @@ class MediaRepositoryImpl @Inject constructor(
                 epochId = obj.getLong("epochId"),
                 wrappedKey = obj.getString("wrappedKey").toByteArray(Charsets.UTF_8),
                 gateReference = obj.getString("gateReference"),
+            )
+        } else if (type == "V4") {
+            GateMetadata.V4(
+                epochId = obj.optLong("epochId", 0),
+                marketCapTargetUsd = obj.optLong("marketCapTargetUsd", 0),
+                wrappedKey = obj.optString("wrappedKey", "").toByteArray(Charsets.UTF_8),
+                gateReference = obj.optString("gateReference", ""),
+                tokenAddress = obj.optString("tokenAddress", ""),
+                chain = obj.optString("chain", ""),
             )
         } else {
             GateMetadata.V1(

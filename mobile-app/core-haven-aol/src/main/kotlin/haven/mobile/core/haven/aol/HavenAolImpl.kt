@@ -35,7 +35,7 @@ class HavenAolImpl @Inject constructor(
             // requestDecryptionKeyV4 + market-cap gate). Fail closed, never derive a v3 key for v4 content.
             return Result.failure(
                 HavenError.UnsupportedGateMetadata(
-                    "This item uses a market-cap drip gate (gate_type 4) this build can't unlock yet.",
+                    "This premiere unlocks when the community pumps its gate token to the target market cap — this build can't unlock it yet.",
                 ),
             )
         }
