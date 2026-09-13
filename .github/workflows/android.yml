@@ -44,6 +44,7 @@ jobs:
           wallet.projectId=02760a75be7577c92e7d39f1de04db31
           haven.aol.canisterId=dciac-uaaaa-aaaad-qlzuq-cai
           haven.aol.icHost=https://ic0.app
+          arkiv.endpointUrl=https://rpc.tiramisu.db-chain.testnet.arkiv.network
           EOF
           cat haven-mobile/mobile-app/local.properties
 

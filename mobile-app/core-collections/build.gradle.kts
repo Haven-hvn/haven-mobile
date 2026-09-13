@@ -35,6 +35,7 @@ android {
 
 dependencies {
     implementation(project(":core-domain"))
+    implementation(project(":core-arkiv"))
     implementation(project(":core-wallet"))
     implementation(libs.kotlinx.coroutines)
     implementation(libs.okhttp)

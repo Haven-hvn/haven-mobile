@@ -140,8 +140,9 @@ class MediaRepositoryImpl @Inject constructor(
                 // catalogue.
                 val candidateGates = buildList {
                     addAll(arkivClient.discoverGates(chains).getOrDefault(emptyList()))
-                    // The bundled roster is a fallback for the same question, for as long as there is no
-                    // public index to ask (see collections.json).
+                    // The roster now merges its bundled seed with the same live index, so this is
+                    // belt-and-braces for when the index is reachable from one call site but not the
+                    // other — not the only dynamic source.
                     addAll(collectionRepository.accessibleGates(chains))
                     // Gates this wallet has published under. A creator keeps access to their own
                     // community even if the index cannot be reached.

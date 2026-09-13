@@ -5,9 +5,10 @@ import cloud.filecoin.foc.cache.PieceRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -35,6 +36,102 @@ class ArkivClientImpl @Inject constructor(
         .readTimeout(config.timeoutMillis, TimeUnit.MILLISECONDS)
         .build()
 
+    /**
+     * Direct `arkiv_query` JSON-RPC against the chain (see `@arkiv-network/sdk` `processQuery`).
+     *
+     * There is no REST gateway in front of Arkiv: predicates serialize to a query string
+     * (`gate_token = "0x…" && gate_chain = 8453`, `$owner=0x…`, `$key = 0x…`), options carry hex
+     * `resultsPerPage` plus an opaque `cursor`, and the result is `{data, blockNumber, cursor}`.
+     * Iteration ends when `cursor` is absent/empty or the page comes back short.
+     */
+    private fun arkivQuery(query: String, resultsPerPage: Int, cursor: String?): JSONObject {
+        val options = JSONObject()
+            .put("includeData", JSONObject()
+                .put("key", true)
+                .put("attributes", true)
+                .put("contentType", true)
+                .put("owner", true)
+                .put("creator", true)
+                .put("createdAtBlock", true))
+            .put("resultsPerPage", "0x" + resultsPerPage.toString(16))
+            .apply { cursor?.let { put("cursor", it) } }
+        val body = JSONObject()
+            .put("jsonrpc", "2.0")
+            .put("id", 1)
+            .put("method", "arkiv_query")
+            .put("params", JSONArray().put(query).put(options))
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw HavenError.NetworkError("Arkiv query failed (${response.code}).")
+            }
+            val text = response.body?.string()
+                ?: throw HavenError.NetworkError("Arkiv query came back empty.")
+            val result = runCatching { JSONObject(text).getJSONObject("result") }.getOrNull()
+                ?: throw HavenError.NetworkError("Arkiv query came back unreadable.")
+            val error = JSONObject(text).optJSONObject("error")
+            if (error != null) {
+                throw HavenError.NetworkError("Arkiv rejected the query (${error.optString("message")}).")
+            }
+            return result
+        }
+    }
+
+    /** `key = "value"` predicate, strings double-quoted exactly like the SDK serializes them. */
+    private fun eqStr(key: String, value: String): String =
+        "$key = \"${value.replace("\"", "")}\""
+
+    /** `key = 123` predicate for numeric attributes (chain ids, thresholds). */
+    private fun eqNum(key: String, value: Long): String = "$key = $value"
+
+    /**
+     * Raw chain entity -> the flat shape the item parser reads.
+     *
+     * The chain splits attributes into `stringAttributes` / `numericAttributes` (hex values);
+     * the parser wants plain keys, so string values pass through and numeric hex decodes to Long.
+     */
+    private fun normalizeEntity(raw: JSONObject): JSONObject {
+        val out = JSONObject()
+        raw.optString("key", null)?.let { out.put("id", it); out.put("key", it); out.put("entityKey", it) }
+        raw.optString("owner", null)?.let { out.put("owner", it) }
+        raw.optString("creator", null)?.let { out.put("creator", it) }
+        raw.optString("contentType", null)?.let { out.put("contentType", it) }
+        hexToLongOrNull(raw.optString("createdAtBlock", null))?.let { out.put("createdAtBlock", it) }
+        val strings = raw.optJSONArray("stringAttributes")
+        if (strings != null) {
+            for (i in 0 until strings.length()) {
+                val attr = strings.optJSONObject(i) ?: continue
+                val k = attr.optString("key", null) ?: continue
+                if (!attr.isNull("value")) out.put(k, attr.optString("value"))
+            }
+        }
+        val numerics = raw.optJSONArray("numericAttributes")
+        if (numerics != null) {
+            for (i in 0 until numerics.length()) {
+                val attr = numerics.optJSONObject(i) ?: continue
+                val k = attr.optString("key", null) ?: continue
+                hexToLongOrNull(attr.optString("value", null))?.let { out.put(k, it) }
+            }
+        }
+        return out
+    }
+
+    private fun hexToLongOrNull(hex: String?): Long? {
+        val clean = hex?.trim()?.removePrefix("0x")?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching { clean.toBigInteger(16).toLong() }.getOrNull()
+    }
+
+    /** One page of normalized entities plus the next cursor (null when iteration ends). */
+    private fun queryPage(query: String, pageSize: Int, cursor: String?): Pair<List<JSONObject>, String?> {
+        val result = arkivQuery(query, pageSize, cursor)
+        val data = result.optJSONArray("data") ?: JSONArray()
+        val items = List(data.length()) { idx -> normalizeEntity(data.getJSONObject(idx)) }
+        val next = result.optString("cursor", null).takeIf { it.isNotEmpty() }
+            ?.takeIf { items.size >= pageSize }
+        return items to next
+    }
+
     override suspend fun listMediaForOwner(
         owner: String,
         pageSize: Int,
@@ -43,26 +140,9 @@ class ArkivClientImpl @Inject constructor(
         notConfigured<ArkivPage<MediaItem>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                val url = buildUrl("/api/arkiv/media")
-                    .addQueryParameter("owner", owner)
-                    .addQueryParameter("pageSize", pageSize.toString())
-                    .apply { cursor?.let { addQueryParameter("cursor", it) } }
-                    .build()
-                    .toString()
-                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        HavenError.NetworkError("Couldn't reach Haven's content list (${response.code})."),
-                    )
-                }
-                val body = response.body?.string() ?: return@withContext Result.failure(
-                    HavenError.CacheMiss("No content came back."),
-                )
-                val json = JSONObject(body)
-                val items = json.getJSONArray("items")
-                val mediaItems = List(items.length()) { idx -> items.getJSONObject(idx).toMediaItem() }
-                val nextCursor = json.optString("nextCursor", null).takeIf { it.isNotEmpty() }
-                Result.success(ArkivPage(items = mediaItems, nextCursor = nextCursor))
+                // The SDK appends `$owner` unquoted; mirror it exactly.
+                val (items, nextCursor) = queryPage("\$owner=${owner.lowercase()}", pageSize, cursor)
+                Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -84,28 +164,15 @@ class ArkivClientImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 // Filters on the gating asset rather than the author, which is what makes this a feed
-                // of a community's archive instead of a list of one wallet's uploads.
-                val url = buildUrl("/api/arkiv/media")
-                    .addQueryParameter("gateChain", gate.chain)
-                    .addQueryParameter("gateTokenAddress", gate.tokenAddress)
-                    .addQueryParameter("pageSize", pageSize.toString())
-                    .apply { cursor?.let { addQueryParameter("cursor", it) } }
-                    .build()
-                    .toString()
-                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        HavenError.NetworkError("Couldn't reach Haven's content list (${response.code})."),
+                // of a community's archive instead of a list of one wallet's uploads. Same predicates
+                // as the dapp's `fetchCommunityFeedForToken`; the chain is stored as the EIP-155 id.
+                val chainId = HavenChain.parse(gate.chain)?.chainId
+                    ?: return@withContext Result.failure(
+                        HavenError.Internal("Unknown gate chain: ${gate.chain}"),
                     )
-                }
-                val body = response.body?.string() ?: return@withContext Result.failure(
-                    HavenError.CacheMiss("No content came back."),
-                )
-                val json = JSONObject(body)
-                val items = json.getJSONArray("items")
-                val mediaItems = List(items.length()) { idx -> items.getJSONObject(idx).toMediaItem() }
-                val nextCursor = json.optString("nextCursor", null).takeIf { it.isNotEmpty() }
-                Result.success(ArkivPage(items = mediaItems, nextCursor = nextCursor))
+                val query = "${eqStr("gate_token", gate.tokenAddress)} && ${eqNum("gate_chain", chainId)}"
+                val (items, nextCursor) = queryPage(query, pageSize, cursor)
+                Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -120,35 +187,22 @@ class ArkivClientImpl @Inject constructor(
         notConfigured<List<TokenGate>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                val url = buildUrl("/api/arkiv/gates")
-                    .apply {
-                        // Narrow server-side where possible; the result is filtered again below, since
-                        // an index that ignores the parameter must not widen what gets checked.
-                        chains.forEach { addQueryParameter("chain", it.aolVariant) }
+                // Arkiv has no concept of gates — they are Haven's reading of entity attributes
+                // (`gate_token`/`gate_chain`/`gate_threshold`, stamped at publish time). So discovery
+                // mirrors the dapp: page Haven video entities and collect distinct gate attributes
+                // client-side. Bounded: discovery pages the listing, it never crawls the archive.
+                val gates = mutableListOf<TokenGate>()
+                var cursor: String? = null
+                var pages = 0
+                do {
+                    val (items, next) = queryPage(VIDEO_GROUPS_QUERY, SCAN_PAGE_SIZE, cursor)
+                    for (item in items) {
+                        runCatching { item.toMediaItem().gate }.getOrNull()?.let { gates.add(it) }
                     }
-                    .build()
-                    .toString()
-                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        HavenError.NetworkError("Couldn't reach Haven's community list (${response.code})."),
-                    )
-                }
-                val body = response.body?.string() ?: return@withContext Result.success(emptyList())
-                val array = runCatching { JSONArray(body) }.getOrNull()
-                    ?: runCatching { JSONObject(body).getJSONArray("gates") }.getOrNull()
-                    ?: return@withContext Result.success(emptyList())
-
-                val gates = List(array.length()) { idx -> array.optJSONObject(idx) }.mapNotNull { entry -> entry?.toTokenGate() }
-
-                // One gate per (chain, contract): thresholds vary per entity, and the lowest is the one
-                // that decides whether anything under it is readable.
-                val deduplicated = gates
-                    .filter { HavenChain.parse(it.chain) in chains }
-                    .groupBy { "${HavenChain.parse(it.chain)?.aolVariant}:${it.tokenAddress.lowercase()}" }
-                    .mapNotNull { (_, group) -> group.minByOrNull { it.threshold } }
-
-                Result.success(deduplicated)
+                    cursor = next
+                    pages++
+                } while (cursor != null && pages < MAX_SCAN_PAGES)
+                Result.success(dedupeGates(gates, chains))
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -159,25 +213,40 @@ class ArkivClientImpl @Inject constructor(
         }
     }
 
+    /**
+     * One gate per (chain, contract): thresholds vary per entity, and the lowest is the one
+     * that decides whether anything under it is readable. Shared by the attribute scan and
+     * the legacy endpoint path.
+     */
+    private fun dedupeGates(gates: List<TokenGate>, chains: Set<HavenChain>): List<TokenGate> =
+        gates
+            .filter { HavenChain.parse(it.chain) in chains }
+            .groupBy { "${HavenChain.parse(it.chain)?.aolVariant}:${it.tokenAddress.lowercase()}" }
+            .mapNotNull { (_, group) -> group.minByOrNull { it.threshold } }
+
+    private companion object {
+        /** Entities per scan page; discovery pages the listing, it never loads the archive. */
+        const val SCAN_PAGE_SIZE = 50
+        /** Hard bound so a huge archive cannot turn discovery into an unbounded crawl. */
+        const val MAX_SCAN_PAGES = 10
+        /** Haven video groups that carry gate attributes (see dapp `arkiv-publish`). */
+        const val VIDEO_GROUPS_QUERY =
+            "(grp = \"haven.video.full\" || grp = \"haven.video.drip.series\" || grp = \"haven.video.drip.part\")"
+    }
+
     override suspend fun discoverUserCommunities(address: String): Result<List<Community>> {
         notConfigured<List<Community>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                val url = buildUrl("/api/arkiv/communities")
-                    .addQueryParameter("address", address)
-                    .build()
-                    .toString()
-                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        HavenError.NetworkError("Couldn't reach Haven's community list (${response.code})."),
-                    )
-                }
-                val body = response.body?.string() ?: return@withContext Result.failure(
-                    HavenError.CacheMiss("No communities came back."),
-                )
-                val jsonArray = JSONArray(body)
-                val communities = List(jsonArray.length()) { idx -> jsonArray.getJSONObject(idx) }.mapNotNull { it.toCommunity() }
+                // Dapp parity (`discoverUserCommunities`): the wallet's own entities, gate attributes
+                // read locally. Answers "nothing" for a reader who never published — that is why
+                // `discoverGates` exists alongside it.
+                val (items, _) = queryPage("\$owner=${address.lowercase()}", SCAN_PAGE_SIZE, null)
+                val communities = items
+                    .mapNotNull { runCatching { it.toCommunity() }.getOrNull() }
+                    // Local key, not the checker: core-collections owns gate keys and already
+                    // depends on this module, so importing it here would be circular.
+                    .distinctBy { "${it.gate.chain}:${it.gate.tokenAddress.lowercase()}" }
                 Result.success(communities)
             } catch (e: HavenError) {
                 Result.failure(e)
@@ -195,19 +264,13 @@ class ArkivClientImpl @Inject constructor(
         notConfigured<MediaItem?>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                val url = buildUrl("/api/arkiv/media/$id").build().toString()
-                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                if (!response.isSuccessful) {
-                    if (response.code == 404) {
-                        return@withContext Result.success(null)
-                    }
-                    return@withContext Result.failure(
-                        HavenError.NetworkError("Couldn't load this item (${response.code})."),
-                    )
+                // Same `$key` lookup as the SDK's `getEntity`; keys are 32 bytes of hex.
+                val clean = id.trim().removePrefix("0x")
+                if (clean.length != 64 || !clean.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                    return@withContext Result.success(null)
                 }
-                val body = response.body?.string() ?: return@withContext Result.success(null)
-                val json = JSONObject(body)
-                Result.success(json.toMediaItem())
+                val (items, _) = queryPage("\$key = 0x${clean.lowercase()}", 1, null)
+                Result.success(items.firstOrNull()?.let { runCatching { it.toMediaItem() }.getOrNull() })
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -224,8 +287,8 @@ class ArkivClientImpl @Inject constructor(
      * Returns a typed failure when there is no endpoint to call, and null when there is.
      *
      * Generic so each caller keeps its own `Result<T>`. Without this, an unconfigured build threw
-     * `HavenError.Internal("Invalid Arkiv endpoint URL: ")` out of `buildUrl` for every query,
-     * which surfaced to the user as an unexplained failure rather than "not set up yet".
+     * out of URL building for every query, which surfaced to the user as an unexplained failure
+     * rather than "not set up yet".
      */
     private fun <T> notConfigured(): Result<T>? =
         if (config.isConfigured) {
@@ -237,12 +300,6 @@ class ArkivClientImpl @Inject constructor(
                 ),
             )
         }
-
-    private fun buildUrl(path: String): okhttp3.HttpUrl.Builder {
-        val baseUrl = config.endpointUrl.toHttpUrlOrNull()
-            ?: throw HavenError.Internal("Invalid Arkiv endpoint URL: ${config.endpointUrl}")
-        return baseUrl.newBuilder().addPathSegments(path.trimStart('/'))
-    }
 
     /**
      * Entity -> `MediaItem`, against ARKIV_FORMAT 2.0.0 canonical keys.
@@ -410,7 +467,7 @@ class ArkivClientImpl @Inject constructor(
      * read directly. A row missing either the chain or the contract is skipped rather than defaulted —
      * a gate with a guessed chain checks the wrong balance and answers confidently.
      */
-    private fun JSONObject.toTokenGate(): TokenGate? {
+    internal fun JSONObject.toTokenGate(): TokenGate? {
         val rawChain = firstChain("gate_chain", "gateChain", "chain") ?: return null
         val token = firstString("gateTokenAddress", "gate_token", "tokenAddress") ?: return null
         val chain = HavenChain.parse(rawChain) ?: return null

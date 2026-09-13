@@ -23,10 +23,12 @@ wallet.projectId=
 haven.aol.canisterId=
 haven.aol.icHost=https://ic0.app
 
-# ── Arkiv gateway ────────────────────────────────────────────────────────────────────────────
-# Base URL for entity queries (/api/arkiv/media, /api/arkiv/communities). Blank means the library
-# renders from the local Room mirror only — which is a genuinely useful offline mode.
+# ── Arkiv chain ──────────────────────────────────────────────────────────────────────────────
+# JSON-RPC URL of the Arkiv chain, queried directly with `arkiv_query` (same as the dapp's
+# @arkiv-network/sdk). Blank means the library renders from the local Room mirror only —
+# which is a genuinely useful offline mode.
 # Surfaces as BuildConfig.ARKIV_ENDPOINT_URL in :core-arkiv.
+# Tiramisu (latest testnet): https://rpc.tiramisu.db-chain.testnet.arkiv.network
 arkiv.endpointUrl=
 
 # ── EVM balance reads (access checks) ────────────────────────────────────────────────────────

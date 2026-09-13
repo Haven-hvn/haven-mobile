@@ -3,10 +3,10 @@ package haven.mobile.core.arkiv
 /**
  * Arkiv connection settings.
  *
- * [endpointUrl] may be blank — that is the state of a fresh clone with no `local.properties`. The
- * client checks [isConfigured] and returns a typed "not configured" failure rather than building a
- * request against an empty base URL, which previously threw `HavenError.Internal` from deep inside
- * `buildUrl` on every single query.
+ * [endpointUrl] is the chain's JSON-RPC URL (e.g. Tiramisu), queried directly with `arkiv_query`
+ * — there is no REST gateway in front of Arkiv. It may be blank: a fresh clone with no
+ * `local.properties` renders from the local Room mirror only, which is a genuinely useful
+ * offline mode.
  */
 data class ArkivConfig(
     val endpointUrl: String,
