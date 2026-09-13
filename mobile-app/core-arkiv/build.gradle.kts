@@ -19,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        // Arkiv gateway base URL. Empty is a valid state: the client reports "not configured"
+        // Arkiv chain JSON-RPC URL. Empty is a valid state: the client reports "not configured"
         // instead of throwing, so a fresh clone builds and runs against the local mirror only.
         buildConfigField(
             "String",
@@ -37,4 +37,6 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")
+    // Real org.json on the JVM test classpath: android.jar stubs throw RuntimeException("Stub!").
+    testImplementation("org.json:json:20231013")
 }
