@@ -89,7 +89,8 @@ class WatchViewModel @Inject constructor(
     private val plaintextSpool: PlaintextSpool,
     private val aesKeyCache: AesKeyCache,
     private val mediaRepository: MediaRepository,
-    private val walletSession: WalletSession,
+    /** Exposed so the drip sheet can offer in-app trading when a wallet is connected. */
+    val walletSession: WalletSession,
 ) : ViewModel() {
 
     private val itemId = MutableStateFlow<String?>(null)

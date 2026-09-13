@@ -123,6 +123,9 @@ fun DripPumpScreen(
     pump: DripPump,
     onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** Connected wallet; when null the sheet keeps its link-out and no trade panel renders. */
+    wallet: haven.mobile.core.wallet.WalletSession? = null,
+    walletAddress: String? = null,
 ) {
     val context = LocalContext.current
     val target = formatUsdCompact(pump.targetUsd)
@@ -179,6 +182,15 @@ fun DripPumpScreen(
                 Icon(Icons.Default.OpenInNew, contentDescription = null)
                 Spacer(Modifier.size(HavenSpacing.sm))
                 Text("Pump it on mint.club")
+            }
+            if (wallet != null && walletAddress != null) {
+                Spacer(Modifier.height(HavenSpacing.md))
+                MintClubTradePanel(
+                    wallet = wallet,
+                    address = walletAddress,
+                    pump = pump,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             Spacer(Modifier.height(HavenSpacing.sm))
             OutlinedButton(

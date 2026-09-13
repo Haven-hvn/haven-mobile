@@ -21,4 +21,10 @@ interface WalletSession {
     suspend fun connect(): Result<String>
     suspend fun disconnect()
     suspend fun signTypedDataV4(json: String, chainId: Long): Result<String>
+
+    /**
+     * Submits a contract call through the connected wallet (`eth_sendTransaction`).
+     * The wallet signs and broadcasts; [Result] holds the tx hash on success.
+     */
+    suspend fun sendTransaction(to: String, data: String, chainId: Long, valueHex: String = "0x0"): Result<String>
 }

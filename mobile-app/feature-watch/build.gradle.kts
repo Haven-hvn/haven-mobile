@@ -18,6 +18,7 @@ dependencies {
     implementation(project(":core-cache"))
     implementation(project(":core-cache-mirror"))
     implementation(project(":core-wallet"))
+    implementation(libs.okhttp)
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)
     // ComponentActivity, for picture-in-picture and the SAF launcher.

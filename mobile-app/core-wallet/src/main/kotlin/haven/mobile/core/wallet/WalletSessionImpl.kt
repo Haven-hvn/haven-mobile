@@ -475,6 +475,110 @@ class WalletSessionImpl @Inject constructor(
             }
         }
     }
+
+    override suspend fun sendTransaction(to: String, data: String, chainId: Long, valueHex: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            val addr = try {
+                AppKit.getAccount()?.address
+            } catch (e: Exception) {
+                diagError("TX: getAccount threw", e)
+                return@withContext Result.failure(WalletError.NoAddressReturned)
+            }
+            if (addr.isNullOrBlank()) return@withContext Result.failure(WalletError.NoAddressReturned)
+
+            val tx = org.json.JSONObject().apply {
+                put("from", addr)
+                put("to", to)
+                put("data", data)
+                put("value", valueHex)
+            }
+            val params = JSONArray().apply { put(tx) }.toString()
+            val request = Request(
+                method = "eth_sendTransaction",
+                params = params,
+                chainId = "eip155:$chainId"
+            )
+
+            try {
+                diag("TX: requesting eth_sendTransaction — to=${to.take(12)}… chain=eip155:$chainId")
+                val hash: String = kotlinx.coroutines.withTimeout(180_000) {
+                    suspendCancellableCoroutine<String> { cont ->
+                        val forwarding = object : AppKit.ModalDelegate {
+                            override fun onSessionApproved(s: Modal.Model.ApprovedSession) {}
+                            override fun onSessionRejected(s: Modal.Model.RejectedSession) {}
+                            override fun onSessionUpdate(s: Modal.Model.UpdatedSession) {}
+                            override fun onSessionEvent(s: Modal.Model.SessionEvent) {}
+                            override fun onSessionExtend(s: Modal.Model.Session) {}
+                            override fun onSessionDelete(s: Modal.Model.DeletedSession) {
+                                scope.launch {
+                                    walletDataStore.clearAll()
+                                    _address.value = null
+                                }
+                            }
+                            override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
+                                when (val result = response.result) {
+                                    is Modal.Model.JsonRpcResponse.JsonRpcResult -> {
+                                        val h = result.result as? String
+                                        if (h != null && cont.isActive) cont.resume(h)
+                                    }
+                                    is Modal.Model.JsonRpcResponse.JsonRpcError -> {
+                                        if (cont.isActive) {
+                                            cont.resumeWithException(Exception("${result.code}: ${result.message}"))
+                                        }
+                                    }
+                                }
+                            }
+                            override fun onProposalExpired(p: Modal.Model.ExpiredProposal) {}
+                            override fun onRequestExpired(r: Modal.Model.ExpiredRequest) {
+                                if (cont.isActive) cont.resumeWithException(Exception("Request expired"))
+                            }
+                            override fun onConnectionStateChange(s: Modal.Model.ConnectionState) {}
+                            override fun onError(error: Modal.Model.Error) {
+                                diagError("TX: delegate onError", error.throwable)
+                                if (cont.isActive) cont.resumeWithException(error.throwable)
+                            }
+                        }
+                        try {
+                            AppKit.setDelegate(forwarding)
+                        } catch (e: Exception) {
+                            if (cont.isActive) cont.resumeWithException(e)
+                            return@suspendCancellableCoroutine
+                        }
+                        try {
+                            AppKit.request(
+                                request = request,
+                                onSuccess = { sent ->
+                                    diag("TX: request sent — waiting for wallet approval")
+                                },
+                                onError = { err ->
+                                    diagError("TX: AppKit.request onError", err)
+                                    if (cont.isActive) cont.resumeWithException(err)
+                                }
+                            )
+                        } catch (e: Exception) {
+                            diagError("TX: AppKit.request threw", e)
+                            if (cont.isActive) cont.resumeWithException(e)
+                        }
+                    }
+                }
+                try {
+                    registerSessionDelegate()
+                } catch (_: Exception) {}
+                if (!hash.startsWith("0x") || hash.length != 66) {
+                    return@withContext Result.failure(WalletError.TransactionFailed("Bad tx hash: $hash"))
+                }
+                diag("TX: sent ${hash.take(12)}…")
+                Result.success(hash)
+            } catch (e: Exception) {
+                try {
+                    registerSessionDelegate()
+                } catch (_: Exception) {}
+                when (e) {
+                    is WalletError -> Result.failure(e)
+                    else -> Result.failure(WalletError.TransactionFailed(e.message ?: "Unknown error"))
+                }
+            }
+        }
 }
 
 sealed class WalletError : Exception() {
@@ -489,4 +593,5 @@ sealed class WalletError : Exception() {
         override val message: String get() = "Invalid signature format — expected 0x + 130 hex chars"
     }
     data class SigningFailed(override val message: String) : WalletError()
+    data class TransactionFailed(override val message: String) : WalletError()
 }

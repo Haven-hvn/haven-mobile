@@ -123,10 +123,13 @@ fun WatchScreen(
                     // Method 4 (gate_type 4): the chunk unlocks collectively when the gate
                     // token is pumped to its market-cap target. Say so up front with the
                     // buy link — never send viewers into a decrypt that cannot succeed.
+                    val walletAddress by viewModel.walletSession.address.collectAsState()
                     DripPumpScreen(
                         media = media,
                         pump = pump,
                         onRetry = { viewModel.retry(media) },
+                        wallet = viewModel.walletSession,
+                        walletAddress = walletAddress,
                     )
                 } else {
                     if (media.kind.rendersInline()) {
