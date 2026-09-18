@@ -20,12 +20,15 @@ abstract class ArkivDiModule {
 object ArkivConfigModule {
     /**
      * Endpoint comes from `local.properties` via `BuildConfig` (see this module's build script),
-     * the same pattern as `wallet.projectId` and `haven.aol.*`. It used to be hard-coded to `""`,
-     * which meant every Arkiv call failed while looking like a network error.
+     * the same pattern as `wallet.projectId` and `haven.aol.*`. CI/release builds have no
+     * `local.properties`, where `BuildConfig` would otherwise be blank — so a blank value falls
+     * back to Tiramisu, the same default haven-dapp and haven-cli use. A missing config value
+     * must never be what "offline" means; offline is no connectivity at call time.
      */
     @Provides
     @Singleton
     fun provideArkivConfig(): ArkivConfig = ArkivConfig(
-        endpointUrl = BuildConfig.ARKIV_ENDPOINT_URL,
+        endpointUrl = BuildConfig.ARKIV_ENDPOINT_URL
+            .ifBlank { "https://rpc.tiramisu.db-chain.testnet.arkiv.network" },
     )
 }

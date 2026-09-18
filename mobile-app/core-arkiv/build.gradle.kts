@@ -19,8 +19,10 @@ android {
     }
 
     defaultConfig {
-        // Arkiv chain JSON-RPC URL. Empty is a valid state: the client reports "not configured"
-        // instead of throwing, so a fresh clone builds and runs against the local mirror only.
+        // Arkiv chain JSON-RPC URL, blank unless overridden in local.properties. A blank
+        // BuildConfig falls back to the Tiramisu default in ArkivDiModule, so every build
+        // can reach the chain; the client's "not configured" path only triggers on an
+        // explicitly blank ArkivConfig (e.g. tests).
         buildConfigField(
             "String",
             "ARKIV_ENDPOINT_URL",

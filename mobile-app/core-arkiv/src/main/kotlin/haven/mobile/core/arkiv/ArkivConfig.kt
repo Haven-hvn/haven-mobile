@@ -3,10 +3,10 @@ package haven.mobile.core.arkiv
 /**
  * Arkiv connection settings.
  *
- * [endpointUrl] is the chain's JSON-RPC URL (e.g. Tiramisu), queried directly with `arkiv_query`
- * — there is no REST gateway in front of Arkiv. It may be blank: a fresh clone with no
- * `local.properties` renders from the local Room mirror only, which is a genuinely useful
- * offline mode.
+ * [endpointUrl] is the chain's JSON-RPC URL (Tiramisu by default), queried directly with
+ * `arkiv_query` — there is no REST gateway in front of Arkiv. Production DI always supplies
+ * a value (see `ArkivDiModule`); a blank URL only ever means "explicitly unconfigured",
+ * never "offline" — offline is no connectivity at call time.
  */
 data class ArkivConfig(
     val endpointUrl: String,

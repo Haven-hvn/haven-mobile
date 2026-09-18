@@ -25,10 +25,10 @@ haven.aol.icHost=https://ic0.app
 
 # ── Arkiv chain ──────────────────────────────────────────────────────────────────────────────
 # JSON-RPC URL of the Arkiv chain, queried directly with `arkiv_query` (same as the dapp's
-# @arkiv-network/sdk). Blank means the library renders from the local Room mirror only —
-# which is a genuinely useful offline mode.
+# @arkiv-network/sdk). This is an OVERRIDE ONLY: left blank, the app uses the Tiramisu
+# default (https://rpc.tiramisu.db-chain.testnet.arkiv.network), same as haven-dapp and
+# haven-cli. Set it only to point at a different chain.
 # Surfaces as BuildConfig.ARKIV_ENDPOINT_URL in :core-arkiv.
-# Tiramisu (latest testnet): https://rpc.tiramisu.db-chain.testnet.arkiv.network
 arkiv.endpointUrl=
 
 # ── EVM balance reads (access checks) ────────────────────────────────────────────────────────
