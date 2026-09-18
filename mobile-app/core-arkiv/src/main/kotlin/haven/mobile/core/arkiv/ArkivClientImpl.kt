@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.math.BigInteger
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,23 +38,34 @@ class ArkivClientImpl @Inject constructor(
         .build()
 
     /**
-     * Direct `arkiv_query` JSON-RPC against the chain (see `@arkiv-network/sdk` `processQuery`).
+     * Direct `arkiv_query` JSON-RPC against the chain, byte-compatible with `@arkiv-network/sdk`
+     * 0.8 `runQuery` (CLI `ArkivEngineClient.query` sends the same shape).
      *
-     * There is no REST gateway in front of Arkiv: predicates serialize to a query string
-     * (`gate_token = "0x…" && gate_chain = 8453`, `$owner=0x…`, `$key = 0x…`), options carry hex
-     * `resultsPerPage` plus an opaque `cursor`, and the result is `{data, blockNumber, cursor}`.
-     * Iteration ends when `cursor` is absent/empty or the page comes back short.
+     * There is no REST gateway in front of Arkiv. Predicates serialize to a query string with
+     * type-tagged literals (`gate_token = str('0x…') AND gate_chain = i32(8453)`,
+     * `$owner = addr(0x…)`, `$key = key(0x…)`); options carry the full `select` map plus a hex
+     * `limit` and an opaque `cursor`; the result is `{data, blockNumber, cursor}`. Iteration
+     * ends when `cursor` is absent/empty or the page comes back short.
+     *
+     * The tagged literals are load-bearing, verified against the live node: bare hex is
+     * rejected ("a hex literal must carry its type"), double-quoted strings are a parse error
+     * (single quotes only), and the combinators are `AND`/`OR`, not `&&`/`||`.
      */
-    private fun arkivQuery(query: String, resultsPerPage: Int, cursor: String?): JSONObject {
+    private fun arkivQuery(query: String, limit: Int, cursor: String?): JSONObject {
         val options = JSONObject()
-            .put("includeData", JSONObject()
+            .put("select", JSONObject()
                 .put("key", true)
-                .put("attributes", true)
-                .put("contentType", true)
                 .put("owner", true)
                 .put("creator", true)
-                .put("createdAtBlock", true))
-            .put("resultsPerPage", "0x" + resultsPerPage.toString(16))
+                .put("createdAt", true)
+                .put("updatedAt", false)
+                .put("expiresAt", true)
+                .put("creationFlags", false)
+                .put("contentType", true)
+                .put("payload", false)
+                .put("attributeSchema", false)
+                .put("attributes", true))
+            .put("limit", "0x" + limit.toString(16))
             .apply { cursor?.let { put("cursor", it) } }
         val body = JSONObject()
             .put("jsonrpc", "2.0")
@@ -78,55 +90,121 @@ class ArkivClientImpl @Inject constructor(
         }
     }
 
-    /** `key = "value"` predicate, strings double-quoted exactly like the SDK serializes them. */
+    /**
+     * `key = str('value')` predicate, exactly like the SDK serializes `eq(name, string)`.
+     * Single quotes only — a double-quoted string is a node parse error.
+     */
     private fun eqStr(key: String, value: String): String =
-        "$key = \"${value.replace("\"", "")}\""
-
-    /** `key = 123` predicate for numeric attributes (chain ids, thresholds). */
-    private fun eqNum(key: String, value: Long): String = "$key = $value"
+        "$key = str('${value.replace("'", "")}')"
 
     /**
-     * Raw chain entity -> the flat shape the item parser reads.
-     *
-     * The chain splits attributes into `stringAttributes` / `numericAttributes` (hex values);
-     * the parser wants plain keys, so string values pass through and numeric hex decodes to Long.
+     * `key = i32(123)` predicate for numeric attributes (chain ids), like the SDK's
+     * `eq(name, number)`. Bare ints parse, but writers stamp numbers as `i32` and comparison
+     * is type-exact, so the tag stays.
      */
-    private fun normalizeEntity(raw: JSONObject): JSONObject {
+    private fun eqNum(key: String, value: Long): String = "$key = i32($value)"
+
+    /**
+     * Raw chain row -> the flat shape the item parser reads.
+     *
+     * The node returns SDK 0.8 `RpcEntity` rows: flat `key`/`owner`/`creator`/`createdAt`/
+     * `expiresAt`/`contentType` fields plus `attributes` as `[{name, type, value}]` with
+     * type-tagged values. Decoding mirrors CLI `decode_rpc_entity` / SDK
+     * `entityFromRpcResult`: block heights land under the `*Block` keys the readers expect,
+     * attributes merge in decoded, and anything unknown is skipped rather than guessed.
+     */
+    internal fun normalizeRpcEntity(raw: JSONObject): JSONObject {
         val out = JSONObject()
         raw.optString("key", null)?.let { out.put("id", it); out.put("key", it); out.put("entityKey", it) }
         raw.optString("owner", null)?.let { out.put("owner", it) }
         raw.optString("creator", null)?.let { out.put("creator", it) }
         raw.optString("contentType", null)?.let { out.put("contentType", it) }
-        hexToLongOrNull(raw.optString("createdAtBlock", null))?.let { out.put("createdAtBlock", it) }
-        val strings = raw.optJSONArray("stringAttributes")
-        if (strings != null) {
-            for (i in 0 until strings.length()) {
-                val attr = strings.optJSONObject(i) ?: continue
-                val k = attr.optString("key", null) ?: continue
-                if (!attr.isNull("value")) out.put(k, attr.optString("value"))
-            }
-        }
-        val numerics = raw.optJSONArray("numericAttributes")
-        if (numerics != null) {
-            for (i in 0 until numerics.length()) {
-                val attr = numerics.optJSONObject(i) ?: continue
-                val k = attr.optString("key", null) ?: continue
-                hexToLongOrNull(attr.optString("value", null))?.let { out.put(k, it) }
+        decodeRpcInt(raw.opt("createdAt"))?.let { out.put("createdAtBlock", it) }
+        decodeRpcInt(raw.opt("expiresAt"))?.let { out.put("expiresAtBlock", it) }
+        val attributes = raw.optJSONArray("attributes")
+        if (attributes != null) {
+            for (i in 0 until attributes.length()) {
+                val entry = attributes.optJSONObject(i) ?: continue
+                val name = entry.optString("name", null) ?: continue
+                decodeRpcValue(entry.optString("type", null), entry.opt("value"))
+                    ?.let { out.put(name, it) }
             }
         }
         return out
     }
 
-    private fun hexToLongOrNull(hex: String?): Long? {
-        val clean = hex?.trim()?.removePrefix("0x")?.takeIf { it.isNotEmpty() } ?: return null
-        return runCatching { clean.toBigInteger(16).toLong() }.getOrNull()
+    /**
+     * One `{name, type, value}` attribute -> the flat value readers expect.
+     *
+     * Tags mirror CLI `decode_rpc_value` (`bool`, `i32`, `u64`, `u256`, `dec`, `bytes32`,
+     * `str`, `addr`, `key`, `bytes`). Writers stamp strings as `str` and numbers as `i32`
+     * (see dapp `lib/arkiv-attrs`), so those two carry every Haven attribute in practice;
+     * the rest decode for completeness. Unknown tags and malformed values decode to null
+     * and the attribute is skipped — a corrupt row degrades to fewer fields, not a
+     * failed page.
+     */
+    private fun decodeRpcValue(tag: String?, value: Any?): Any? {
+        if (value == null || value === JSONObject.NULL) return null
+        return when (tag) {
+            "bool" -> when (value) {
+                is Boolean -> value
+                is String -> when (value) {
+                    "true" -> true
+                    "false" -> false
+                    else -> null
+                }
+                else -> null
+            }
+            "i32" -> decodeRpcInt(value)
+            // u64 can exceed Long.MAX_VALUE; u256 always might. Long when exact, Double
+            // otherwise — the threshold reader is Double-based, so nothing downstream breaks.
+            "u64", "u256" -> decodeRpcU256(value)
+            "dec", "str", "addr", "key", "bytes32" -> value as? String
+            // No reader takes raw bytes; keep the 0x spelling so a future one can hex-decode it.
+            "bytes" -> (value as? String)?.takeIf { it.startsWith("0x") }
+            else -> null
+        }
+    }
+
+    /** Block heights and `i32` values: a JSON number, `0x` quantity, or decimal string. */
+    private fun decodeRpcInt(value: Any?): Long? = when (value) {
+        is Number -> value.toLong()
+        is String -> {
+            val clean = value.trim()
+            runCatching {
+                if (clean.startsWith("0x", ignoreCase = true)) clean.substring(2).toBigInteger(16).longValueExact()
+                else clean.toLong()
+            }.getOrNull()
+        }
+        else -> null
+    }
+
+    /** `u64`/`u256` values: exact Long when it fits, Double otherwise (never null on overflow). */
+    private fun decodeRpcU256(value: Any?): Any? {
+        val big: BigInteger? = when (value) {
+            is BigInteger -> value
+            is Number -> BigInteger.valueOf(value.toLong())
+            is String -> {
+                val clean = value.trim()
+                runCatching {
+                    if (clean.startsWith("0x", ignoreCase = true)) clean.substring(2).toBigInteger(16)
+                    else clean.toBigInteger()
+                }.getOrNull()
+            }
+            else -> null
+        } ?: return null
+        return try {
+            big.longValueExact()
+        } catch (_: ArithmeticException) {
+            big.toDouble()
+        }
     }
 
     /** One page of normalized entities plus the next cursor (null when iteration ends). */
     private fun queryPage(query: String, pageSize: Int, cursor: String?): Pair<List<JSONObject>, String?> {
         val result = arkivQuery(query, pageSize, cursor)
         val data = result.optJSONArray("data") ?: JSONArray()
-        val items = List(data.length()) { idx -> normalizeEntity(data.getJSONObject(idx)) }
+        val items = List(data.length()) { idx -> normalizeRpcEntity(data.getJSONObject(idx)) }
         val next = result.optString("cursor", null).takeIf { it.isNotEmpty() }
             ?.takeIf { items.size >= pageSize }
         return items to next
@@ -140,8 +218,8 @@ class ArkivClientImpl @Inject constructor(
         notConfigured<ArkivPage<MediaItem>>()?.let { return it }
         return withContext(Dispatchers.IO) {
             try {
-                // The SDK appends `$owner` unquoted; mirror it exactly.
-                val (items, nextCursor) = queryPage("\$owner=${owner.lowercase()}", pageSize, cursor)
+                // Same `$owner` lookup the SDK emits for `ownedBy` (lowercase verifies OK on-chain).
+                val (items, nextCursor) = queryPage("\$owner = addr(${owner.lowercase()})", pageSize, cursor)
                 Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
             } catch (e: HavenError) {
                 Result.failure(e)
@@ -170,7 +248,7 @@ class ArkivClientImpl @Inject constructor(
                     ?: return@withContext Result.failure(
                         HavenError.Internal("Unknown gate chain: ${gate.chain}"),
                     )
-                val query = "${eqStr("gate_token", gate.tokenAddress)} && ${eqNum("gate_chain", chainId)}"
+                val query = "${eqStr("gate_token", gate.tokenAddress)} AND ${eqNum("gate_chain", chainId)}"
                 val (items, nextCursor) = queryPage(query, pageSize, cursor)
                 Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
             } catch (e: HavenError) {
@@ -229,9 +307,13 @@ class ArkivClientImpl @Inject constructor(
         const val SCAN_PAGE_SIZE = 50
         /** Hard bound so a huge archive cannot turn discovery into an unbounded crawl. */
         const val MAX_SCAN_PAGES = 10
-        /** Haven video groups that carry gate attributes (see dapp `arkiv-publish`). */
+        /**
+         * Haven video groups that carry gate attributes (see dapp `arkiv-publish`).
+         * Flat `OR` chain exactly like the SDK renders `or(...)` — the language has no
+         * `||`, and parenthesised groups are untested against the node, so none are used.
+         */
         const val VIDEO_GROUPS_QUERY =
-            "(grp = \"haven.video.full\" || grp = \"haven.video.drip.series\" || grp = \"haven.video.drip.part\")"
+            "grp = str('haven.video.full') OR grp = str('haven.video.drip.series') OR grp = str('haven.video.drip.part')"
     }
 
     override suspend fun discoverUserCommunities(address: String): Result<List<Community>> {
@@ -241,7 +323,7 @@ class ArkivClientImpl @Inject constructor(
                 // Dapp parity (`discoverUserCommunities`): the wallet's own entities, gate attributes
                 // read locally. Answers "nothing" for a reader who never published — that is why
                 // `discoverGates` exists alongside it.
-                val (items, _) = queryPage("\$owner=${address.lowercase()}", SCAN_PAGE_SIZE, null)
+                val (items, _) = queryPage("\$owner = addr(${address.lowercase()})", SCAN_PAGE_SIZE, null)
                 val communities = items
                     .mapNotNull { runCatching { it.toCommunity() }.getOrNull() }
                     // Local key, not the checker: core-collections owns gate keys and already
@@ -269,7 +351,7 @@ class ArkivClientImpl @Inject constructor(
                 if (clean.length != 64 || !clean.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
                     return@withContext Result.success(null)
                 }
-                val (items, _) = queryPage("\$key = 0x${clean.lowercase()}", 1, null)
+                val (items, _) = queryPage("\$key = key(0x${clean.lowercase()})", 1, null)
                 Result.success(items.firstOrNull()?.let { runCatching { it.toMediaItem() }.getOrNull() })
             } catch (e: HavenError) {
                 Result.failure(e)
