@@ -25,7 +25,7 @@ object HavenAolConfigModule {
         // Mainnet backend from haven-hvn/haven-aol; local.properties may still override.
         return HavenAolConfig(
             canisterId = try { haven.mobile.core.haven.aol.BuildConfig.HAVEN_AOL_CANISTER_ID } catch (_: Exception) { "" }
-                .ifBlank { "dciac-uaaaa-aaaad-qlzuq-cai" },
+                .ifBlank { "gny6k-fqaaa-aaaab-ag3ra-cai" },
             icHost = try { haven.mobile.core.haven.aol.BuildConfig.HAVEN_AOL_IC_HOST } catch (_: Exception) { "" }
                 .ifBlank { "https://ic0.app" },
         )
