@@ -14,9 +14,9 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 /**
- * Method 4 must surface a notice plus a buy link — never a bare decrypt error.
- * These pin the sheet's pure inputs: V4 detection, token/chain resolution, and
- * the mint.club trade URL shared with the dapp lock screen.
+ * Method 4 must surface a notice plus in-app trading — never a bare decrypt error.
+ * These pin the sheet's pure inputs: V4 detection and token/chain resolution for
+ * the trade panel.
  */
 class DripPumpSheetTest {
 
@@ -39,10 +39,7 @@ class DripPumpSheetTest {
         assertNotNull(pump)
         assertEquals(5_000_000, pump!!.targetUsd)
         assertEquals(HavenChain.BASE_MAINNET, pump.chain)
-        assertEquals(
-            "https://mint.club/token/base/0xabcDEF1234567890abcdef1234567890ABCDEF12",
-            pump.tradeUrl,
-        )
+        assertEquals("0xabcDEF1234567890abcdef1234567890ABCDEF12", pump.tokenAddress)
     }
 
     @Test
@@ -57,16 +54,17 @@ class DripPumpSheetTest {
         )
         val pump = item(encryptionMetadata = v4, gate = null).dripPump()
         assertNotNull(pump)
-        assertEquals("https://mint.club/token/base/0x1111111111111111111111111111111111111111", pump!!.tradeUrl)
+        assertEquals("0x1111111111111111111111111111111111111111", pump!!.tokenAddress)
+        assertEquals(HavenChain.BASE_MAINNET, pump.chain)
     }
 
     @Test
-    fun `v4 without any token still shows the notice, minus the buy link`() {
+    fun `v4 without any token still shows the notice, minus trading`() {
         val v4 = GateMetadata.V4(epochId = 1, marketCapTargetUsd = 1_000_000, wrappedKey = byteArrayOf(1), gateReference = "")
         val pump = item(encryptionMetadata = v4, gate = null).dripPump()
         assertNotNull(pump)
         assertNull(pump!!.tokenAddress)
-        assertNull(pump.tradeUrl)
+        assertNull(pump.chain)
     }
 
     @Test
@@ -74,13 +72,6 @@ class DripPumpSheetTest {
         val content = GateMetadata.V4(epochId = 1, marketCapTargetUsd = 5, wrappedKey = byteArrayOf(1), gateReference = "")
         val cid = GateMetadata.V4(epochId = 2, marketCapTargetUsd = 9, wrappedKey = byteArrayOf(2), gateReference = "")
         assertEquals(content, item(encryptionMetadata = content, cidEncryptionMetadata = cid).dripPumpGate())
-    }
-
-    @Test
-    fun `mintClubUrl matches the dapp shape`() {
-        assertEquals("https://mint.club/token/base/0xabc", mintClubUrl("0xabc", "base"))
-        assertEquals("https://mint.club/token/ethereum/0xabc", mintClubUrl("0xabc", "ethereum"))
-        assertNull(mintClubUrl("  ", "base"))
     }
 
     @Test

@@ -3,8 +3,6 @@ package haven.mobile.feature.watch
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,10 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,8 +39,10 @@ import haven.mobile.core.domain.havenChain
  *
  * A market-cap drip chunk unlocks collectively: the community pumps the gate token until its
  * market cap reaches the chunk target, and only then can holders decrypt. This screen says that
- * up front — with the buy link — instead of failing later with an inscrutable decrypt error.
- * It never unlocks content itself; the decrypt path stays fail-closed ([ haven.mobile.core.haven.aol.HavenAol]).
+ * up front — with the in-app trade panel — instead of failing later with an inscrutable decrypt
+ * error. It never unlocks content itself; the decrypt path stays fail-closed
+ * ([ haven.mobile.core.haven.aol.HavenAol]). The pump never leaves the app: no browser, no
+ * mint.club page.
  */
 data class DripPump(
     /** Whole-USD market-cap target for this chunk. */
@@ -53,8 +51,6 @@ data class DripPump(
     val tokenAddress: String?,
     /** Chain carrying the gate token, when it resolves. */
     val chain: HavenChain?,
-    /** mint.club trade page for the gate token. Null when the token is unknown. */
-    val tradeUrl: String?,
 )
 
 /** The v4 drip gate on this item, preferring the content gate over the CID-layer gate. */
@@ -75,21 +71,11 @@ fun MediaItem.dripPump(): DripPump? {
         ?: v4.tokenAddress.takeIf { it.isAddressShaped() }
         ?: v4.gateReference.takeIf { it.isAddressShaped() }
     val chain = gate?.havenChain() ?: HavenChain.parse(v4.chain.ifBlank { gate?.chain })
-    val networkKey = chain?.mintClubKey ?: "base"
     return DripPump(
         targetUsd = v4.marketCapTargetUsd,
         tokenAddress = token,
         chain = chain,
-        tradeUrl = token?.let { mintClubUrl(it, networkKey) },
     )
-}
-
-/** mint.club trade URL for a gate token. Mirrors dapp `buildMintClubUrl`. */
-fun mintClubUrl(token: String, networkKey: String): String? {
-    val t = token.trim()
-    if (t.isEmpty()) return null
-    val chain = networkKey.trim().lowercase().ifEmpty { "base" }
-    return "https://mint.club/token/$chain/$t"
 }
 
 /** `0x1234…abcd` for addresses, passthrough otherwise. Mirrors dapp `shortenAddress`. */
@@ -123,7 +109,7 @@ fun DripPumpScreen(
     pump: DripPump,
     onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    /** Connected wallet; when null the sheet keeps its link-out and no trade panel renders. */
+    /** Connected wallet; when null the sheet keeps share/copy and no trade panel renders. */
     wallet: haven.mobile.core.wallet.WalletSession? = null,
     walletAddress: String? = null,
 ) {
@@ -131,8 +117,7 @@ fun DripPumpScreen(
     val target = formatUsdCompact(pump.targetUsd)
     val tokenLabel = pump.tokenAddress?.let { shortAddress(it) } ?: "gate token"
     val chainLabel = pump.chain?.label ?: "its chain"
-    val shareText = "Help pump $tokenLabel to $target to premiere \"${media.title}\" on Haven" +
-        (pump.tradeUrl?.let { " — $it" } ?: "")
+    val shareText = "Help pump $tokenLabel to $target to premiere \"${media.title}\" on Haven"
 
     Column(
         modifier = modifier
@@ -171,26 +156,16 @@ fun DripPumpScreen(
             textAlign = TextAlign.Center,
         )
 
-        if (pump.tradeUrl != null) {
+        if (pump.tokenAddress != null) {
             Spacer(Modifier.height(HavenSpacing.xl))
-            Button(
-                onClick = { openUrl(context, pump.tradeUrl) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(HavenSpacing.touchTarget),
-            ) {
-                Icon(Icons.Default.OpenInNew, contentDescription = null)
-                Spacer(Modifier.size(HavenSpacing.sm))
-                Text("Pump it on mint.club")
-            }
             if (wallet != null && walletAddress != null) {
-                Spacer(Modifier.height(HavenSpacing.md))
                 MintClubTradePanel(
                     wallet = wallet,
                     address = walletAddress,
                     pump = pump,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(HavenSpacing.md))
             }
             Spacer(Modifier.height(HavenSpacing.sm))
             OutlinedButton(
@@ -252,14 +227,6 @@ fun DripPumpScreen(
             style = HavenTheme.text.monoSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-private fun openUrl(context: Context, url: String) {
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }.onFailure {
-        Toast.makeText(context, "No browser found for $url", Toast.LENGTH_SHORT).show()
     }
 }
 
