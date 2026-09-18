@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import haven.mobile.core.design.component.HavenDestination
@@ -21,6 +22,7 @@ sealed interface AppRoute {
     data object Collections : AppRoute
     data object Watch : AppRoute
     data object Community : AppRoute
+    data object Launches : AppRoute
     data object Settings : AppRoute
     data object Debug : AppRoute
 }
@@ -32,6 +34,7 @@ fun AppRoute.route(): String = when (this) {
     AppRoute.Collections -> "collections"
     AppRoute.Watch -> "watch/{$ARG_ITEM_ID}"
     AppRoute.Community -> "community"
+    AppRoute.Launches -> "launches"
     AppRoute.Settings -> "settings"
     AppRoute.Debug -> "debug"
 }
@@ -42,17 +45,20 @@ const val ARG_ITEM_ID: String = "itemId"
 fun watchRouteFor(itemId: String): String = "watch/$itemId"
 
 /**
- * Bottom navigation: four destinations.
+ * Bottom navigation: five destinations.
  *
  * Watch is not among them — it is a detail screen reached by choosing an item, and a nav slot that
  * needs an argument it does not have can only guess. Onboarding is a gate rather than a destination.
  *
  * Communities earns a permanent slot because joining one is how reading works at all, and the question
- * "why is my library empty" arrives at the worst possible moment.
+ * "why is my library empty" arrives at the worst possible moment. Launches sits next to the feed
+ * because it is the feed's complement: global discovery without gate membership, for finding
+ * premieres to pump rather than reading what you can already open.
  */
 val bottomDestinations: List<HavenDestination> = listOf(
     HavenDestination(route = "library", label = "Library", icon = Icons.Default.VideoLibrary),
     HavenDestination(route = "community", label = "Feed", icon = Icons.Default.Groups),
+    HavenDestination(route = "launches", label = "Launches", icon = Icons.Default.RocketLaunch),
     HavenDestination(route = "collections", label = "Communities", icon = Icons.Default.Explore),
     HavenDestination(route = "settings", label = "Settings", icon = Icons.Default.Settings),
 )

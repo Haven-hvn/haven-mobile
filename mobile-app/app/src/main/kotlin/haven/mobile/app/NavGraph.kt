@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import haven.mobile.feature.collections.collectionsRoute
 import haven.mobile.feature.community.communityRoute
+import haven.mobile.feature.launches.launchesRoute
 import haven.mobile.feature.library.libraryRoute
 import haven.mobile.feature.onboarding.onboardingRoute
 import haven.mobile.feature.settings.settingsRoute
@@ -37,6 +38,7 @@ fun AppNavGraph(
         collectionsRoute(navController = navController)
         watchRoute(navController = navController)
         communityRoute(navController = navController)
+        launchesRoute(navController = navController)
         settingsRoute(
             navController = navController,
             onNavigateBack = { navController.popBackStack() },

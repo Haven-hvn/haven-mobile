@@ -43,6 +43,7 @@ include(":feature-library")
 include(":feature-watch")
 include(":feature-community")
 include(":feature-collections")
+include(":feature-launches")
 include(":feature-settings")
 
 includeBuild("build-logic")

@@ -2,6 +2,7 @@ package haven.mobile.core.arkiv
 
 import haven.mobile.core.domain.Community
 import haven.mobile.core.domain.HavenChain
+import haven.mobile.core.domain.LaunchStage
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.TokenGate
 
@@ -45,6 +46,16 @@ interface ArkivClient {
      * [discoverGates] exists.
      */
     suspend fun discoverUserCommunities(address: String): Result<List<Community>>
+
+    /**
+     * Every live drip-launch stage on Arkiv, whoever published it.
+     *
+     * Parity with `haven-dapp`'s `UpcomingDrops`: drip PART entities joined to their SERIES header
+     * per `drip_id` (parts carry no title, token or chain of their own), stages past an expiry gap
+     * trimmed reader-side. Global discovery — no wallet, no gate membership — so a reader who holds
+     * nothing can still find launches to pump.
+     */
+    suspend fun listLaunches(): Result<List<LaunchStage>>
 
     suspend fun getMedia(id: String): Result<MediaItem?>
 }

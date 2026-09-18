@@ -3,6 +3,9 @@ package haven.mobile.core.arkiv
 import cloud.filecoin.foc.cache.FocChain
 import cloud.filecoin.foc.cache.PieceRef
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,8 +25,10 @@ import haven.mobile.core.domain.Community
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.GateMetadata
 import haven.mobile.core.domain.HavenChain
+import haven.mobile.core.domain.LaunchStage
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MerkleProofStep
+import haven.mobile.core.domain.selectLiveStages
 import haven.mobile.core.domain.TokenGate
 import haven.mobile.core.domain.TokenStandard
 import haven.mobile.core.domain.error.HavenError
@@ -332,6 +337,17 @@ class ArkivClientImpl @Inject constructor(
         /** Hard bound so a huge archive cannot turn discovery into an unbounded crawl. */
         const val MAX_SCAN_PAGES = 10
         /**
+         * Drip PART rows: the `grp` marker plus `gate_type = i32(4)`, the numeric per-marketcap
+         * spelling writers stamp. Same types the SDK emits, so comparison stays type-exact.
+         */
+        const val DRIP_PARTS_QUERY = "grp = str('haven.video.drip.part') AND gate_type = i32(4)"
+        const val DRIP_PART_GROUP = "haven.video.drip.part"
+        const val DRIP_SERIES_GROUP = "haven.video.drip.series"
+        /** Series headers per `drip_id`: one lookup, near-unique, same `limit(5)` as the dapp. */
+        const val SERIES_LOOKUP_LIMIT = 5
+        /** Sanity bound for `drip_idx`; anything past it is corrupt, not a late stage. */
+        const val MAX_DRIP_INDEX = 100_000L
+        /**
          * Haven video groups that carry gate attributes (see dapp `arkiv-publish`).
          * Flat `OR` chain exactly like the SDK renders `or(...)` — the language has no
          * `||`, and parenthesised groups are untested against the node, so none are used.
@@ -364,6 +380,52 @@ class ArkivClientImpl @Inject constructor(
                 )
             }
         }
+    }
+
+    override suspend fun listLaunches(): Result<List<LaunchStage>> {
+        notConfigured<List<LaunchStage>>()?.let { return it }
+        return withContext(Dispatchers.IO) {
+            try {
+                // Drip PARTs, walked whole: the gap rule needs every stage of a launch before it
+                // can tell a hole from a cut-off page, so the parts query pages (bounded, like
+                // `discoverGates`) instead of taking one capped list like the dapp's `limit(24)`.
+                val parts = mutableListOf<JSONObject>()
+                var cursor: String? = null
+                var pages = 0
+                do {
+                    val (items, next) = queryPage(DRIP_PARTS_QUERY, SCAN_PAGE_SIZE, cursor)
+                    parts += items.filter { it.optString("grp", null) == DRIP_PART_GROUP }
+                    cursor = next
+                    pages++
+                } while (cursor != null && pages < MAX_SCAN_PAGES)
+                // One series fetch per distinct drip_id — shared facts live on the header, never
+                // on the part. A single `drip_id` equality plus a client-side `grp` check, exactly
+                // like the dapp's find-or-create lookup.
+                val dripIds = parts
+                    .mapNotNull { it.optString("drip_id", null)?.takeIf { id -> id.isNotEmpty() } }
+                    .distinct()
+                val seriesById = coroutineScope {
+                    dripIds.map { dripId -> async { dripId to findDripSeries(dripId) } }
+                        .awaitAll()
+                        .mapNotNull { (dripId, series) -> series?.let { dripId to it } }
+                        .toMap()
+                }
+                val stages = parts.mapNotNull { it.toLaunchStage(seriesById) }
+                Result.success(selectLiveStages(stages))
+            } catch (e: HavenError) {
+                Result.failure(e)
+            } catch (e: Exception) {
+                Result.failure(
+                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
+                )
+            }
+        }
+    }
+
+    /** The SERIES header for one `drip_id`, or null when it has expired or never existed. */
+    private fun findDripSeries(dripId: String): JSONObject? {
+        val (items, _) = queryPage(eqStr("drip_id", dripId), SERIES_LOOKUP_LIMIT, null)
+        return items.firstOrNull { it.optString("grp", null) == DRIP_SERIES_GROUP }
     }
 
     override suspend fun getMedia(id: String): Result<MediaItem?> {
@@ -659,6 +721,57 @@ class ArkivClientImpl @Inject constructor(
             tokenStandard = standard,
         )
     }
+
+    /**
+     * One PART row plus its SERIES header -> a launch stage.
+     *
+     * Mirrors dapp `parseDripInfo` + the `UpcomingDrops` row mapping: per-stage facts (`drip_id`,
+     * `drip_idx`, `mcap_usd`) from the part, shared facts (title, total, token, chain) from the
+     * series. A part without a `drip_id` or without a positive `mcap_usd` is dropped — the dapp
+     * filters `marketCapTargetUsd > 0` the same way. A missing series degrades to "Untitled Drop"
+     * with no token rather than dropping the row: the stage exists and its target is real.
+     */
+    internal fun JSONObject.toLaunchStage(seriesById: Map<String, JSONObject>): LaunchStage? {
+        val dripId = firstString("drip_id")?.takeIf { it.isNotEmpty() } ?: return null
+        val target = firstLong("mcap_usd") ?: return null
+        val series = seriesById[dripId]
+        return LaunchStage(
+            id = firstString("id", "key", "entityKey") ?: "",
+            title = series?.firstString("title")?.takeIf { it.isNotEmpty() } ?: "Untitled Drop",
+            gateToken = series?.firstString("gate_token", "gateTokenAddress", "tokenAddress") ?: "",
+            gateChain = series?.let { HavenChain.parse(it.firstChain("gate_chain", "gateChain", "chain")) },
+            marketCapTargetUsd = target,
+            dripIndex = firstIndex("drip_idx") ?: 0,
+            dripTotal = series?.firstLong("drip_total")?.toInt() ?: 1,
+            dripId = dripId,
+            creatorHandle = series?.payloadField("creator"),
+            createdAtBlock = firstLong("created_at_block", "createdAtBlock"),
+        )
+    }
+
+    /** One string field out of the entity payload JSON (`payloadJson`); null when unreadable. */
+    private fun JSONObject.payloadField(name: String): String? {
+        val payload = optString("payloadJson", null)?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { JSONObject(payload) }.getOrNull()
+            ?.optString(name, null)?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Stage index (`drip_idx`): 0 is the premiere, so unlike [firstLong] this accepts zero.
+     * Garbage and absurd values fail closed to null (the caller then reads 0, the dapp's own
+     * fallback for a non-finite index).
+     */
+    private fun JSONObject.firstIndex(vararg keys: String): Int? = keys
+        .asSequence()
+        .mapNotNull { key ->
+            when (val value = opt(key)) {
+                is Number -> value.toLong()
+                is String -> value.trim().toLongOrNull()
+                else -> null
+            }?.takeIf { it in 0..MAX_DRIP_INDEX }
+        }
+        .firstOrNull()
+        ?.toInt()
 
     private fun JSONObject.firstString(vararg keys: String): String? = keys
         .asSequence()
