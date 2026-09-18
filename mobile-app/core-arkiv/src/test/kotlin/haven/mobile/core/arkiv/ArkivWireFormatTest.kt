@@ -72,8 +72,8 @@ class ArkivWireFormatTest {
     @Test
     fun `payload attn single parses`() {
         val out = normalized(RPC_ROW_SINGLE_ATTN)
-        val att = with(client) { out.parseAttestationOrNull() }
-        if (att !is Attestation.Single) fail("expected Single attestation")
+        val att = with(client) { out.parseAttestationOrNull() } as? Attestation.Single
+            ?: fail("expected Single attestation")
         assertEquals("BaseMainnet", att.chain)
         assertEquals(75.0, att.threshold)
         assertEquals(1781760000L, att.timestamp)
@@ -83,8 +83,8 @@ class ArkivWireFormatTest {
     @Test
     fun `payload attn merkle parses with proof steps verbatim`() {
         val out = normalized(RPC_ROW_MERKLE_ATTN)
-        val att = with(client) { out.parseAttestationOrNull() }
-        if (att !is Attestation.Merkle) fail("expected Merkle attestation")
+        val att = with(client) { out.parseAttestationOrNull() } as? Attestation.Merkle
+            ?: fail("expected Merkle attestation")
         assertEquals(2L, att.cidCount)
         assertEquals(1, att.merkleProof.size)
         assertEquals("right", att.merkleProof[0].side)
