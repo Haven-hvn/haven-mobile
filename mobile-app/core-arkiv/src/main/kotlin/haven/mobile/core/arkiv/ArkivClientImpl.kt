@@ -205,7 +205,7 @@ class ArkivClientImpl @Inject constructor(
 
     /** `u64`/`u256` values: exact Long when it fits, Double otherwise (never null on overflow). */
     private fun decodeRpcU256(value: Any?): Any? {
-        val big: BigInteger? = when (value) {
+        val big: BigInteger = when (value) {
             is BigInteger -> value
             is Number -> BigInteger.valueOf(value.toLong())
             is String -> {
