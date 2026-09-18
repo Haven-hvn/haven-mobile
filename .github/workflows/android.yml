@@ -42,7 +42,7 @@ jobs:
           cat > haven-mobile/mobile-app/local.properties <<'EOF'
           sdk.dir=/usr/local/lib/android/sdk
           wallet.projectId=02760a75be7577c92e7d39f1de04db31
-          haven.aol.canisterId=dciac-uaaaa-aaaad-qlzuq-cai
+          haven.aol.canisterId=gny6k-fqaaa-aaaab-ag3ra-cai
           haven.aol.icHost=https://ic0.app
           arkiv.endpointUrl=https://rpc.tiramisu.db-chain.testnet.arkiv.network
           EOF
