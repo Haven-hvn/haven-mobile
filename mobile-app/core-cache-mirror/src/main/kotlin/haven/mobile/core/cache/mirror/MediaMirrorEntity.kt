@@ -47,7 +47,9 @@ data class MediaMirrorEntity(
     val contentCacheStatus: String,
     val lastAccessedAt: String?,
     // Added in schema v2. Defaulted so the mapper and the fixtures keep compiling; the mirror is a
-    // cache, so v1 rows are dropped rather than migrated (see HavenMirrorDatabase).
+    // cache, so old rows are dropped rather than migrated (see HavenMirrorDatabase).
     val durationSeconds: Long? = null,
     val creatorHandle: String? = null,
+    // Added in schema v3: the creator address the attestation binding check needs.
+    val creatorAddress: String? = null,
 )

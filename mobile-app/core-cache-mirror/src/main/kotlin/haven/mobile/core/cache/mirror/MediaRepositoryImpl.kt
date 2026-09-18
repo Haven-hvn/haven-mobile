@@ -9,6 +9,7 @@ import haven.mobile.core.domain.GateMetadata
 import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import haven.mobile.core.domain.MerkleProofStep
 import haven.mobile.core.domain.TokenGate
 import haven.mobile.core.domain.TokenStandard
 import haven.mobile.core.domain.error.HavenError
@@ -317,6 +318,7 @@ class MediaRepositoryImpl @Inject constructor(
             lastAccessedAt = lastAccessedAt?.toString(),
             durationSeconds = durationSeconds,
             creatorHandle = creatorHandle,
+            creatorAddress = creatorAddress,
         )
     }
 
@@ -363,6 +365,7 @@ class MediaRepositoryImpl @Inject constructor(
             lastAccessedAt = lastAccessedAt?.let { Instant.parse(it) },
             durationSeconds = durationSeconds,
             creatorHandle = creatorHandle,
+            creatorAddress = creatorAddress,
         )
     }
 
@@ -401,13 +404,30 @@ class MediaRepositoryImpl @Inject constructor(
 
     private fun jsonFromAttestation(attestation: Attestation): String {
         val obj = JSONObject()
-        obj.put("subject", attestation.subject)
-        obj.put("signature", attestation.signature.toString(Charsets.UTF_8))
-        obj.put("signerKeyId", attestation.signerKeyId)
-        val proofArr = JSONArray()
-        attestation.merkleProof?.forEach { proofArr.put(it.toString(Charsets.UTF_8)) }
-        obj.put("merkleProof", proofArr)
-        obj.put("issuedAt", attestation.issuedAt.toString())
+        obj.put("evmAddress", attestation.evmAddress)
+        obj.put("chain", attestation.chain)
+        obj.put("tokenAddress", attestation.tokenAddress)
+        obj.put("threshold", attestation.threshold)
+        obj.put("balanceAtCheck", attestation.balanceAtCheck)
+        obj.put("cidHash", attestation.cidHash)
+        obj.put("timestamp", attestation.timestamp)
+        when (attestation) {
+            is Attestation.Single -> {
+                obj.put("type", "single")
+                obj.put("signature", attestation.signature)
+            }
+            is Attestation.Merkle -> {
+                obj.put("type", "merkle")
+                obj.put("cidCount", attestation.cidCount)
+                val proofArr = JSONArray()
+                attestation.merkleProof.forEach {
+                    proofArr.put(JSONObject().put("side", it.side).put("hash", it.hash))
+                }
+                obj.put("merkleProof", proofArr)
+                obj.put("merkleRoot", attestation.merkleRoot)
+                obj.put("rootSignature", attestation.rootSignature)
+            }
+        }
         return obj.toString()
     }
 
@@ -447,20 +467,53 @@ class MediaRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun parseAttestation(json: String): Attestation {
-        val obj = JSONObject(json)
-        val proofArr = obj.optJSONArray("merkleProof")
-        val merkleProof = if (proofArr != null) {
-            (0 until proofArr.length()).map { proofArr.getString(it).toByteArray(Charsets.UTF_8) }
-        } else {
-            null
+    /**
+     * Mirror rows are disposable cache: anything unreadable (including rows written by older
+     * app versions) degrades to "no attestation" and is re-fetched on the next refresh.
+     */
+    private fun parseAttestation(json: String): Attestation? {
+        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return null
+        val evmAddress = obj.optString("evmAddress", null)?.takeIf { it.isNotEmpty() } ?: return null
+        val chain = obj.optString("chain", null)?.takeIf { it.isNotEmpty() } ?: return null
+        val tokenAddress = obj.optString("tokenAddress", null)?.takeIf { it.isNotEmpty() } ?: return null
+        val threshold = obj.optDouble("threshold").takeIf { !it.isNaN() } ?: return null
+        val balanceAtCheck = obj.optDouble("balanceAtCheck").takeIf { !it.isNaN() } ?: return null
+        val cidHash = obj.optString("cidHash", null)?.takeIf { it.isNotEmpty() } ?: return null
+        if (obj.isNull("timestamp")) return null
+        val timestamp = obj.optLong("timestamp")
+        if (obj.optString("type", null) == "merkle") {
+            if (obj.isNull("cidCount")) return null
+            val proofArr = obj.optJSONArray("merkleProof") ?: return null
+            val steps = (0 until proofArr.length()).map { idx ->
+                val step = proofArr.optJSONObject(idx) ?: return null
+                MerkleProofStep(
+                    side = step.optString("side", null) ?: return null,
+                    hash = step.optString("hash", null) ?: return null,
+                )
+            }
+            return Attestation.Merkle(
+                evmAddress = evmAddress,
+                chain = chain,
+                tokenAddress = tokenAddress,
+                threshold = threshold,
+                balanceAtCheck = balanceAtCheck,
+                cidHash = cidHash,
+                timestamp = timestamp,
+                cidCount = obj.optLong("cidCount"),
+                merkleProof = steps,
+                merkleRoot = obj.optString("merkleRoot", null)?.takeIf { it.isNotEmpty() } ?: return null,
+                rootSignature = obj.optString("rootSignature", null)?.takeIf { it.isNotEmpty() } ?: return null,
+            )
         }
-        return Attestation(
-            subject = obj.getString("subject"),
-            signature = obj.getString("signature").toByteArray(Charsets.UTF_8),
-            signerKeyId = obj.getString("signerKeyId"),
-            merkleProof = merkleProof,
-            issuedAt = Instant.parse(obj.getString("issuedAt")),
+        return Attestation.Single(
+            evmAddress = evmAddress,
+            chain = chain,
+            tokenAddress = tokenAddress,
+            threshold = threshold,
+            balanceAtCheck = balanceAtCheck,
+            cidHash = cidHash,
+            timestamp = timestamp,
+            signature = obj.optString("signature", null)?.takeIf { it.isNotEmpty() } ?: return null,
         )
     }
 }

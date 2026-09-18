@@ -147,6 +147,33 @@ class HavenAolImpl @Inject constructor(
         }
     }
 
+    override suspend fun attestationPublicKey(): Result<ByteArray> {
+        if (config.canisterId.isBlank()) return Result.failure(HavenError.CanisterCallFailed("attestationPublicKey not configured"))
+        aesKeyCache.get("attestationPublicKey:${config.canisterId}")?.let { return Result.success(it) }
+        return try {
+            val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
+            val agent = dev.ic.kotlin.agent.IcAgent(transport)
+            val arg = dev.ic.kotlin.candid.CandidEncoder.encode(emptyList())
+            val replyBytes = agent.query(principal, "getAttestationPublicKey", arg)
+            val decoded = dev.ic.kotlin.candid.CandidDecoder.decode(replyBytes)
+            val first = decoded.firstOrNull()
+            val keyBytes: ByteArray? = when (first) {
+                is dev.ic.kotlin.candid.CandidValue.CandidBlob -> first.bytes
+                is dev.ic.kotlin.candid.CandidValue.CandidVec -> (first.items.firstOrNull() as? dev.ic.kotlin.candid.CandidValue.CandidBlob)?.bytes
+                else -> null
+            }
+            if (keyBytes != null) {
+                aesKeyCache.put("attestationPublicKey:${config.canisterId}", keyBytes)
+                Result.success(keyBytes)
+            } else {
+                Result.failure(HavenError.CanisterCallFailed("attestationPublicKey: unexpected Candid shape"))
+            }
+        } catch (e: Exception) {
+            Result.failure(HavenError.CanisterCallFailed("attestationPublicKey query failed for ${config.canisterId}: ${e.message}"))
+        }
+    }
+
     override suspend fun decryptAll(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>> {
         if (items.isEmpty()) return emptyList()
         // v3 batch: group by (epochId + gateReference) — one canister call per epoch, as in haven-aol-decrypt-v3.ts

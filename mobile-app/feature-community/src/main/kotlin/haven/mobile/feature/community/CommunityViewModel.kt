@@ -125,9 +125,7 @@ class CommunityViewModel @Inject constructor(
             val attestation = item.attestation
             val state = when {
                 attestation == null -> AttestationState.UNVERIFIED
-                attestation.merkleProof != null ->
-                    attestationVerifier.verifyBatch(attestation, item.id).toState()
-                else -> attestationVerifier.verifySingle(attestation, item.id).toState()
+                else -> attestationVerifier.verify(attestation, item).toState()
             }
             item.id to state
         }

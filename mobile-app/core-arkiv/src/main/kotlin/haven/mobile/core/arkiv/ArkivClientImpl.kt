@@ -23,6 +23,7 @@ import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.GateMetadata
 import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.domain.MediaItem
+import haven.mobile.core.domain.MerkleProofStep
 import haven.mobile.core.domain.TokenGate
 import haven.mobile.core.domain.TokenStandard
 import haven.mobile.core.domain.error.HavenError
@@ -62,7 +63,7 @@ class ArkivClientImpl @Inject constructor(
                 .put("expiresAt", true)
                 .put("creationFlags", false)
                 .put("contentType", true)
-                .put("payload", false)
+                .put("payload", true)
                 .put("attributeSchema", false)
                 .put("attributes", true))
             .put("limit", "0x" + limit.toString(16))
@@ -119,6 +120,13 @@ class ArkivClientImpl @Inject constructor(
         raw.optString("owner", null)?.let { out.put("owner", it) }
         raw.optString("creator", null)?.let { out.put("creator", it) }
         raw.optString("contentType", null)?.let { out.put("contentType", it) }
+        // Payload is entity metadata JSON (attestations live under `attn`); media bytes never
+        // touch the chain. Kept as text — only the attestation parser reads it.
+        raw.optString("payload", null)
+            ?.let { hexToBytesOrNull(it) }
+            ?.let { runCatching { it.toString(Charsets.UTF_8) }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+            ?.let { out.put("payloadJson", it) }
         decodeRpcInt(raw.opt("createdAt"))?.let { out.put("createdAtBlock", it) }
         decodeRpcInt(raw.opt("expiresAt"))?.let { out.put("expiresAtBlock", it) }
         val attributes = raw.optJSONArray("attributes")
@@ -129,6 +137,22 @@ class ArkivClientImpl @Inject constructor(
                 decodeRpcValue(entry.optString("type", null), entry.opt("value"))
                     ?.let { out.put(name, it) }
             }
+        }
+        // Row identity wins: a `creator` *attribute* (display name) must never overwrite the
+        // creator address the binding check needs, so it is preserved under its own key.
+        raw.optString("creator", null)?.let { out.put("creatorAddress", it) }
+        return out
+    }
+
+    /** Strict hex decode for `0x`-prefixed wire blobs — malformed input fails closed to null. */
+    private fun hexToBytesOrNull(hex: String): ByteArray? {
+        val clean = hex.trim().removePrefix("0x").takeIf { it.isNotEmpty() } ?: return null
+        if (clean.length % 2 != 0) return null
+        val out = ByteArray(clean.length / 2)
+        for (i in out.indices) {
+            val hi = clean[i * 2].digitToIntOrNull(16) ?: return null
+            val lo = clean[i * 2 + 1].digitToIntOrNull(16) ?: return null
+            out[i] = ((hi shl 4) or lo).toByte()
         }
         return out
     }
@@ -471,6 +495,7 @@ class ArkivClientImpl @Inject constructor(
             lastAccessedAt = null,
             durationSeconds = firstLong("dur_s"),
             creatorHandle = firstString("creator", "creatorHandle"),
+            creatorAddress = firstString("creatorAddress"),
         )
     }
 
@@ -487,22 +512,90 @@ class ArkivClientImpl @Inject constructor(
         return Instant.fromEpochMilliseconds(0)
     }
 
-    /** Attestations come from the canister, not the entity, so absence is normal. */
-    private fun JSONObject.parseAttestationOrNull(): Attestation? {
-        val attObj = optJSONObject("attn") ?: optJSONObject("attestation") ?: return null
-        val subject = attObj.optString("subject", null)?.takeIf { it.isNotEmpty() } ?: return null
-        val signature = attObj.optString("signature", null)?.takeIf { it.isNotEmpty() } ?: return null
-        return Attestation(
-            subject = subject,
-            signature = signature.toByteArray(Charsets.UTF_8),
-            signerKeyId = attObj.optString("signerKeyId", ""),
-            merkleProof = attObj.optJSONArray("merkleProof")?.let { arr ->
-                List(arr.length()) { idx -> arr.getString(idx).toByteArray(Charsets.UTF_8) }
-            },
-            issuedAt = attObj.optString("issuedAt", null)
-                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
-                ?: Instant.fromEpochMilliseconds(0),
+    /**
+     * The payload's `attn` object, if it carries a complete attestation.
+     *
+     * haven-cli embeds the canister's receipt verbatim (see dapp `types/attestation`), so the
+     * keys are camelCase and every binding field is required — anything missing fails closed
+     * to null rather than producing a half-attestation that could render verified. Absence is
+     * normal: most entities were never attested.
+     */
+    internal fun JSONObject.parseAttestationOrNull(): Attestation? {
+        val payload = optString("payloadJson", null)?.takeIf { it.isNotBlank() } ?: return null
+        val attn = runCatching { JSONObject(payload) }.getOrNull()?.opt("attn") ?: return null
+        val obj = when (attn) {
+            is JSONObject -> attn
+            is String -> runCatching { JSONObject(attn) }.getOrNull() ?: return null
+            else -> return null
+        }
+        return parseAttestationObject(obj)
+    }
+
+    /**
+     * `attn` JSON -> model, discriminated like dapp `isMerkleAttestation`: a `merkleRoot`
+     * string plus a `merkleProof` array routes to [Attestation.Merkle], anything else with a
+     * `signature` to [Attestation.Single]. Partially-populated payloads fail closed — a lone
+     * `merkleProof` without root lands in the Single branch, which then rejects it for the
+     * missing `signature`.
+     */
+    internal fun parseAttestationObject(obj: JSONObject): Attestation? {
+        val evmAddress = obj.requiredString("evmAddress") ?: return null
+        val chain = obj.requiredString("chain") ?: return null
+        val tokenAddress = obj.requiredString("tokenAddress") ?: return null
+        val threshold = obj.opt("threshold").let { jsonDoubleOrNull(it) } ?: return null
+        val balanceAtCheck = obj.opt("balanceAtCheck").let { jsonDoubleOrNull(it) } ?: return null
+        val cidHash = obj.requiredString("cidHash") ?: return null
+        val timestamp = jsonLongOrNull(obj.opt("timestamp")) ?: return null
+        val merkleRoot = obj.optString("merkleRoot", null)
+        val proofArray = obj.optJSONArray("merkleProof")
+        if (merkleRoot != null && proofArray != null) {
+            val cidCount = jsonLongOrNull(obj.opt("cidCount")) ?: return null
+            val steps = (0 until proofArray.length()).map { idx ->
+                val step = proofArray.optJSONObject(idx) ?: return null
+                MerkleProofStep(
+                    side = step.optString("side", null) ?: return null,
+                    hash = step.optString("hash", null) ?: return null,
+                )
+            }
+            return Attestation.Merkle(
+                evmAddress = evmAddress,
+                chain = chain,
+                tokenAddress = tokenAddress,
+                threshold = threshold,
+                balanceAtCheck = balanceAtCheck,
+                cidHash = cidHash,
+                timestamp = timestamp,
+                cidCount = cidCount,
+                merkleProof = steps,
+                merkleRoot = merkleRoot,
+                rootSignature = obj.requiredString("rootSignature") ?: return null,
+            )
+        }
+        return Attestation.Single(
+            evmAddress = evmAddress,
+            chain = chain,
+            tokenAddress = tokenAddress,
+            threshold = threshold,
+            balanceAtCheck = balanceAtCheck,
+            cidHash = cidHash,
+            timestamp = timestamp,
+            signature = obj.requiredString("signature") ?: return null,
         )
+    }
+
+    private fun JSONObject.requiredString(key: String): String? =
+        optString(key, null)?.takeIf { it.isNotEmpty() }
+
+    private fun jsonDoubleOrNull(value: Any?): Double? = when (value) {
+        is Number -> value.toDouble().takeIf { it.isFinite() }
+        is String -> value.trim().toDoubleOrNull()?.takeIf { it.isFinite() }
+        else -> null
+    }
+
+    private fun jsonLongOrNull(value: Any?): Long? = when (value) {
+        is Number -> value.toLong()
+        is String -> value.trim().toLongOrNull()
+        else -> null
     }
 
     /**

@@ -60,4 +60,12 @@ data class MediaItem(
      * which is both friendlier and the only human identity an entity carries.
      */
     val creatorHandle: String? = null,
+
+    /**
+     * The entity creator's address (`entity.creator`), preserved for attestation cross-checks.
+     *
+     * Distinct from [creatorHandle] on purpose: an entity may also carry a `creator` *attribute*
+     * (a display name), which takes over the handle slot. The binding check needs the address.
+     */
+    val creatorAddress: String? = null,
 )
