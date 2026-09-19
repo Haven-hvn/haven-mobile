@@ -15,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigInteger
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -43,6 +44,12 @@ class ArkivClientImpl @Inject constructor(
         .connectTimeout(config.timeoutMillis, TimeUnit.MILLISECONDS)
         .readTimeout(config.timeoutMillis, TimeUnit.MILLISECONDS)
         .build()
+
+    /**
+     * Block height -> header timestamp. Block timestamps are immutable, so entries never
+     * expire or revalidate; a refresh re-resolves only blocks it has never seen.
+     */
+    private val blockTimestampCache = ConcurrentHashMap<Long, Instant>()
 
     /**
      * Direct `arkiv_query` JSON-RPC against the chain, byte-compatible with `@arkiv-network/sdk`
@@ -252,6 +259,75 @@ class ArkivClientImpl @Inject constructor(
     }
 
     /**
+     * Fills in wall-clock creation dates from the chain.
+     *
+     * 2.0 entities carry no timestamp attribute — only the creation block — so items parse
+     * with [createdAt][MediaItem.createdAt] on epoch meaning "unknown". The block header holds
+     * the real time, one `eth_getBlockByNumber` per distinct block: those resolve here, in
+     * parallel, through the session cache. Anything unresolvable keeps epoch and still renders
+     * "Unknown date" — a failed lookup degrades the label, never the listing. Internal so the
+     * no-network pass-through pins.
+     */
+    internal suspend fun resolveCreatedAt(items: List<MediaItem>): List<MediaItem> {
+        val missing = items
+            .filter { it.createdAt == EPOCH }
+            .mapNotNull { it.createdAtBlock?.takeIf { block -> block > 0 } }
+            .distinct()
+            .filter { it !in blockTimestampCache }
+        if (missing.isNotEmpty()) {
+            coroutineScope {
+                missing.map { block ->
+                    async { fetchBlockTimestamp(block)?.let { blockTimestampCache[block] = it } }
+                }.awaitAll()
+            }
+        }
+        if (blockTimestampCache.isEmpty()) return items
+        return items.map { item ->
+            if (item.createdAt == EPOCH) {
+                item.createdAtBlock?.let { blockTimestampCache[it] }?.let { item.copy(createdAt = it) }
+                    ?: item
+            } else {
+                item
+            }
+        }
+    }
+
+    /** One block header timestamp, or null when the node cannot serve it. Never throws. */
+    private fun fetchBlockTimestamp(block: Long): Instant? {
+        val timestamp = runCatching {
+            val body = JSONObject()
+                .put("jsonrpc", "2.0")
+                .put("id", 1)
+                .put("method", "eth_getBlockByNumber")
+                .put("params", JSONArray().put("0x" + block.toString(16)).put(false))
+                .toString()
+                .toRequestBody("application/json".toMediaType())
+            httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).build())
+                .execute().use { response ->
+                    if (!response.isSuccessful) return@runCatching null
+                    val text = response.body?.string() ?: return@runCatching null
+                    parseBlockTimestamp(JSONObject(text).optJSONObject("result"))
+                }
+        }.getOrNull()
+        if (timestamp == null) Timber.d("Arkiv block timestamp lookup failed (block=%d)", block)
+        return timestamp
+    }
+
+    /**
+     * Block header -> wall-clock time. The node returns a `0x` quantity; decimal strings parse
+     * too, and anything else (missing block, malformed value, non-positive time) reads null so
+     * the item keeps its honest "unknown".
+     */
+    internal fun parseBlockTimestamp(result: JSONObject?): Instant? {
+        val raw = result?.optString("timestamp", null)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val seconds = runCatching {
+            if (raw.startsWith("0x", ignoreCase = true)) raw.substring(2).toLong(16)
+            else raw.toLong()
+        }.getOrNull()?.takeIf { it > 0 } ?: return null
+        return Instant.fromEpochSeconds(seconds)
+    }
+
+    /**
      * Next-page cursor, or null when iteration ends.
      *
      * The node omits `cursor` (or sends it empty) on the last page, and a short page is
@@ -275,7 +351,8 @@ class ArkivClientImpl @Inject constructor(
             try {
                 // Same `$owner` lookup the SDK emits for `ownedBy` (lowercase verifies OK on-chain).
                 val (items, nextCursor) = queryPage("\$owner = addr(${owner.lowercase()})", pageSize, cursor)
-                Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
+                val mapped = resolveCreatedAt(items.map { it.toMediaItem() })
+                Result.success(ArkivPage(items = mapped, nextCursor = nextCursor))
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -301,7 +378,8 @@ class ArkivClientImpl @Inject constructor(
                     )
                 val query = "${eqStr("gate_token", gate.tokenAddress)} AND ${eqNum("gate_chain", chainId)}"
                 val (items, nextCursor) = queryPage(query, pageSize, cursor)
-                Result.success(ArkivPage(items = items.map { it.toMediaItem() }, nextCursor = nextCursor))
+                val mapped = resolveCreatedAt(items.map { it.toMediaItem() })
+                Result.success(ArkivPage(items = mapped, nextCursor = nextCursor))
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -354,6 +432,8 @@ class ArkivClientImpl @Inject constructor(
         const val MAX_CAUSE_CHARS = 160
         /** Bound on the cause-chain walk; deeper chains report the ancestor at the cap. */
         const val MAX_CAUSE_DEPTH = 5
+        /** Epoch means "no wall-clock stamp" (see `parseCreatedAt`); rows render it as unknown. */
+        val EPOCH = Instant.fromEpochMilliseconds(0)
         /**
          * Keys the payload merge must never overwrite: row identity and decoded system
          * fields. Everything else follows dapp spread order (payload wins over attributes).
@@ -462,7 +542,8 @@ class ArkivClientImpl @Inject constructor(
                     return@withContext Result.success(null)
                 }
                 val (items, _) = queryPage("\$key = key(0x${clean.lowercase()})", 1, null)
-                Result.success(items.firstOrNull()?.let { runCatching { it.toMediaItem() }.getOrNull() })
+                val found = items.firstOrNull()?.let { runCatching { it.toMediaItem() }.getOrNull() }
+                Result.success(found?.let { resolveCreatedAt(listOf(it)).first() })
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
@@ -634,7 +715,8 @@ class ArkivClientImpl @Inject constructor(
      * `created_at` is an ISO-8601 attribute written by the entity store, but not every entity has one.
      *
      * Falling back to "now" would make an old archive look newly published and sort to the top of every
-     * screen, so an entity with no timestamp sorts to the bottom instead.
+     * screen, so an entity with no timestamp lands on epoch instead — and block-header resolution
+     * upgrades it to the real creation time afterwards (see `resolveCreatedAt`).
      */
     private fun JSONObject.parseCreatedAt(): Instant {
         firstString("created_at", "createdAt")?.let { raw ->

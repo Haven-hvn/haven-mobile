@@ -42,4 +42,5 @@ dependencies {
     ksp("com.google.dagger:hilt-compiler:2.60.1")
     // Real org.json on the JVM test classpath: android.jar stubs throw RuntimeException("Stub!").
     testImplementation("org.json:json:20231013")
+    testImplementation(libs.kotlinx.coroutines)
 }
