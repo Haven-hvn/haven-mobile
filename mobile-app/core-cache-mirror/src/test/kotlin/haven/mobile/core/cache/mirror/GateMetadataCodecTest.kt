@@ -22,20 +22,39 @@ class GateMetadataCodecTest {
 
     @Test
     fun `legacy variants round-trip`() {
-        val v1 = GateMetadata.V1(wrappedKey = "key".toByteArray(Charsets.UTF_8), nonce = "n")
-        val v3 = GateMetadata.V3(epochId = 7, wrappedKey = "key".toByteArray(Charsets.UTF_8), gateReference = "g")
-        val v4 = GateMetadata.V4(
-            epochId = 7,
-            marketCapTargetUsd = 1000,
-            wrappedKey = "key".toByteArray(Charsets.UTF_8),
-            gateReference = "g",
-            tokenAddress = "0xtoken",
-            chain = "eip155:8453",
-        )
+        // Field-wise: ByteArray has no value equality, so data-class equals would fail on
+        // identical bytes. The codec round-trips; only the comparison must be content-based.
+        val v1 = parseGateMetadata(
+            jsonFromGateMetadata(GateMetadata.V1(wrappedKey = "key".toByteArray(Charsets.UTF_8), nonce = "n")),
+        ) as? GateMetadata.V1 ?: throw AssertionError("V1 mistyped")
+        assertTrue("key".toByteArray(Charsets.UTF_8).contentEquals(v1.wrappedKey))
+        assertEquals("n", v1.nonce)
 
-        assertEquals(v1, parseGateMetadata(jsonFromGateMetadata(v1)))
-        assertEquals(v3, parseGateMetadata(jsonFromGateMetadata(v3)))
-        assertEquals(v4, parseGateMetadata(jsonFromGateMetadata(v4)))
+        val v3 = parseGateMetadata(
+            jsonFromGateMetadata(GateMetadata.V3(epochId = 7, wrappedKey = "key".toByteArray(Charsets.UTF_8), gateReference = "g")),
+        ) as? GateMetadata.V3 ?: throw AssertionError("V3 mistyped")
+        assertEquals(7L, v3.epochId)
+        assertTrue("key".toByteArray(Charsets.UTF_8).contentEquals(v3.wrappedKey))
+        assertEquals("g", v3.gateReference)
+
+        val v4 = parseGateMetadata(
+            jsonFromGateMetadata(
+                GateMetadata.V4(
+                    epochId = 7,
+                    marketCapTargetUsd = 1000,
+                    wrappedKey = "key".toByteArray(Charsets.UTF_8),
+                    gateReference = "g",
+                    tokenAddress = "0xtoken",
+                    chain = "eip155:8453",
+                ),
+            ),
+        ) as? GateMetadata.V4 ?: throw AssertionError("V4 mistyped")
+        assertEquals(7L, v4.epochId)
+        assertEquals(1000L, v4.marketCapTargetUsd)
+        assertTrue("key".toByteArray(Charsets.UTF_8).contentEquals(v4.wrappedKey))
+        assertEquals("g", v4.gateReference)
+        assertEquals("0xtoken", v4.tokenAddress)
+        assertEquals("eip155:8453", v4.chain)
     }
 
     @Test
