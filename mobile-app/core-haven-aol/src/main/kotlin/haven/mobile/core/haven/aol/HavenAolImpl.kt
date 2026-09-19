@@ -271,9 +271,17 @@ open class HavenAolImpl @Inject constructor(
     internal open suspend fun callCanister(method: String, candidArg: ByteArray): Result<ByteArray> {
         return try {
             val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
-            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
-            val agent = dev.ic.kotlin.agent.IcAgent(transport)
-            when (val reply = agent.call(principal, method, candidArg)) {
+            // `requestDecryptionKey` runs EVM-RPC checks then VetKD derivation (10s+), and the
+            // v3 sync response waits on execution — OkHttp's 10s read default would abort slow
+            // but healthy executions, so size per-request timeouts for that reality. The overall
+            // 5-minute poll timeout in IcCallWithPolling still bounds the whole operation.
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, client)
+            when (val reply = IcCallWithPolling(transport).call(principal, method, candidArg)) {
                 is dev.ic.kotlin.agent.Reply.Replied -> Result.success(reply.arg)
                 is dev.ic.kotlin.agent.Reply.Rejected ->
                     Result.failure(HavenError.CanisterCallFailed("Canister rejected $method: ${reply.message}"))
