@@ -26,4 +26,6 @@ dependencies {
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp(libs.androidx.room.compiler)
     ksp("com.google.dagger:hilt-compiler:2.60.1")
+    // Real org.json on the JVM test classpath: android.jar stubs throw RuntimeException("Stub!").
+    testImplementation("org.json:json:20231013")
 }

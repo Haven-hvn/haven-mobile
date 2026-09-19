@@ -119,6 +119,12 @@ class ArkivClientImpl @Inject constructor(
      * type-tagged values. Decoding mirrors CLI `decode_rpc_entity` / SDK
      * `entityFromRpcResult`: block heights land under the `*Block` keys the readers expect,
      * attributes merge in decoded, and anything unknown is skipped rather than guessed.
+     *
+     * The decoded payload then merges over the attributes — dapp parity
+     * (`parseArkivEntityToVideo` spreads `{...attributes, ...payload}`): the piece CID,
+     * gate blobs, and locator fields live in the payload, not the attributes, and without
+     * the merge every item reads as having no stored content. System/identity keys stay
+     * reserved — the row's key/owner/creator are facts about the row, never payload claims.
      */
     internal fun normalizeRpcEntity(raw: JSONObject): JSONObject {
         val out = JSONObject()
@@ -126,8 +132,9 @@ class ArkivClientImpl @Inject constructor(
         raw.optString("owner", null)?.let { out.put("owner", it) }
         raw.optString("creator", null)?.let { out.put("creator", it) }
         raw.optString("contentType", null)?.let { out.put("contentType", it) }
-        // Payload is entity metadata JSON (attestations live under `attn`); media bytes never
-        // touch the chain. Kept as text — only the attestation parser reads it.
+        // Payload is entity metadata JSON (attestations live under `attn`, locators like
+        // `piece` and gate blobs beside them); media bytes never touch the chain. Kept as
+        // text for the attestation parser, and merged below for every other reader.
         raw.optString("payload", null)
             ?.let { hexToBytesOrNull(it) }
             ?.let { runCatching { it.toString(Charsets.UTF_8) }.getOrNull() }
@@ -142,6 +149,12 @@ class ArkivClientImpl @Inject constructor(
                 val name = entry.optString("name", null) ?: continue
                 decodeRpcValue(entry.optString("type", null), entry.opt("value"))
                     ?.let { out.put(name, it) }
+            }
+        }
+        out.optString("payloadJson", null)?.takeIf { it.isNotBlank() }?.let { text ->
+            val payload = runCatching { JSONObject(text) }.getOrNull() ?: return@let
+            payload.keys().forEach { key ->
+                if (key !in RESERVED_MERGE_KEYS) out.put(key, payload.opt(key))
             }
         }
         // Row identity wins: a `creator` *attribute* (display name) must never overwrite the
@@ -341,6 +354,14 @@ class ArkivClientImpl @Inject constructor(
         const val MAX_CAUSE_CHARS = 160
         /** Bound on the cause-chain walk; deeper chains report the ancestor at the cap. */
         const val MAX_CAUSE_DEPTH = 5
+        /**
+         * Keys the payload merge must never overwrite: row identity and decoded system
+         * fields. Everything else follows dapp spread order (payload wins over attributes).
+         */
+        val RESERVED_MERGE_KEYS = setOf(
+            "id", "key", "entityKey", "owner", "creatorAddress", "contentType",
+            "payloadJson", "createdAtBlock", "expiresAtBlock",
+        )
         /** Entities per scan page; discovery pages the listing, it never loads the archive. */
         const val SCAN_PAGE_SIZE = 50
         /** Hard bound so a huge archive cannot turn discovery into an unbounded crawl. */
@@ -519,12 +540,13 @@ class ArkivClientImpl @Inject constructor(
      * Entity -> `MediaItem`, against ARKIV_FORMAT 2.0.0 canonical keys.
      *
      * `lib/parse-arkiv-video.ts` (haven-dapp) is the spec: it merges `entity.attributes` with the
-     * decoded payload and reads canonical `snake_case` keys off the result. Anything it does not read
-     * does not exist in practice — which ruled out two fields this parser previously invented, and one
-     * it required:
+     * decoded payload and reads canonical `snake_case` keys off the result, and the record this
+     * reads is merged the same way (see [normalizeRpcEntity]). Anything the dapp does not read
+     * does not exist in practice — which ruled out two fields this parser previously invented,
+     * and one it required:
      *
-     *  - **`size_bytes`** — no entity carries a size. `PieceRef.size` is the size of record once foc
-     *    resolves the piece, so nothing is read here and [MediaItem.sizeBytes] stays null until then.
+     *  - **`size_bytes`** — the payload carries a `size`, but foc's resolved piece is the size
+     *    of record, so nothing is read here and [MediaItem.sizeBytes] stays null until then.
      *  - **`thumbnail_cid`** — absent from the dapp's read path, written by nothing. Removed rather
      *    than carried as a permanently null column.
      *  - **`arkivStatus` / `contentCacheStatus` / `createdAt` / `title` / `owner`** — all were read with
@@ -541,9 +563,10 @@ class ArkivClientImpl @Inject constructor(
      * (replaced by `grp`).
      *
      * The camelCase spellings are accepted alongside the canonical ones because the HTTP gateway in
-     * front of Arkiv may already be reshaping them.
+     * front of Arkiv may already be reshaping them. Internal so the payload-merge result pins
+     * without touching the network.
      */
-    private fun JSONObject.toMediaItem(): MediaItem {
+    internal fun JSONObject.toMediaItem(): MediaItem {
         val mimeType = firstMime("mime", "mimeType", "contentMimeType")
         val sourceUri = firstString("src", "sourceUri")
         val extension = deriveExtension(mimeType, sourceUri)
@@ -902,6 +925,22 @@ class ArkivClientImpl @Inject constructor(
                 runCatching { JSONObject(it) }.getOrNull()
             }
         }.firstOrNull() ?: return null
+
+        // Sealed (VetKD) records as real writers emit them (`{version, encryptedAesKey, …}` —
+        // see dapp `isGateMetadata`): recognized, never mistaken for open content, and failed
+        // closed at decrypt time. Any non-empty sealed key counts, whatever the version claims —
+        // an unparsable version must not read as unsealed (deliberately stricter than the dapp,
+        // which nulls records whose version it does not route).
+        obj.optString("encryptedAesKey", null)?.takeIf { it.isNotEmpty() }?.let { sealed ->
+            return GateMetadata.Sealed(
+                version = when (val v = obj.opt("version")) {
+                    is Number -> v.toLong()
+                    is String -> v.toLongOrNull() ?: 0L
+                    else -> 0L
+                },
+                encryptedAesKey = sealed,
+            )
+        }
 
         val wrappedKey = obj.firstString("wrappedKey", "wrapped_key", "ciphertext")
             ?.toByteArray(Charsets.UTF_8)

@@ -396,33 +396,6 @@ class MediaRepositoryImpl @Inject constructor(
         return arr.toString()
     }
 
-    private fun jsonFromGateMetadata(metadata: GateMetadata): String {
-        val obj = JSONObject()
-        when (metadata) {
-            is GateMetadata.V1 -> {
-                obj.put("type", "V1")
-                obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
-                obj.put("nonce", metadata.nonce)
-            }
-            is GateMetadata.V3 -> {
-                obj.put("type", "V3")
-                obj.put("epochId", metadata.epochId)
-                obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
-                obj.put("gateReference", metadata.gateReference)
-            }
-            is GateMetadata.V4 -> {
-                obj.put("type", "V4")
-                obj.put("epochId", metadata.epochId)
-                obj.put("marketCapTargetUsd", metadata.marketCapTargetUsd)
-                obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
-                obj.put("gateReference", metadata.gateReference)
-                obj.put("tokenAddress", metadata.tokenAddress)
-                obj.put("chain", metadata.chain)
-            }
-        }
-        return obj.toString()
-    }
-
     private fun jsonFromAttestation(attestation: Attestation): String {
         val obj = JSONObject()
         obj.put("evmAddress", attestation.evmAddress)
@@ -459,32 +432,6 @@ class MediaRepositoryImpl @Inject constructor(
             (0 until arr.length()).map { arr.getString(it) }
         } catch (_: Exception) {
             null
-        }
-    }
-
-    private fun parseGateMetadata(json: String): GateMetadata {
-        val obj = JSONObject(json)
-        val type = obj.optString("type", "V1")
-        return if (type == "V3") {
-            GateMetadata.V3(
-                epochId = obj.getLong("epochId"),
-                wrappedKey = obj.getString("wrappedKey").toByteArray(Charsets.UTF_8),
-                gateReference = obj.getString("gateReference"),
-            )
-        } else if (type == "V4") {
-            GateMetadata.V4(
-                epochId = obj.optLong("epochId", 0),
-                marketCapTargetUsd = obj.optLong("marketCapTargetUsd", 0),
-                wrappedKey = obj.optString("wrappedKey", "").toByteArray(Charsets.UTF_8),
-                gateReference = obj.optString("gateReference", ""),
-                tokenAddress = obj.optString("tokenAddress", ""),
-                chain = obj.optString("chain", ""),
-            )
-        } else {
-            GateMetadata.V1(
-                wrappedKey = obj.getString("wrappedKey").toByteArray(Charsets.UTF_8),
-                nonce = obj.getString("nonce"),
-            )
         }
     }
 
@@ -553,3 +500,71 @@ internal fun unreachableCauseOrNull(
     failures: List<Throwable>,
 ): Throwable? =
     if (openCount == 0 && ownCount == 0 && failures.isNotEmpty()) failures.first() else null
+
+/**
+ * Gate metadata <-> its mirror-column JSON. Pure and top-level so the codec pins without
+ * Room or a wallet; the `type` tag routes each variant, with unknown tags degrading to V1
+ * exactly as before (old rows keep parsing).
+ */
+internal fun jsonFromGateMetadata(metadata: GateMetadata): String {
+    val obj = JSONObject()
+    when (metadata) {
+        is GateMetadata.V1 -> {
+            obj.put("type", "V1")
+            obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
+            obj.put("nonce", metadata.nonce)
+        }
+        is GateMetadata.V3 -> {
+            obj.put("type", "V3")
+            obj.put("epochId", metadata.epochId)
+            obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
+            obj.put("gateReference", metadata.gateReference)
+        }
+        is GateMetadata.V4 -> {
+            obj.put("type", "V4")
+            obj.put("epochId", metadata.epochId)
+            obj.put("marketCapTargetUsd", metadata.marketCapTargetUsd)
+            obj.put("wrappedKey", metadata.wrappedKey.toString(Charsets.UTF_8))
+            obj.put("gateReference", metadata.gateReference)
+            obj.put("tokenAddress", metadata.tokenAddress)
+            obj.put("chain", metadata.chain)
+        }
+        is GateMetadata.Sealed -> {
+            obj.put("type", "Sealed")
+            obj.put("version", metadata.version)
+            obj.put("encryptedAesKey", metadata.encryptedAesKey)
+        }
+    }
+    return obj.toString()
+}
+
+internal fun parseGateMetadata(json: String): GateMetadata {
+    val obj = JSONObject(json)
+    val type = obj.optString("type", "V1")
+    return if (type == "V3") {
+        GateMetadata.V3(
+            epochId = obj.getLong("epochId"),
+            wrappedKey = obj.getString("wrappedKey").toByteArray(Charsets.UTF_8),
+            gateReference = obj.getString("gateReference"),
+        )
+    } else if (type == "V4") {
+        GateMetadata.V4(
+            epochId = obj.optLong("epochId", 0),
+            marketCapTargetUsd = obj.optLong("marketCapTargetUsd", 0),
+            wrappedKey = obj.optString("wrappedKey", "").toByteArray(Charsets.UTF_8),
+            gateReference = obj.optString("gateReference", ""),
+            tokenAddress = obj.optString("tokenAddress", ""),
+            chain = obj.optString("chain", ""),
+        )
+    } else if (type == "Sealed") {
+        GateMetadata.Sealed(
+            version = obj.optLong("version", 0),
+            encryptedAesKey = obj.optString("encryptedAesKey", ""),
+        )
+    } else {
+        GateMetadata.V1(
+            wrappedKey = obj.getString("wrappedKey").toByteArray(Charsets.UTF_8),
+            nonce = obj.getString("nonce"),
+        )
+    }
+}

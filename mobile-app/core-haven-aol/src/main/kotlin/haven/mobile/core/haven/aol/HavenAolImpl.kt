@@ -39,6 +39,19 @@ class HavenAolImpl @Inject constructor(
                 ),
             )
         }
+        val sealed = item.encryptionMetadata as? haven.mobile.core.domain.GateMetadata.Sealed
+        if (sealed != null) {
+            // Only the content layer gates playback: the CID layer seals a locator mobile never
+            // needs (the piece CID arrives in plaintext), while a sealed content key needs a
+            // device VetKD unwrap this build does not have yet. Fail closed before any signing
+            // prompt — like V4, never derive a legacy key for sealed content.
+            val label = if (sealed.version > 0) " v${sealed.version}" else ""
+            return Result.failure(
+                HavenError.UnsupportedGateMetadata(
+                    "This item is sealed with Haven-AOL$label — this build can't unwrap sealed keys yet.",
+                ),
+            )
+        }
         val isV3 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V3 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V3
         val nonce = nonceManager.getNonce(address, config.canisterId)
         val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)

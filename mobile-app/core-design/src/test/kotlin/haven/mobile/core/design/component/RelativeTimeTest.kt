@@ -53,6 +53,13 @@ class RelativeTimeTest {
         assertEquals("Just now", format("2026-08-18T12:00:00Z"))
     }
 
+    @Test
+    fun `epoch reads as unknown instead of fifty six years ago`() {
+        // 2.0 entities carry no wall-clock stamp; the parser lands them on epoch meaning
+        // "unknown", and the row must say so instead of aging them from 1970.
+        assertEquals("Unknown date", RelativeTime.format(Instant.fromEpochMilliseconds(0), now))
+    }
+
     private fun format(instant: String): String =
         RelativeTime.format(Instant.parse(instant), now)
 }

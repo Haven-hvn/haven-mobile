@@ -24,4 +24,16 @@ sealed interface GateMetadata {
         /** Chain carrying the gate token (`chain` in the v4 gate JSON, any spelling). */
         val chain: String = "",
     ) : GateMetadata
+
+    /**
+     * A VetKD-sealed gate record (`{version, encryptedAesKey, …}`) as real writers emit it —
+     * see dapp `isGateMetadata` / `GateMetadataJson`. The content key is sealed to a device
+     * derivation this build cannot unwrap yet (no IBE client), so decrypt fails closed on
+     * this variant instead of deriving a legacy key. Recognized — never mistaken for open
+     * content — with the record's version kept for the failure message (0 when unparsable).
+     */
+    data class Sealed(
+        val version: Long,
+        val encryptedAesKey: String,
+    ) : GateMetadata
 }

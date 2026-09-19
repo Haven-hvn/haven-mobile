@@ -17,6 +17,11 @@ import kotlin.time.Instant
 object RelativeTime {
 
     fun format(instant: Instant, now: Instant = Clock.System.now()): String {
+        // 2.0 entities carry no wall-clock stamp — writers record the creation block, not a
+        // date — so the parser lands them on epoch meaning "unknown" (dapp parity with
+        // `parseVideoCreatedAt`). Render the sentinel honestly instead of "56 years ago".
+        if (instant <= EPOCH) return UNKNOWN_DATE
+
         val seconds = (now - instant).inWholeSeconds
 
         // A clock skew between the publisher's chain timestamp and this device should not print
@@ -35,6 +40,9 @@ object RelativeTime {
 
     private fun plural(count: Long, unit: String): String =
         if (count == 1L) "1 $unit ago" else "$count ${unit}s ago"
+
+    private val EPOCH = Instant.fromEpochMilliseconds(0)
+    private const val UNKNOWN_DATE = "Unknown date"
 
     private const val MINUTE = 60L
     private const val HOUR = 60L * MINUTE
