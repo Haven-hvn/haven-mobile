@@ -31,6 +31,7 @@ import org.json.JSONObject
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import timber.log.Timber
 
 @Singleton
 class MediaRepositoryImpl @Inject constructor(
@@ -134,13 +135,26 @@ class MediaRepositoryImpl @Inject constructor(
                 val chains = settingsRepository.enabledChains.first()
                     .ifEmpty { HavenChain.mainnets.toSet() }
 
+                // Every Arkiv call below degrades to empty on failure (partial success is
+                // success), but the failures are collected: if NOTHING comes back and every
+                // call errored, that is an outage, not an empty library, and returning
+                // success renders a lie the user cannot distinguish from "holds nothing".
+                val failures = mutableListOf<Throwable>()
+                fun <T> Result<T>.orEmptyLogged(source: String, default: T): T {
+                    exceptionOrNull()?.let {
+                        failures.add(it)
+                        Timber.w(it, "refreshAccessible: %s failed", source)
+                    }
+                    return getOrDefault(default)
+                }
+
                 // ── The intersection ──────────────────────────────────────────────────────────
                 // Arkiv stores what every archive requires; the wallet's balances say what it has.
                 // What overlaps is what this reader can open. Neither side is authoritative alone:
                 // holdings without conditions is a wallet inventory, conditions without holdings is a
                 // catalogue.
                 val candidateGates = buildList {
-                    addAll(arkivClient.discoverGates(chains).getOrDefault(emptyList()))
+                    addAll(arkivClient.discoverGates(chains).orEmptyLogged("discoverGates", emptyList()))
                     // The roster now merges its bundled seed with the same live index, so this is
                     // belt-and-braces for when the index is reachable from one call site but not the
                     // other — not the only dynamic source.
@@ -149,7 +163,7 @@ class MediaRepositoryImpl @Inject constructor(
                     // community even if the index cannot be reached.
                     addAll(
                         arkivClient.discoverUserCommunities(walletAddress)
-                            .getOrDefault(emptyList())
+                            .orEmptyLogged("discoverUserCommunities", emptyList())
                             .map { it.gate },
                     )
                 }.distinctBy { gate ->
@@ -167,13 +181,18 @@ class MediaRepositoryImpl @Inject constructor(
                 // A creator sees their own work regardless of what they hold: they published it, and
                 // they may well have moved the gating asset on since.
                 val ownItems = arkivClient.listMediaForOwner(walletAddress, PAGE_SIZE, null)
-                    .getOrNull()
+                    .orEmptyLogged("listMediaForOwner", null)
                     ?.items
                     .orEmpty()
 
                 if (openable.isEmpty() && ownItems.isEmpty()) {
                     // Nothing to fetch is not a failure: a wallet that holds nothing yet has an empty
-                    // library, and the Communities screen is where that gets fixed.
+                    // library, and the Communities screen is where that gets fixed. But nothing
+                    // fetched BECAUSE every call errored is an outage — fail with the first cause
+                    // so the screen says "couldn't reach" instead of rendering fake-empty.
+                    unreachableCauseOrNull(openable.size, ownItems.size, failures)?.let {
+                        return@withContext Result.failure(it)
+                    }
                     return@withContext Result.success(Unit)
                 }
 
@@ -204,8 +223,10 @@ class MediaRepositoryImpl @Inject constructor(
                 }
 
                 if (reached == 0 && lastFailure != null) {
+                    Timber.w(lastFailure, "refreshAccessible: all community pages failed")
                     Result.failure(lastFailure!!)
                 } else {
+                    lastFailure?.let { Timber.w(it, "refreshAccessible: some community pages failed") }
                     Result.success(Unit)
                 }
             } catch (e: HavenError) {
@@ -517,3 +538,18 @@ class MediaRepositoryImpl @Inject constructor(
         )
     }
 }
+
+/**
+ * Outage, or genuinely empty?
+ *
+ * `refreshAccessible` degrades every Arkiv call to empty so one unreachable community cannot
+ * blank a library others answered for — but when NOTHING comes back and calls errored, success
+ * renders a lie. The first cause is the one the screen shows ("couldn't reach …"); the rest
+ * are in logcat. Pure so the rule pins without Room or a wallet.
+ */
+internal fun unreachableCauseOrNull(
+    openCount: Int,
+    ownCount: Int,
+    failures: List<Throwable>,
+): Throwable? =
+    if (openCount == 0 && ownCount == 0 && failures.isNotEmpty()) failures.first() else null

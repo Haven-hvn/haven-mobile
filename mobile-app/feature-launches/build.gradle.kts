@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":core-domain"))
     implementation(project(":core-design"))
     implementation(project(":core-arkiv"))
+    implementation("com.jakewharton.timber:timber:5.0.1")
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)
 }

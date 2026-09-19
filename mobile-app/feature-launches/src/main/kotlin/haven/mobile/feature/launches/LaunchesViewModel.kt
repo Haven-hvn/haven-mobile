@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 sealed interface LaunchesUiState {
@@ -72,8 +73,12 @@ class LaunchesViewModel @Inject constructor(
             val result = arkivClient.listLaunches()
             refreshing.value = false
             result.fold(
-                onSuccess = { stages.value = it },
+                onSuccess = {
+                    Timber.i("listLaunches: %d stages", it.size)
+                    stages.value = it
+                },
                 onFailure = { throwable ->
+                    Timber.w(throwable, "listLaunches failed")
                     val message = throwable.message ?: "Could not load launches"
                     if (stages.value == null) fatalError.value = message
                     else refreshError.value = message

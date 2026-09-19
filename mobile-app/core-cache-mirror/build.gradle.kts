@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime)
+    implementation("com.jakewharton.timber:timber:5.0.1")
     implementation("com.google.dagger:hilt-android:2.60.1")
     ksp(libs.androidx.room.compiler)
     ksp("com.google.dagger:hilt-compiler:2.60.1")
