@@ -273,7 +273,7 @@ class ArkivClientImpl @Inject constructor(
             .filter { it.createdAt == EPOCH }
             .mapNotNull { it.createdAtBlock?.takeIf { block -> block > 0 } }
             .distinct()
-            .filter { it !in blockTimestampCache }
+            .filter { !blockTimestampCache.containsKey(it) }
         if (missing.isNotEmpty()) {
             coroutineScope {
                 missing.map { block ->
