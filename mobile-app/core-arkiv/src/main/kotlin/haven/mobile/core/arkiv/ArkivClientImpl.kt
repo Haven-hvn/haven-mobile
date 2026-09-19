@@ -18,6 +18,7 @@ import java.math.BigInteger
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import timber.log.Timber
 
 import haven.mobile.core.domain.ArkivStatus
 import haven.mobile.core.domain.Attestation
@@ -253,11 +254,7 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                // The exception text ("Failed to connect to /93.184.216.34:443") is diagnostic, not
-                // something to show a reader — so it travels as the cause instead of the message.
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("listMediaForOwner", e))
             }
         }
     }
@@ -283,9 +280,7 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("listMediaForCommunity", e))
             }
         }
     }
@@ -313,9 +308,7 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("discoverGates", e))
             }
         }
     }
@@ -332,6 +325,10 @@ class ArkivClientImpl @Inject constructor(
             .mapNotNull { (_, group) -> group.minByOrNull { it.threshold } }
 
     private companion object {
+        /** Free-text bound per cause in the on-screen message; the full stack goes to logcat. */
+        const val MAX_CAUSE_CHARS = 160
+        /** Bound on the cause-chain walk; deeper chains report the ancestor at the cap. */
+        const val MAX_CAUSE_DEPTH = 5
         /** Entities per scan page; discovery pages the listing, it never loads the archive. */
         const val SCAN_PAGE_SIZE = 50
         /** Hard bound so a huge archive cannot turn discovery into an unbounded crawl. */
@@ -373,11 +370,7 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                // The exception text ("Failed to connect to /93.184.216.34:443") is diagnostic, not
-                // something to show a reader — so it travels as the cause instead of the message.
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("discoverUserCommunities", e))
             }
         }
     }
@@ -415,9 +408,7 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("listLaunches", e))
             }
         }
     }
@@ -442,13 +433,56 @@ class ArkivClientImpl @Inject constructor(
             } catch (e: HavenError) {
                 Result.failure(e)
             } catch (e: Exception) {
-                // The exception text ("Failed to connect to /93.184.216.34:443") is diagnostic, not
-                // something to show a reader — so it travels as the cause instead of the message.
-                Result.failure(
-                    HavenError.NetworkError("Couldn't reach the network. Check your connection.", e),
-                )
+                Result.failure(networkError("getMedia", e))
             }
         }
+    }
+
+    /**
+     * Transport failure -> an error the phone shows verbatim.
+     *
+     * Feed, Library, and Launches all render this message as the failure detail, so the
+     * diagnostics travel IN the message, not just the cause: the endpoint host (proves which
+     * URL the build carries), the exception class (DNS vs TLS vs timeout vs refused), its
+     * detail, and the root cause when it adds information (a TLS handshake failure's
+     * "Trust anchor … not found" lives one level down). Each free-text part is truncated so
+     * the banner stays readable; the full stack goes to logcat. Internal so the message
+     * shape pins without touching the network.
+     */
+    internal fun networkError(source: String, e: Exception): HavenError.NetworkError {
+        Timber.w(e, "Arkiv %s failed (endpoint=%s)", source, config.endpointUrl)
+        val host = endpointHost()
+        val causeName = e.javaClass.simpleName.ifBlank { e.javaClass.name }
+        val detail = e.message?.trim().orEmpty().take(MAX_CAUSE_CHARS)
+        val at = if (detail.isNotEmpty()) "$causeName: $detail" else causeName
+        val root = rootCause(e)
+        val rootMessage = root?.message?.trim().orEmpty().take(MAX_CAUSE_CHARS)
+        val rootPart = if (root != null && rootMessage.isNotEmpty() && rootMessage != detail) {
+            "; caused by ${root.javaClass.simpleName}: $rootMessage"
+        } else {
+            ""
+        }
+        return HavenError.NetworkError(
+            "Couldn't reach $host ($at$rootPart). Check your connection.",
+            e,
+        )
+    }
+
+    /** Host of the configured endpoint, or the raw value when it does not parse as a URI. */
+    private fun endpointHost(): String =
+        runCatching { java.net.URI(config.endpointUrl).host }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: config.endpointUrl.ifBlank { "Arkiv" }
+
+    /** Deepest distinct cause, so TLS trust failures name their root. Bounded, cycle-safe. */
+    private fun rootCause(e: Throwable): Throwable? {
+        var current = e.cause ?: return null
+        var depth = 0
+        while (current.cause != null && current.cause !== current && depth < MAX_CAUSE_DEPTH) {
+            current = current.cause!!
+            depth++
+        }
+        return current
     }
 
     /**
