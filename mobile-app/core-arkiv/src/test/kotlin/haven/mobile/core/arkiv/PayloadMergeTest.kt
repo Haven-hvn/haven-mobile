@@ -81,6 +81,10 @@ class PayloadMergeTest {
             ?: throw AssertionError("expected Sealed, got ${item.encryptionMetadata}")
         assertEquals(1L, gate.version)
         assertEquals("SEALEDKEY", gate.encryptedAesKey)
+        assertEquals("sha256:abc", gate.cid)
+        assertEquals("EthSepolia", gate.chain)
+        assertEquals("0xtoken", gate.tokenAddress)
+        assertEquals("1", gate.threshold)
         assertTrue(item.cidEncryptionMetadata is GateMetadata.Sealed, "cid layer sealed too")
         assertEquals("eip155:11155111", item.gate?.chain)
     }

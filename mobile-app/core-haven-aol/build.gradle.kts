@@ -64,4 +64,6 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines)
     testImplementation(libs.kotlinx.datetime)
+    // Real org.json on the JVM test classpath: android.jar stubs throw RuntimeException("Stub!").
+    testImplementation("org.json:json:20231013")
 }
