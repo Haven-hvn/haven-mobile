@@ -36,6 +36,14 @@ if [ ! -d "$TOOLCHAIN" ]; then
 fi
 
 echo "build-vetkeys: using NDK $NDK"
+# cc-rs needs the NDK toolchain bin dir (ar/ranlib wrappers) on PATH.
+export PATH="$TOOLCHAIN/bin:$PATH"
+# NDK r23+ ships only llvm-ar; provide the prefixed names cc-rs probes for.
+for t in "${TARGETS[@]}"; do
+    if [ ! -x "$TOOLCHAIN/bin/$t-ar" ]; then
+        ln -sf "llvm-ar" "$TOOLCHAIN/bin/$t-ar" 2>/dev/null || true
+    fi
+done
 rustup target add "${TARGETS[@]}"
 
 for i in "${!ABIS[@]}"; do
@@ -51,6 +59,7 @@ for i in "${!ABIS[@]}"; do
     echo "build-vetkeys: $target ($abi)"
     env "CC_$flat=$clang" \
         "CXX_$flat=${clang/clang/clang++}" \
+        "AR_$flat=$TOOLCHAIN/bin/llvm-ar" \
         "CARGO_TARGET_${upper}_LINKER=$clang" \
         cargo build --manifest-path "$CRATE_DIR/Cargo.toml" --release --target "$target"
     mkdir -p "$OUT_DIR/$abi"
