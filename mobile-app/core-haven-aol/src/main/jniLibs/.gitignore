@@ -1,0 +1,2 @@
+# Built by tools/build-vetkeys-android.sh (CI always rebuilds); never commit binaries.
+*.so

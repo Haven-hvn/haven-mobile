@@ -48,6 +48,27 @@ jobs:
           EOF
           cat haven-mobile/mobile-app/local.properties
 
+      - name: Install Android NDK (vetkeys native library)
+        run: |
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: haven-mobile/mobile-app/core-haven-aol/src/main/rust/haven_vetkeys
+
+      - name: VetKeys host tests (crypto logic gate)
+        working-directory: haven-mobile/mobile-app/core-haven-aol/src/main/rust/haven_vetkeys
+        run: cargo test --locked
+
+      - name: Build vetkeys native libraries
+        run: haven-mobile/mobile-app/tools/build-vetkeys-android.sh
+
       - name: Run unit tests
         working-directory: haven-mobile/mobile-app
         run: ./gradlew testDebugUnitTest --continue
