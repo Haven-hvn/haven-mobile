@@ -235,10 +235,22 @@ class ArkivClientImpl @Inject constructor(
         val result = arkivQuery(query, pageSize, cursor)
         val data = result.optJSONArray("data") ?: JSONArray()
         val items = List(data.length()) { idx -> normalizeRpcEntity(data.getJSONObject(idx)) }
-        val next = result.optString("cursor", null).takeIf { it.isNotEmpty() }
-            ?.takeIf { items.size >= pageSize }
-        return items to next
+        return items to nextCursorOrNull(result, items.size, pageSize)
     }
+
+    /**
+     * Next-page cursor, or null when iteration ends.
+     *
+     * The node omits `cursor` (or sends it empty) on the last page, and a short page is
+     * terminal even when a cursor rides along — either ends iteration. `optString` returns
+     * null for a missing key through a platform type that compiles a direct call, so the
+     * safe call here is load-bearing: a bare dereference NPEs on exactly the single-page
+     * responses every small library returns. Internal so the terminal-page rule pins
+     * without touching the network.
+     */
+    internal fun nextCursorOrNull(result: JSONObject, received: Int, pageSize: Int): String? =
+        result.optString("cursor", null)?.takeIf { it.isNotEmpty() }
+            ?.takeIf { received >= pageSize }
 
     override suspend fun listMediaForOwner(
         owner: String,
@@ -443,11 +455,11 @@ class ArkivClientImpl @Inject constructor(
      *
      * Feed, Library, and Launches all render this message as the failure detail, so the
      * diagnostics travel IN the message, not just the cause: the endpoint host (proves which
-     * URL the build carries), the exception class (DNS vs TLS vs timeout vs refused), its
-     * detail, and the root cause when it adds information (a TLS handshake failure's
-     * "Trust anchor … not found" lives one level down). Each free-text part is truncated so
-     * the banner stays readable; the full stack goes to logcat. Internal so the message
-     * shape pins without touching the network.
+     * URL the build carries), the failing call (which of the six queries threw), the exception
+     * class (DNS vs TLS vs timeout vs refused), its detail, and the root cause when it adds
+     * information (a TLS handshake failure's "Trust anchor … not found" lives one level down).
+     * Each free-text part is truncated so the banner stays readable; the full stack goes to
+     * logcat. Internal so the message shape pins without touching the network.
      */
     internal fun networkError(source: String, e: Exception): HavenError.NetworkError {
         Timber.w(e, "Arkiv %s failed (endpoint=%s)", source, config.endpointUrl)
@@ -463,7 +475,7 @@ class ArkivClientImpl @Inject constructor(
             ""
         }
         return HavenError.NetworkError(
-            "Couldn't reach $host ($at$rootPart). Check your connection.",
+            "Couldn't reach $host [$source] ($at$rootPart). Check your connection.",
             e,
         )
     }

@@ -85,6 +85,13 @@ class NetworkErrorDiagnosticsTest {
     }
 
     @Test
+    fun `failing call is named in the message`() {
+        val message = with(client) { networkError("listLaunches", UnknownHostException("x")).message }
+
+        assertTrue(message.contains("[listLaunches]"), "source missing: $message")
+    }
+
+    @Test
     fun `original exception is preserved as the cause`() {
         val failure = UnknownHostException("nope")
         val error = with(client) { networkError("test", failure) }
