@@ -144,7 +144,7 @@ class SealedUnlockPrimitivesTest {
         )
         val balanceErr = impl.parseGateKeyResult(balance).exceptionOrNull()
         assertTrue(balanceErr is HavenError.GateVerificationFailed)
-        assertTrue(balanceErr!!.message.contains("100") && balanceErr.message.contains("3"))
+        assertTrue(balanceErr!!.message.orEmpty().contains("100") && balanceErr.message.orEmpty().contains("3"))
 
         val sig = errReply("InvalidSignature", CandidValue.CandidText("bad"))
         assertTrue(impl.parseGateKeyResult(sig).exceptionOrNull() is HavenError.SigningFailed)
@@ -152,7 +152,7 @@ class SealedUnlockPrimitivesTest {
         val nonce = errReply("NonceAlreadyUsed", CandidValue.CandidNull)
         val nonceErr = impl.parseGateKeyResult(nonce).exceptionOrNull()
         assertTrue(nonceErr is HavenError.Internal)
-        assertTrue(nonceErr!!.message.contains("already submitted"))
+        assertTrue(nonceErr!!.message.orEmpty().contains("already submitted"))
 
         val unknown = errReply("SomethingNew", CandidValue.CandidNull)
         assertTrue(impl.parseGateKeyResult(unknown).exceptionOrNull() is HavenError.CanisterCallFailed)

@@ -200,7 +200,7 @@ class SealedGateTest {
 
             val error = result.exceptionOrNull()
             assertTrue("expected UnsupportedGateMetadata, got $error", error is HavenError.UnsupportedGateMetadata)
-            assertTrue(error!!.message.contains("v3"))
+            assertTrue(error!!.message.orEmpty().contains("v3"))
             assertFalse("wallet must not be asked to sign", signingAsked)
             assertNull("canister must not be called", impl.lastArg)
         }
@@ -223,7 +223,7 @@ class SealedGateTest {
             val result = impl.decrypt(sealedItem(), session)
 
             assertTrue(result.isFailure)
-            assertTrue(result.exceptionOrNull()!!.message.contains("native vetkeys library"))
+            assertTrue(result.exceptionOrNull()!!.message.orEmpty().contains("native vetkeys library"))
             assertFalse("wallet must not be asked to sign", signingAsked)
         }
     }
