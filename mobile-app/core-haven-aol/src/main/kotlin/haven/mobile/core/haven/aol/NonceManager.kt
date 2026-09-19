@@ -33,9 +33,18 @@ class NonceManager {
         return walletAddress + ":" + canisterId
     }
 
+    /**
+     * Fresh EIP-712 `uint256` in `[1, 2^256)`, decimal-encoded — dapp parity with
+     * `createRandomGateNonce`. Decimal, never hex: the value embeds in the typed-data JSON
+     * (where a 256-bit number loses precision and hex is not valid) and parses to the Candid
+     * `Nat` verbatim. Fresh on every call — the canister rejects replayed nonces.
+     */
     private fun generateNonce(): String {
-        val bytes = ByteArray(16)
-        SecureRandom().nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it) }
+        while (true) {
+            val bytes = ByteArray(32)
+            SecureRandom().nextBytes(bytes)
+            val value = java.math.BigInteger(1, bytes)
+            if (value != java.math.BigInteger.ZERO) return value.toString(10)
+        }
     }
 }

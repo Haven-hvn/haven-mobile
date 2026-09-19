@@ -1021,6 +1021,14 @@ class ArkivClientImpl @Inject constructor(
                     else -> 0L
                 },
                 encryptedAesKey = sealed,
+                cid = obj.optString("cid", null)?.takeIf { it.isNotEmpty() } ?: "",
+                chain = obj.optString("chain", null)?.takeIf { it.isNotEmpty() } ?: "",
+                tokenAddress = obj.optString("tokenAddress", null)?.takeIf { it.isNotEmpty() } ?: "",
+                threshold = when (val t = obj.opt("threshold")) {
+                    is Number -> t.toLong().toString()
+                    is String -> t.trim()
+                    else -> ""
+                },
             )
         }
 

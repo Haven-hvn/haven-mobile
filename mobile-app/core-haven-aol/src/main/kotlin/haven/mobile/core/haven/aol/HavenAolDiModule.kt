@@ -5,6 +5,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import haven.mobile.core.haven.aol.vetkeys.JniVetKdUnwrap
+import haven.mobile.core.haven.aol.vetkeys.VetKdUnwrap
 import javax.inject.Singleton
 
 @Module
@@ -13,6 +15,10 @@ abstract class HavenAolDiModule {
     @Binds
     @Singleton
     abstract fun bindHavenAol(impl: HavenAolImpl): HavenAol
+
+    @Binds
+    @Singleton
+    abstract fun bindVetKdUnwrap(impl: JniVetKdUnwrap): VetKdUnwrap
 }
 
 @Module

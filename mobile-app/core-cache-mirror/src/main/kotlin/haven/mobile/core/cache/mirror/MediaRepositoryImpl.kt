@@ -533,6 +533,10 @@ internal fun jsonFromGateMetadata(metadata: GateMetadata): String {
             obj.put("type", "Sealed")
             obj.put("version", metadata.version)
             obj.put("encryptedAesKey", metadata.encryptedAesKey)
+            obj.put("cid", metadata.cid)
+            obj.put("chain", metadata.chain)
+            obj.put("tokenAddress", metadata.tokenAddress)
+            obj.put("threshold", metadata.threshold)
         }
     }
     return obj.toString()
@@ -560,6 +564,10 @@ internal fun parseGateMetadata(json: String): GateMetadata {
         GateMetadata.Sealed(
             version = obj.optLong("version", 0),
             encryptedAesKey = obj.optString("encryptedAesKey", ""),
+            cid = obj.optString("cid", ""),
+            chain = obj.optString("chain", ""),
+            tokenAddress = obj.optString("tokenAddress", ""),
+            threshold = obj.optString("threshold", ""),
         )
     } else {
         GateMetadata.V1(

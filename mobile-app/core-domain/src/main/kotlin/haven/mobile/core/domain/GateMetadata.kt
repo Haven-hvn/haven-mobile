@@ -27,13 +27,21 @@ sealed interface GateMetadata {
 
     /**
      * A VetKD-sealed gate record (`{version, encryptedAesKey, …}`) as real writers emit it —
-     * see dapp `isGateMetadata` / `GateMetadataJson`. The content key is sealed to a device
-     * derivation this build cannot unwrap yet (no IBE client), so decrypt fails closed on
-     * this variant instead of deriving a legacy key. Recognized — never mistaken for open
-     * content — with the record's version kept for the failure message (0 when unparsable).
+     * see dapp `isGateMetadata` / `GateMetadataJson`. The sealed key unwraps through the
+     * canister plus a device VetKD derivation, which needs the record's own gate fields (the
+     * derivation input and the canister request both bind them). Recognized — never mistaken
+     * for open content — with the version kept for routing (0 when unparsable).
      */
     data class Sealed(
         val version: Long,
         val encryptedAesKey: String,
+        /** Gate record `cid`: derivation input and canister request binding. */
+        val cid: String = "",
+        /** Gate record `chain` spelling, normalized to the AOL variant at unwrap time. */
+        val chain: String = "",
+        /** Gate record `tokenAddress`. */
+        val tokenAddress: String = "",
+        /** Gate record `threshold` verbatim; normalized to a positive integer at unwrap time. */
+        val threshold: String = "",
     ) : GateMetadata
 }

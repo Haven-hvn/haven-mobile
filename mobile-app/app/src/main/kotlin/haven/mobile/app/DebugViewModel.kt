@@ -59,48 +59,13 @@ class DebugViewModel @Inject constructor(
     fun signFixtureEip712() {
         viewModelScope.launch {
             _log.update { it + "Sign fixture EIP-712: called" }
-            // Same shape GateRequestBuilder.buildV1Request emits, with fixture values —
-            // primaryType must have a matching definition or wallets reject the payload.
-            val payload = """
-                {
-                  "types": {
-                    "EIP712Domain": [
-                      {"name": "name", "type": "string"},
-                      {"name": "version", "type": "string"},
-                      {"name": "chainId", "type": "uint256"},
-                      {"name": "verifyingContract", "type": "address"}
-                    ],
-                    "GateRequest": [
-                      {"name": "itemId", "type": "string"},
-                      {"name": "gate", "type": "Gate"},
-                      {"name": "nonce", "type": "uint256"}
-                    ],
-                    "Gate": [
-                      {"name": "chain", "type": "string"},
-                      {"name": "tokenAddress", "type": "address"},
-                      {"name": "threshold", "type": "uint256"},
-                      {"name": "tokenStandard", "type": "string"}
-                    ]
-                  },
-                  "primaryType": "GateRequest",
-                  "domain": {
-                    "name": "Haven-AOL",
-                    "version": "1",
-                    "chainId": 1,
-                    "verifyingContract": "0x0000000000000000000000000000000000000001"
-                  },
-                  "message": {
-                    "itemId": "fixture",
-                    "gate": {
-                      "chain": "eip155:1",
-                      "tokenAddress": "0x0000000000000000000000000000000000000000",
-                      "threshold": 1,
-                      "tokenStandard": "ERC20"
-                    },
-                    "nonce": 123
-                  }
-                }
-            """.trimIndent()
+            // Built by the real builder with fixture values, so the debug payload can never
+            // drift from the canonical shape wallets and the canister verify.
+            val payload = haven.mobile.core.haven.aol.GateRequestBuilder().buildV1Request(
+                evmAddress = "0x0000000000000000000000000000000000000000",
+                transportPublicKeyHex = "0x" + "ab".repeat(48),
+                nonceDecimal = "123",
+            )
              _log.update { it + "Sign fixture EIP-712: awaiting wallet response..." }
             val result = walletSession.signTypedDataV4(payload, 1L)
             _log.update { it + "Sign fixture EIP-712: received — ${if (result.isSuccess) "ok" else "error"}" }

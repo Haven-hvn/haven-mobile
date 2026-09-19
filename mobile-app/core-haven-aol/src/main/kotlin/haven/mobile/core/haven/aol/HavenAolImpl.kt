@@ -8,12 +8,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class HavenAolImpl @Inject constructor(
+open class HavenAolImpl @Inject constructor(
     private val config: HavenAolConfig,
     private val walletSession: WalletSession,
     private val aesKeyCache: AesKeyCache,
     private val nonceManager: NonceManager,
-    private val gateRequestBuilder: GateRequestBuilder
+    private val gateRequestBuilder: GateRequestBuilder,
+    private val vetKdUnwrap: haven.mobile.core.haven.aol.vetkeys.VetKdUnwrap,
 ) : HavenAol {
 
     override suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray> {
@@ -28,7 +29,7 @@ class HavenAolImpl @Inject constructor(
         // Check in-memory AES key cache first (FR-ACL-2) — gate key survives for session until disconnect
         val cacheKey = "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
-        val gate = item.gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
+        val gate = item.gate
         val isV4 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V4 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V4
         if (isV4) {
             // gate_type=4 (per-marketcap drip) has no mobile decrypt path yet (needs
@@ -39,19 +40,141 @@ class HavenAolImpl @Inject constructor(
                 ),
             )
         }
+        // Sealed content routes on its record version: v1 unwraps below, anything else fails
+        // closed (v3/v4 need their own canister methods). Only the content layer gates
+        // playback — the CID layer seals a locator mobile never needs.
         val sealed = item.encryptionMetadata as? haven.mobile.core.domain.GateMetadata.Sealed
         if (sealed != null) {
-            // Only the content layer gates playback: the CID layer seals a locator mobile never
-            // needs (the piece CID arrives in plaintext), while a sealed content key needs a
-            // device VetKD unwrap this build does not have yet. Fail closed before any signing
-            // prompt — like V4, never derive a legacy key for sealed content.
-            val label = if (sealed.version > 0) " v${sealed.version}" else ""
+            if (sealed.version != 1L) {
+                val label = if (sealed.version > 0) " v${sealed.version}" else ""
+                return Result.failure(
+                    HavenError.UnsupportedGateMetadata(
+                        "This item is sealed with Haven-AOL$label — this build unwraps v1 seals only.",
+                    ),
+                )
+            }
+            return decryptSealedV1(item, sealed, session, address, cacheKey)
+        }
+        val legacyGate = gate ?: return Result.failure(HavenError.CanisterCallFailed("No gate for ${item.id}"))
+        return decryptLegacy(item, legacyGate, session, address, cacheKey)
+    }
+
+    /**
+     * VetKD v1 unlock — dapp parity with `decryptContentKey`: transport keypair, canonical
+     * EIP-712 signature, `requestDecryptionKey`, then the device unwrap of the bundled
+     * `encrypted_key` against the record's sealed AES key.
+     *
+     * The record's own gate fields bind the derivation and the request (never the attribute
+     * gate, which can disagree) — and anything incomplete fails closed before any signing
+     * prompt, so the wallet never signs for an unlock that cannot complete.
+     */
+    private suspend fun decryptSealedV1(
+        item: MediaItem,
+        sealed: haven.mobile.core.domain.GateMetadata.Sealed,
+        session: WalletSession,
+        address: String,
+        cacheKey: String,
+    ): Result<ByteArray> {
+        if (!vetKdUnwrap.isAvailable()) {
             return Result.failure(
-                HavenError.UnsupportedGateMetadata(
-                    "This item is sealed with Haven-AOL$label — this build can't unwrap sealed keys yet.",
-                ),
+                HavenError.Internal("Sealed unlock needs the native vetkeys library, which is missing from this build."),
             )
         }
+        if (sealed.cid.isBlank() || sealed.chain.isBlank() || sealed.tokenAddress.isBlank()) {
+            return Result.failure(
+                HavenError.UnsupportedGateMetadata("This item's seal record is incomplete — this build can't unwrap it."),
+            )
+        }
+        val chainVariant = haven.mobile.core.domain.HavenChain.parse(sealed.chain)?.aolVariant
+            ?: return Result.failure(
+                HavenError.UnsupportedGateMetadata("This item is gated on a network Haven can't check."),
+            )
+        val thresholdNorm = normalizeSealedThreshold(sealed.threshold)
+        val transport = vetKdUnwrap.generateTransportKeypair().getOrElse {
+            timber.log.Timber.w(it, "VetKD transport keypair failed")
+            return Result.failure(HavenError.Internal("Could not prepare the sealed unlock."))
+        }
+        val nonce = nonceManager.getNonce(address, config.canisterId)
+        val typedData = gateRequestBuilder.buildV1Request(
+            evmAddress = address,
+            transportPublicKeyHex = "0x" + transport.publicKey.toHex(),
+            nonceDecimal = nonce,
+        )
+        val sig = session.signTypedDataV4(typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+            return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
+        }
+        val sigBytes = parseWalletSignature(sig) ?: return Result.failure(
+            HavenError.InvalidSignatureFormat("The wallet returned an unusable signature."),
+        )
+        val nonceNat = try {
+            java.math.BigInteger(nonce)
+        } catch (_: Exception) {
+            return Result.failure(HavenError.Internal("Could not prepare the sealed unlock."))
+        }
+        val record = dev.ic.kotlin.candid.CandidValue.CandidRecord(
+            mapOf(
+                dev.ic.kotlin.candid.fieldId("chain") to dev.ic.kotlin.candid.CandidValue.CandidVariant(
+                    dev.ic.kotlin.candid.fieldId(chainVariant), dev.ic.kotlin.candid.CandidValue.CandidNull,
+                ),
+                dev.ic.kotlin.candid.fieldId("tokenAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(sealed.tokenAddress),
+                dev.ic.kotlin.candid.fieldId("threshold") to dev.ic.kotlin.candid.CandidValue.CandidNat(java.math.BigInteger(thresholdNorm)),
+                dev.ic.kotlin.candid.fieldId("cid") to dev.ic.kotlin.candid.CandidValue.CandidText(sealed.cid),
+                dev.ic.kotlin.candid.fieldId("evmAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(address),
+                dev.ic.kotlin.candid.fieldId("transportPublicKey") to dev.ic.kotlin.candid.CandidValue.CandidBlob(transport.publicKey),
+                dev.ic.kotlin.candid.fieldId("nonce") to dev.ic.kotlin.candid.CandidValue.CandidNat(nonceNat),
+                dev.ic.kotlin.candid.fieldId("signature") to dev.ic.kotlin.candid.CandidValue.CandidBlob(sigBytes),
+                dev.ic.kotlin.candid.fieldId("eip712ChainId") to dev.ic.kotlin.candid.CandidValue.CandidNat(
+                    java.math.BigInteger.valueOf(GateRequestBuilder.EIP712_CHAIN_ID),
+                ),
+                dev.ic.kotlin.candid.fieldId("eip712VerifyingContract") to dev.ic.kotlin.candid.CandidValue.CandidText(
+                    GateRequestBuilder.EIP712_VERIFYING_CONTRACT,
+                ),
+            ),
+        )
+        return try {
+            val replyArg = callCanister("requestDecryptionKey", dev.ic.kotlin.candid.CandidEncoder.encode(listOf(record)))
+                .getOrElse { return Result.failure(it) }
+            val decoded = try {
+                dev.ic.kotlin.candid.CandidDecoder.decode(replyArg)
+            } catch (_: Exception) {
+                null
+            } ?: return Result.failure(HavenError.CanisterCallFailed("Canister returned an unreadable response."))
+            val keys = parseGateKeyResult(decoded).getOrElse { return Result.failure(it) }
+            val derivation = vetkdDerivationInput(chainVariant, sealed.tokenAddress, thresholdNorm, sealed.cid)
+            val aesKey = vetKdUnwrap.unwrapContentKey(
+                haven.mobile.core.haven.aol.vetkeys.UnwrapParams(
+                    encryptedVetKey = keys.encryptedKey,
+                    transportSecret = transport.secretKey,
+                    verificationKey = keys.verificationKey,
+                    derivationInput = derivation,
+                    sealedKeyUtf8 = sealed.encryptedAesKey.toByteArray(Charsets.UTF_8),
+                ),
+            ).getOrElse {
+                timber.log.Timber.w(it, "VetKD unwrap failed")
+                return Result.failure(HavenError.PlaybackDecryptFailed("The sealed key would not open (${it.message})."))
+            }
+            if (aesKey.size != 32) {
+                return Result.failure(HavenError.PlaybackDecryptFailed("The sealed key unwrapped to the wrong size."))
+            }
+            aesKeyCache.put(cacheKey, aesKey)
+            Result.success(aesKey)
+        } catch (e: Exception) {
+            timber.log.Timber.w(e, "Sealed v1 unlock failed")
+            Result.failure(HavenError.CanisterCallFailed("Haven couldn't unlock this sealed item."))
+        }
+    }
+
+    /**
+     * Legacy (unwrapped-key) decrypt path: pre-seal V1/V3 gate shapes whose key material the
+     * canister returns directly. Untouched by the sealed flow above.
+     */
+    private suspend fun decryptLegacy(
+        item: MediaItem,
+        gate: haven.mobile.core.domain.TokenGate,
+        session: WalletSession,
+        address: String,
+        cacheKey: String,
+    ): Result<ByteArray> {
         val isV3 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V3 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V3
         val nonce = nonceManager.getNonce(address, config.canisterId)
         val chain = haven.mobile.core.domain.HavenChain.parse(gate.chain)
@@ -60,7 +183,15 @@ class HavenAolImpl @Inject constructor(
                     "This item is gated on a network Haven can't check.",
                 ),
             )
-        val json = if (isV3) gateRequestBuilder.buildV3Request(item, nonce, address, chain.chainId) else gateRequestBuilder.buildV1Request(item, nonce, address, chain.chainId)
+        if (!isV3) {
+            // Pre-seal V1 shapes carry their key inline and no writer emits them; the live v1
+            // protocol is the sealed flow above. Fail closed instead of signing a request whose
+            // reply could never become a valid key.
+            return Result.failure(
+                HavenError.UnsupportedGateMetadata("This item uses a legacy gate shape this build can't unlock."),
+            )
+        }
+        val json = gateRequestBuilder.buildV3Request(item, nonce, address, chain.chainId)
         val sig = session.signTypedDataV4(json, chain.chainId).getOrElse { return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}")) }
         // Live VetKD flow via ic-kotlin (parity with haven-aol-decrypt.ts / haven-aol-decrypt-v3.ts):
         // Agent call is attempted; on offline / --offline build no network is hit at compile time,
@@ -132,6 +263,124 @@ class HavenAolImpl @Inject constructor(
             )
         }
     }
+
+    /**
+     * Raw canister call, seammed for tests: production hits the network, tests override with a
+     * canned reply. Returns the reply argument bytes, or the rejection as a failure.
+     */
+    internal open suspend fun callCanister(method: String, candidArg: ByteArray): Result<ByteArray> {
+        return try {
+            val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
+            val agent = dev.ic.kotlin.agent.IcAgent(transport)
+            when (val reply = agent.call(principal, method, candidArg)) {
+                is dev.ic.kotlin.agent.Reply.Replied -> Result.success(reply.arg)
+                is dev.ic.kotlin.agent.Reply.Rejected ->
+                    Result.failure(HavenError.CanisterCallFailed("Canister rejected $method: ${reply.message}"))
+            }
+        } catch (e: Exception) {
+            timber.log.Timber.w(e, "HavenAol call failed (method=%s)", method)
+            Result.failure(HavenError.CanisterCallFailed("Haven couldn't reach the service that unlocks this item."))
+        }
+    }
+
+    /**
+     * `requestDecryptionKey` reply -> bundled keys. Reads `encrypted_key` and
+     * `verification_key` by field id (never positionally — record fields sort by hash), and
+     * maps `err` variants to the dapp's `mapGateError` messages. Internal so canned replies
+     * pin the mapping.
+     */
+    internal fun parseGateKeyResult(
+        decoded: List<dev.ic.kotlin.candid.CandidValue>,
+    ): Result<GateKeys> {
+        val variant = decoded.firstOrNull() as? dev.ic.kotlin.candid.CandidValue.CandidVariant
+            ?: return Result.failure(HavenError.CanisterCallFailed("Canister returned an unexpected response."))
+        if (variant.tag == dev.ic.kotlin.candid.fieldId("ok")) {
+            val fields = (variant.value as? dev.ic.kotlin.candid.CandidValue.CandidRecord)?.fields
+            val encKey = fields?.get(dev.ic.kotlin.candid.fieldId("encrypted_key"))
+                as? dev.ic.kotlin.candid.CandidValue.CandidBlob
+            val verificationKey = fields?.get(dev.ic.kotlin.candid.fieldId("verification_key"))
+                as? dev.ic.kotlin.candid.CandidValue.CandidBlob
+            if (encKey == null || verificationKey == null) {
+                return Result.failure(HavenError.CanisterCallFailed("Canister returned an incomplete response."))
+            }
+            return Result.success(GateKeys(encKey.bytes, verificationKey.bytes))
+        }
+        if (variant.tag == dev.ic.kotlin.candid.fieldId("err")) {
+            return Result.failure(mapGateError(variant.value))
+        }
+        return Result.failure(HavenError.CanisterCallFailed("Canister returned an unexpected response."))
+    }
+
+    /** Canister `GateError` variant -> reader-facing failure, mirroring dapp `mapGateError`. */
+    internal fun mapGateError(value: dev.ic.kotlin.candid.CandidValue): HavenError {
+        val err = value as? dev.ic.kotlin.candid.CandidValue.CandidVariant
+            ?: return HavenError.CanisterCallFailed("The unlock request was rejected.")
+        fun tag(name: String) = err.tag == dev.ic.kotlin.candid.fieldId(name)
+        return when {
+            tag("InsufficientBalance") -> {
+                val details = err.value as? dev.ic.kotlin.candid.CandidValue.CandidRecord
+                val required = (details?.fields?.get(dev.ic.kotlin.candid.fieldId("required"))
+                    as? dev.ic.kotlin.candid.CandidValue.CandidNat)?.value?.toString() ?: "?"
+                val actual = (details?.fields?.get(dev.ic.kotlin.candid.fieldId("actual"))
+                    as? dev.ic.kotlin.candid.CandidValue.CandidNat)?.value?.toString() ?: "0"
+                HavenError.GateVerificationFailed(
+                    "Insufficient token balance. Required: $required, your balance: $actual. " +
+                        "Make sure you hold the required tokens on the correct chain.",
+                )
+            }
+            tag("InvalidSignature") -> HavenError.SigningFailed(
+                "Invalid signature. Please try signing again with your wallet.",
+            )
+            tag("NonceAlreadyUsed") -> HavenError.Internal(
+                "This decrypt request was already submitted (nonce replay protection). " +
+                    "Try playing the video again — you should only need one wallet signature.",
+            )
+            tag("InvalidAddress") -> HavenError.CanisterCallFailed(
+                "Invalid address: ${(err.value as? dev.ic.kotlin.candid.CandidValue.CandidText)?.value ?: "?"}",
+            )
+            tag("EvmRpcError") -> HavenError.CanisterCallFailed(
+                "Balance check failed (${(err.value as? dev.ic.kotlin.candid.CandidValue.CandidText)?.value ?: "RPC error"}). Try again.",
+            )
+            tag("VetKDError") -> HavenError.CanisterCallFailed(
+                "Key service error (${(err.value as? dev.ic.kotlin.candid.CandidValue.CandidText)?.value ?: "unknown"}). Try again.",
+            )
+            tag("InvalidThreshold") -> HavenError.CanisterCallFailed("The gate threshold is invalid.")
+            else -> HavenError.CanisterCallFailed("The unlock request was rejected.")
+        }
+    }
+
+    /**
+     * VetKD derivation input — dapp parity with `computeDerivationInput` (derivation-spec.md):
+     * the preimage binds the gate the key derives for, and doubles as the IBE identity at
+     * unwrap. Any drift here derives a key that cannot open the sealed record.
+     */
+    internal fun vetkdDerivationInput(
+        chainVariant: String,
+        tokenAddress: String,
+        thresholdNorm: String,
+        cid: String,
+    ): ByteArray {
+        val preimage = "accessol:$chainVariant:$tokenAddress:$thresholdNorm:$cid"
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(preimage.toByteArray(Charsets.UTF_8))
+    }
+
+    /** Record threshold -> positive integer string, mirroring `normalizeDerivationThreshold`. */
+    internal fun normalizeSealedThreshold(raw: String): String =
+        raw.trim().toLongOrNull()?.coerceAtLeast(1L)?.toString() ?: "1"
+
+    /**
+     * Wallet signature -> 65 bytes, mirroring `parseSignatureHex`. Anything else fails closed
+     * before the Candid call rather than encoding a short signature.
+     */
+    internal fun parseWalletSignature(sig: String): ByteArray? {
+        val hex = sig.removePrefix("0x")
+        if (hex.length != 130 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+        return ByteArray(65) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
     override suspend fun verificationKey(): Result<ByteArray> {
         if (config.canisterId.isBlank()) return Result.failure(HavenError.CanisterCallFailed("verificationKey not configured"))
@@ -228,3 +477,9 @@ class HavenAolImpl @Inject constructor(
         // NonceManager is per-canister; entry clears nothing — real impl would iterate keys
     }
 }
+
+/** Bundled canister reply: transport-encrypted VetKey plus the key that verifies it. */
+internal data class GateKeys(
+    val encryptedKey: ByteArray,
+    val verificationKey: ByteArray,
+)

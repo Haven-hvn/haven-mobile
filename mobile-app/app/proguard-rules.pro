@@ -58,6 +58,12 @@
 -dontwarn okio.**
 -dontwarn org.conscrypt.**
 
+# ── VetKeys JNI boundary ─────────────────────────────────────────────────────────────────────────
+# The Rust exports link by exact class/method name
+# (Java_haven_mobile_core_haven_aol_vetkeys_VetKeysNative_*); renaming either side breaks
+# sealed unlock at runtime with UnsatisfiedLinkError.
+-keep class haven.mobile.core.haven.aol.vetkeys.VetKeysNative { *; }
+
 # ── Crash triage ─────────────────────────────────────────────────────────────────────────────
 # No third-party crash reporter in v1 (requirements §6), so line numbers are the only thing
 # standing between a user-reported stack trace and a fix.
