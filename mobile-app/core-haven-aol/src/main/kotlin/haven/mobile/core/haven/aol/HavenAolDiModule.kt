@@ -7,6 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import haven.mobile.core.haven.aol.vetkeys.JniVetKdUnwrap
 import haven.mobile.core.haven.aol.vetkeys.VetKdUnwrap
+import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
 @Module
@@ -40,6 +41,15 @@ object HavenAolConfigModule {
     @Provides
     @Singleton
     fun provideNonceManager(): NonceManager = NonceManager()
+
+    /**
+     * The single pooled IC client. No other module binds a bare `OkHttpClient`,
+     * so this is unambiguous — and it must stay a Hilt binding (not just a
+     * constructor default) because Hilt never uses Kotlin default arguments.
+     */
+    @Provides
+    @Singleton
+    fun provideIcHttpClient(): OkHttpClient = defaultIcHttpClient()
 
     @Provides
     @Singleton

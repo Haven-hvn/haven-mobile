@@ -23,7 +23,7 @@ open class HavenAolImpl @Inject constructor(
     /**
      * One pooled client for every IC call this singleton makes. A fresh client per
      * request re-pays TLS to `ic0.app` on each unlock; the pool amortises it.
-     * Defaulted (not a Hilt binding) so existing subclasses and tests keep compiling.
+     * Bound in [HavenAolDiModule]; the default keeps test subclasses compiling.
      */
     private val icHttp: OkHttpClient = defaultIcHttpClient(),
 ) : HavenAol {
