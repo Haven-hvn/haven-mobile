@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -41,13 +42,19 @@ import haven.mobile.core.domain.MediaKind
  * viewer, for the rare moment somebody genuinely needs one.
  */
 
-/** Dense list row. 76dp, one tap target, no nested clickables. */
+/**
+ * Dense list row. 76dp, one tap target, no nested clickables.
+ *
+ * `selected` is a visual state only: non-null draws a leading checkbox whose tap is the
+ * row's own click (selection mode), so the row stays a single tap target.
+ */
 @Composable
 fun MediaRow(
     item: MediaItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     attestation: AttestationState? = null,
+    selected: Boolean? = null,
 ) {
     Row(
         modifier = modifier
@@ -58,6 +65,10 @@ fun MediaRow(
             .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selected != null) {
+            Checkbox(checked = selected, onCheckedChange = null)
+            Spacer(Modifier.width(HavenSpacing.sm))
+        }
         MediaKindGlyph(kind = item.kind)
         Spacer(Modifier.width(HavenSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
@@ -90,13 +101,19 @@ fun MediaRow(
     }
 }
 
-/** Grid card. A plate for the kind, then title and the same summary line. */
+/**
+ * Grid card. A plate for the kind, then title and the same summary line.
+ *
+ * `selected` mirrors the row: a non-null value overlays a checkbox on the plate while
+ * the card itself stays the single tap target.
+ */
 @Composable
 fun MediaCard(
     item: MediaItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     attestation: AttestationState? = null,
+    selected: Boolean? = null,
 ) {
     Surface(
         modifier = modifier
@@ -133,6 +150,16 @@ fun MediaCard(
                     contentAlignment = Alignment.TopEnd,
                 ) {
                     CacheStatusChip(status = item.contentCacheStatus, compact = true)
+                }
+                if (selected != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(HavenSpacing.xs),
+                        contentAlignment = Alignment.TopStart,
+                    ) {
+                        Checkbox(checked = selected, onCheckedChange = null)
+                    }
                 }
             }
             Column(modifier = Modifier.padding(HavenSpacing.md)) {
