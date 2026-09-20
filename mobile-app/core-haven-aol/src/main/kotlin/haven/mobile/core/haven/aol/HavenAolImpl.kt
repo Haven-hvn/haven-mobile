@@ -4,6 +4,11 @@ import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.wallet.WalletSession
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,6 +20,12 @@ open class HavenAolImpl @Inject constructor(
     private val nonceManager: NonceManager,
     private val gateRequestBuilder: GateRequestBuilder,
     private val vetKdUnwrap: haven.mobile.core.haven.aol.vetkeys.VetKdUnwrap,
+    /**
+     * One pooled client for every IC call this singleton makes. A fresh client per
+     * request re-pays TLS to `ic0.app` on each unlock; the pool amortises it.
+     * Bound in [HavenAolDiModule]; the default keeps test subclasses compiling.
+     */
+    private val icHttp: OkHttpClient = defaultIcHttpClient(),
 ) : HavenAol {
 
     override suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray> {
@@ -198,7 +209,7 @@ open class HavenAolImpl @Inject constructor(
         // and at runtime an offline host returns a typed failure that callers surface as haven error.
         return try {
             val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
-            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, icHttp)
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val method = if (isV3) "requestDecryptionKeyV3" else "requestDecryptionKey"
             val cid = item.pieceRef?.pieceCid ?: item.id
@@ -273,14 +284,10 @@ open class HavenAolImpl @Inject constructor(
             val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
             // `requestDecryptionKey` runs EVM-RPC checks then VetKD derivation (10s+), and the
             // v3 sync response waits on execution — OkHttp's 10s read default would abort slow
-            // but healthy executions, so size per-request timeouts for that reality. The overall
-            // 5-minute poll timeout in IcCallWithPolling still bounds the whole operation.
-            val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
-                .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, client)
+            // but healthy executions, so the shared client carries sized timeouts for that
+            // reality. The overall 5-minute poll timeout in IcCallWithPolling still bounds
+            // the whole operation.
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, icHttp)
             when (val reply = IcCallWithPolling(transport).call(principal, method, candidArg)) {
                 is dev.ic.kotlin.agent.Reply.Replied -> Result.success(reply.arg)
                 is dev.ic.kotlin.agent.Reply.Rejected ->
@@ -395,7 +402,7 @@ open class HavenAolImpl @Inject constructor(
         aesKeyCache.get("verificationKey:${config.canisterId}")?.let { return Result.success(it) }
         return try {
             val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
-            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, icHttp)
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val arg = dev.ic.kotlin.candid.CandidEncoder.encode(emptyList())
             val replyBytes = agent.query(principal, "getVetKDPublicKey", arg)
@@ -422,7 +429,7 @@ open class HavenAolImpl @Inject constructor(
         aesKeyCache.get("attestationPublicKey:${config.canisterId}")?.let { return Result.success(it) }
         return try {
             val principal = dev.ic.kotlin.candid.Principal.fromText(config.canisterId)
-            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, okhttp3.OkHttpClient())
+            val transport = dev.ic.kotlin.agent.OkHttpTransport(config.icHost, icHttp)
             val agent = dev.ic.kotlin.agent.IcAgent(transport)
             val arg = dev.ic.kotlin.candid.CandidEncoder.encode(emptyList())
             val replyBytes = agent.query(principal, "getAttestationPublicKey", arg)
@@ -444,7 +451,21 @@ open class HavenAolImpl @Inject constructor(
         }
     }
 
-    override suspend fun decryptAll(items: List<MediaItem>, session: WalletSession): List<Result<ByteArray>> {
+    /**
+     * Batch unlock with fan-out: V3 epoch groups and V1 items decrypt concurrently.
+     *
+     * Each group still makes exactly the calls it would alone (one per V3 epoch, one per
+     * V1 item — nonces are fresh per request, so no replay collision), but the 10s+
+     * canister executions overlap instead of adding up. Order is preserved, one item's
+     * failure never cancels the rest (`supervisorScope`), and wallet signature prompts
+     * surface in group order as each concurrent request reaches signing — the batch UI
+     * says how many to expect up front.
+     */
+    override suspend fun decryptAll(
+        items: List<MediaItem>,
+        session: WalletSession,
+        onProgress: suspend (done: Int, total: Int) -> Unit,
+    ): List<Result<ByteArray>> {
         if (items.isEmpty()) return emptyList()
         // v3 batch: group by (epochId + gateReference) — one canister call per epoch, as in haven-aol-decrypt-v3.ts
         // Correct grouping is epochId+gateReference, not full V3 object (which includes wrappedKey per-item)
@@ -458,26 +479,29 @@ open class HavenAolImpl @Inject constructor(
         // Group indices by batch key to preserve input order later
         val groupedIndices = mutableMapOf<V3BatchKey?, MutableList<Int>>()
         items.forEachIndexed { idx, item -> groupedIndices.getOrPut(keyFor(item)) { mutableListOf() }.add(idx) }
-        val results = MutableList<Result<ByteArray>?>(items.size) { null }
-        for ((batchKey, indices) in groupedIndices) {
-            if (batchKey != null) {
-                // V3 epoch group — one GateRequestV3 unlocks whole epoch (FR-ACL-1)
-                val firstIdx = indices.first()
-                val firstItem = items[firstIdx]
-                val single = decrypt(firstItem, session)
-                // Reuse same key/error for all cids in this epoch (response shapes cids, derivation does not)
-                for (idx in indices) results[idx] = single
-                if (single.isSuccess) {
-                    val key = single.getOrNull()!!
-                    // Cache epoch key for subsequent calls within session (FR-ACL-2)
-                    aesKeyCache.put("v3:${batchKey.epochId}:${batchKey.gateReference}", key)
+        val completed = java.util.concurrent.atomic.AtomicInteger(0)
+        return supervisorScope {
+            groupedIndices.map { (batchKey, indices) ->
+                async {
+                    val pairs = if (batchKey != null) {
+                        // V3 epoch group — one GateRequestV3 unlocks whole epoch (FR-ACL-1)
+                        val single = decrypt(items[indices.first()], session)
+                        if (single.isSuccess) {
+                            val key = single.getOrNull()!!
+                            // Cache epoch key for subsequent calls within session (FR-ACL-2)
+                            aesKeyCache.put("v3:${batchKey.epochId}:${batchKey.gateReference}", key)
+                        }
+                        // Reuse same key/error for all cids in this epoch (response shapes cids, derivation does not)
+                        indices.map { idx -> idx to single }
+                    } else {
+                        // V1 — per-item decrypt (preserves v1 parity, each cid has distinct wrappedKey/nonce)
+                        indices.map { idx -> async { idx to decrypt(items[idx], session) } }.awaitAll()
+                    }
+                    onProgress(completed.addAndGet(pairs.size), items.size)
+                    pairs
                 }
-            } else {
-                // V1 — per-item decrypt (preserves v1 parity, each cid has distinct wrappedKey/nonce)
-                for (idx in indices) results[idx] = decrypt(items[idx], session)
-            }
+            }.awaitAll().flatten().sortedBy { it.first }.map { it.second }
         }
-        return results.map { it ?: Result.failure(HavenError.CanisterCallFailed("decryptAll batch: missing result")) }
     }
 
     override suspend fun clearFor(walletAddress: String) {
@@ -491,3 +515,13 @@ internal data class GateKeys(
     val encryptedKey: ByteArray,
     val verificationKey: ByteArray,
 )
+
+/**
+ * Pooled IC client: `requestDecryptionKey` needs 90s reads (EVM-RPC + VetKD),
+ * and one shared pool amortises TLS across unlocks, key fetches and polls.
+ */
+internal fun defaultIcHttpClient(): OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(30, TimeUnit.SECONDS)
+    .readTimeout(90, TimeUnit.SECONDS)
+    .writeTimeout(30, TimeUnit.SECONDS)
+    .build()
