@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import org.json.JSONArray
@@ -118,9 +119,19 @@ class MediaRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Residency is resolved live against the content cache on every emission, not read
+     * from the stored row. Content lands outside refresh (watch staging writes straight
+     * to the cache), so a stored label goes stale until the next refresh — the exact
+     * bug where a row reads "not offline" right after playing. `exists` is IO-confined
+     * internally, and emissions only happen on mirror writes, not on keystrokes.
+     */
     override fun observeAccessible(): Flow<List<MediaItem>> {
-        return getDatabase().mediaDao().observeAccessible().map { entities ->
-            entities.map { it.toMediaItem() }
+        return getDatabase().mediaDao().observeAccessible().mapLatest { entities ->
+            entities.map { entity ->
+                val item = entity.toMediaItem()
+                item.copy(contentCacheStatus = resolveCacheStatus(item))
+            }
         }
     }
 
@@ -155,9 +166,8 @@ class MediaRepositoryImpl @Inject constructor(
                 // catalogue.
                 val candidateGates = buildList {
                     addAll(arkivClient.discoverGates(chains).orEmptyLogged("discoverGates", emptyList()))
-                    // The roster now merges its bundled seed with the same live index, so this is
-                    // belt-and-braces for when the index is reachable from one call site but not the
-                    // other — not the only dynamic source.
+                    // Live-only on both sides (no bundled seed): belt-and-braces for when the
+                    // index is reachable from one call site but not the other.
                     addAll(collectionRepository.accessibleGates(chains))
                     // Gates this wallet has published under. A creator keeps access to their own
                     // community even if the index cannot be reached.
@@ -247,8 +257,12 @@ class MediaRepositoryImpl @Inject constructor(
     }
 
     override fun observeItem(id: String): Flow<MediaItem?> {
-        return getDatabase().mediaDao().observeItem(id).map { entity ->
-            entity?.toMediaItem()
+        // Same live residency as observeAccessible: the watch screen stages content
+        // without a mirror write, and must not show a stale label for its own item.
+        return getDatabase().mediaDao().observeItem(id).mapLatest { entity ->
+            entity?.toMediaItem()?.let { item ->
+                item.copy(contentCacheStatus = resolveCacheStatus(item))
+            }
         }
     }
 

@@ -6,6 +6,12 @@ import haven.mobile.core.wallet.WalletSession
 interface HavenAol {
     suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray>
     /**
+     * True when the session already holds this item's key, so opening it needs no
+     * wallet signature. Lets the viewer explain the signature *before* asking for
+     * it instead of popping the wallet cold.
+     */
+    suspend fun hasCachedKey(item: MediaItem): Boolean
+    /**
      * Unlocks every item, reporting completed count as groups finish (concurrent
      * completions may jump by more than one). Results stay in input order.
      */

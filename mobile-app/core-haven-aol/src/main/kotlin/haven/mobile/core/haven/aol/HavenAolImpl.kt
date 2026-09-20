@@ -38,7 +38,7 @@ open class HavenAolImpl @Inject constructor(
         }
         val address = session.address.value ?: return Result.failure(HavenError.WalletNotConnected("No wallet connected"))
         // Check in-memory AES key cache first (FR-ACL-2) — gate key survives for session until disconnect
-        val cacheKey = "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
+        val cacheKey = cacheKeyFor(item)
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
         val gate = item.gate
         val isV4 = item.cidEncryptionMetadata is haven.mobile.core.domain.GateMetadata.V4 || item.encryptionMetadata is haven.mobile.core.domain.GateMetadata.V4
@@ -450,6 +450,13 @@ open class HavenAolImpl @Inject constructor(
             Result.failure(HavenError.CanisterCallFailed("attestationPublicKey query failed for ${config.canisterId}: ${e.message}"))
         }
     }
+
+    override suspend fun hasCachedKey(item: MediaItem): Boolean =
+        aesKeyCache.getSuspend(cacheKeyFor(item)) != null
+
+    /** Session cache identity for an item's key — one formula for lookup and store. */
+    private fun cacheKeyFor(item: MediaItem): String =
+        "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
 
     /**
      * Batch unlock with fan-out: V3 epoch groups and V1 items decrypt concurrently.
