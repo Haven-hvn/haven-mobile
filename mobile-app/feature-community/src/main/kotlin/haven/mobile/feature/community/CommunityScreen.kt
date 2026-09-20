@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +61,7 @@ fun CommunityScreen(
     viewModel: CommunityViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val batch by viewModel.unlockBatchState.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize()) {
         HavenTopBar(
@@ -146,6 +148,17 @@ fun CommunityScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = HavenSpacing.xxl),
                     ) {
+                        val gatedCount = state.items.count { it.isEncrypted }
+                        if (gatedCount > 0) {
+                            item {
+                                UnlockAllHeader(
+                                    batch = batch,
+                                    gatedCount = gatedCount,
+                                    onUnlockAll = { viewModel.unlockAll(state.items) },
+                                    onDismiss = { viewModel.dismissUnlockBatch() },
+                                )
+                            }
+                        }
                         items(items = state.items, key = { it.id }) { item ->
                             Column {
                                 MediaRow(
@@ -185,6 +198,79 @@ fun CommunityScreen(
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                 )
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One tap replaces N open-wait-back navigations: unlocks every gated row shown,
+ * with the signature count stated up front (each item still needs its own until
+ * the canister offers a batch method). Afterwards unlocked rows open instantly
+ * from the session key cache.
+ */
+@Composable
+private fun UnlockAllHeader(
+    batch: UnlockBatch?,
+    gatedCount: Int,
+    onUnlockAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.sm),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(modifier = Modifier.padding(HavenSpacing.md)) {
+            when (batch) {
+                null -> {
+                    Button(onClick = onUnlockAll) {
+                        Text("Unlock all ($gatedCount)")
+                    }
+                    Spacer(Modifier.height(HavenSpacing.xs))
+                    Text(
+                        text = "Your wallet will ask for $gatedCount signature" +
+                            (if (gatedCount == 1) "" else "s") +
+                            " — afterwards every row below opens instantly.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                is UnlockBatch.Working -> {
+                    val fraction = batch.done.toFloat() / batch.total.coerceAtLeast(1).toFloat()
+                    Text(
+                        text = "Unlocking ${batch.done} of ${batch.total} — approve in your wallet…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(HavenSpacing.xs))
+                    LinearProgressIndicator(
+                        progress = { fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                is UnlockBatch.Done -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (batch.failed == 0) {
+                                "${batch.succeeded} unlocked — rows below open instantly."
+                            } else {
+                                "${batch.succeeded} unlocked, ${batch.failed} failed — " +
+                                    "open a failed row to retry it alone."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "Dismiss unlock summary")
                         }
                     }
                 }

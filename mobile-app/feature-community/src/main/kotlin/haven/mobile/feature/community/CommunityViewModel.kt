@@ -7,6 +7,7 @@ import haven.mobile.core.attestation.AttestationVerifier
 import haven.mobile.core.cache.mirror.MediaRepository
 import haven.mobile.core.design.component.AttestationState
 import haven.mobile.core.domain.MediaItem
+import haven.mobile.core.haven.aol.HavenAol
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,17 @@ sealed interface CommunityUiState {
 }
 
 /**
+ * One-shot batch unlock state. Null means no batch has run (or it was dismissed).
+ *
+ * Counts items, not signatures: each gated item still needs its own wallet
+ * signature until the canister offers a batch method, and the UI says so up front.
+ */
+sealed interface UnlockBatch {
+    data class Working(val done: Int, val total: Int) : UnlockBatch
+    data class Done(val succeeded: Int, val failed: Int) : UnlockBatch
+}
+
+/**
  * The feed.
  *
  * Verification runs per item and its verdict is kept explicitly rather than being inferred from
@@ -55,6 +67,7 @@ class CommunityViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val attestationVerifier: AttestationVerifier,
     private val walletSession: WalletSession,
+    private val havenAol: HavenAol,
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
@@ -62,6 +75,10 @@ class CommunityViewModel @Inject constructor(
     private val refreshError = MutableStateFlow<String?>(null)
     private val fatalError = MutableStateFlow<String?>(null)
     private val attestations = MutableStateFlow<Map<String, AttestationState>>(emptyMap())
+    private val unlockBatch = MutableStateFlow<UnlockBatch?>(null)
+
+    /** Batch unlock progress for the "Unlock all" header; null when idle or dismissed. */
+    val unlockBatchState: StateFlow<UnlockBatch?> = unlockBatch
 
     private val mirror: StateFlow<List<MediaItem>?> = walletSession.address
         .flatMapLatest { address ->
@@ -142,6 +159,34 @@ class CommunityViewModel @Inject constructor(
             refreshing.value = false
             result.exceptionOrNull()?.let { refreshError.value = it.message ?: "Refresh failed" }
         }
+    }
+
+    /**
+     * Unlock every gated item currently shown, in one batch.
+     *
+     * One tap replaces N open-wait-back navigations; after this, tapping any unlocked
+     * row opens instantly (session key cache, no re-sign). Each item still costs its
+     * own wallet signature — the header says the count up front. Ungated items need
+     * no key and are skipped, not failed.
+     */
+    fun unlockAll(visible: List<MediaItem>) {
+        val targets = visible.filter { it.isEncrypted }
+        if (targets.isEmpty() || unlockBatch.value is UnlockBatch.Working) return
+        if (walletSession.address.value == null) return
+        viewModelScope.launch {
+            unlockBatch.value = UnlockBatch.Working(done = 0, total = targets.size)
+            val results = havenAol.decryptAll(targets, walletSession) { done, total ->
+                unlockBatch.value = UnlockBatch.Working(done = done, total = total)
+            }
+            unlockBatch.value = UnlockBatch.Done(
+                succeeded = results.count { it.isSuccess },
+                failed = results.count { !it.isSuccess },
+            )
+        }
+    }
+
+    fun dismissUnlockBatch() {
+        if (unlockBatch.value !is UnlockBatch.Working) unlockBatch.value = null
     }
 
     fun setQuery(value: String) {
