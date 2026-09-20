@@ -16,6 +16,55 @@ class GateRequestBuilder {
      * The nonce travels as a quoted decimal string: a 256-bit value loses precision as a JSON
      * number, and wallets encode `uint256` from decimal strings exactly.
      */
+    /**
+     * Canonical v1 *batch* `BatchGateRequest` typed data for
+     * `batchRequestDecryptionKey`:
+     * `BatchGateRequest(address evmAddress,bytes transportPublicKey,bytes32 cidsCommitment,uint256 nonce)`.
+     *
+     * The wallet hashes the dynamic `bytes` field itself, so the message carries
+     * the raw transport key while `cidsCommitment` arrives pre-hashed (bytes32):
+     * `keccak256(derivationInput₁ ‖ derivationInput₂ ‖ …)` in submitted order —
+     * exactly the canister's `eip712BatchGateStructHash`. Same domain as the
+     * single request; drift signs a digest the canister rejects, so the shape
+     * pins in tests.
+     */
+    fun buildBatchV1Request(
+        evmAddress: String,
+        transportPublicKeyHex: String,
+        cidsCommitmentHex: String,
+        nonceDecimal: String,
+    ): String {
+        return """
+            {
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "BatchGateRequest": [
+                        {"name": "evmAddress", "type": "address"},
+                        {"name": "transportPublicKey", "type": "bytes"},
+                        {"name": "cidsCommitment", "type": "bytes32"},
+                        {"name": "nonce", "type": "uint256"}
+                    ]
+                },
+                "primaryType": "BatchGateRequest",
+                "domain": {
+                    "name": "HavenAOL",
+                    "chainId": $EIP712_CHAIN_ID,
+                    "verifyingContract": "$EIP712_VERIFYING_CONTRACT"
+                },
+                "message": {
+                    "evmAddress": "$evmAddress",
+                    "transportPublicKey": "$transportPublicKeyHex",
+                    "cidsCommitment": "$cidsCommitmentHex",
+                    "nonce": "$nonceDecimal"
+                }
+            }
+        """.trimIndent()
+    }
+
     fun buildV1Request(
         evmAddress: String,
         transportPublicKeyHex: String,

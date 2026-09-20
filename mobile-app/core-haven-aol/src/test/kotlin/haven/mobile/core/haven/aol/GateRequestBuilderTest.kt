@@ -21,6 +21,45 @@ class GateRequestBuilderTest {
         ),
     )
 
+    private fun builtBatch() = JSONObject(
+        builder.buildBatchV1Request(
+            evmAddress = "0xabc",
+            transportPublicKeyHex = "0x" + "ab".repeat(48),
+            cidsCommitmentHex = "0x" + "cd".repeat(32),
+            nonceDecimal = "12345678901234567890",
+        ),
+    )
+
+    @org.junit.Test
+    fun `batch primary type and commitment field`() {
+        val root = builtBatch()
+        assertEquals("BatchGateRequest", root.getString("primaryType"))
+        val message = root.getJSONObject("message")
+        assertEquals("0xabc", message.getString("evmAddress"))
+        assertEquals("0x" + "ab".repeat(48), message.getString("transportPublicKey"))
+        assertEquals("0x" + "cd".repeat(32), message.getString("cidsCommitment"))
+        assertEquals("12345678901234567890", message.getString("nonce"))
+    }
+
+    @org.junit.Test
+    fun `batch type table matches the canister batch typehash`() {
+        val types = builtBatch().getJSONObject("types")
+        val fields = types.getJSONArray("BatchGateRequest")
+        assertEquals(4, fields.length())
+        assertEquals("evmAddress", fields.getJSONObject(0).getString("name"))
+        assertEquals("address", fields.getJSONObject(0).getString("type"))
+        assertEquals("transportPublicKey", fields.getJSONObject(1).getString("name"))
+        assertEquals("bytes", fields.getJSONObject(1).getString("type"))
+        assertEquals("cidsCommitment", fields.getJSONObject(2).getString("name"))
+        assertEquals("bytes32", fields.getJSONObject(2).getString("type"))
+        assertEquals("nonce", fields.getJSONObject(3).getString("name"))
+        assertEquals("uint256", fields.getJSONObject(3).getString("type"))
+        // Same domain as the single request — the canister rebuilds one separator.
+        val domain = builtBatch().getJSONObject("domain")
+        assertEquals("HavenAOL", domain.getString("name"))
+        assertTrue(!builtBatch().getJSONObject("types").getJSONArray("EIP712Domain").toString().contains("version"))
+    }
+
     @org.junit.Test
     fun `domain is HavenAOL without a version field`() {
         val domain = built().getJSONObject("domain")
