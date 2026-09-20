@@ -474,9 +474,12 @@ open class HavenAolImpl @Inject constructor(
         val nonce = nonceManager.getNonce(address, config.canisterId)
         val cids = items.map { (it.encryptionMetadata as haven.mobile.core.domain.GateMetadata.Sealed).cid }
         val commitment = batchCidsCommitmentHex(key.chainVariant, key.tokenAddress, key.thresholdNorm, cids)
+        // The batch struct hashes the transport key itself (`bytes32 transportKeyHash`),
+        // unlike the single request where the wallet hashes the dynamic `bytes` field —
+        // so the raw key goes in the Candid call but only its keccak goes in the typed data.
         val typedData = gateRequestBuilder.buildBatchV1Request(
             evmAddress = address,
-            transportPublicKeyHex = "0x" + transport.publicKey.toHex(),
+            transportKeyHashHex = "0x" + Keccak256.hashHex(transport.publicKey),
             cidsCommitmentHex = commitment,
             nonceDecimal = nonce,
         )

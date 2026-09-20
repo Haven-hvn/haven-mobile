@@ -19,18 +19,19 @@ class GateRequestBuilder {
     /**
      * Canonical v1 *batch* `BatchGateRequest` typed data for
      * `batchRequestDecryptionKey`:
-     * `BatchGateRequest(address evmAddress,bytes transportPublicKey,bytes32 cidsCommitment,uint256 nonce)`.
+     * `BatchGateRequest(address evmAddress,bytes32 transportKeyHash,bytes32 cidsCommitment,uint256 nonce)`.
      *
-     * The wallet hashes the dynamic `bytes` field itself, so the message carries
-     * the raw transport key while `cidsCommitment` arrives pre-hashed (bytes32):
+     * Unlike the single request (whose dynamic `bytes` transport key the wallet
+     * hashes itself), the batch struct takes `transportKeyHash` pre-hashed
+     * (bytes32): `keccak256(transportPublicKey)`. So does `cidsCommitment`:
      * `keccak256(derivationInput₁ ‖ derivationInput₂ ‖ …)` in submitted order —
      * exactly the canister's `eip712BatchGateStructHash`. Same domain as the
-     * single request; drift signs a digest the canister rejects, so the shape
-     * pins in tests.
+     * single request; drift signs a digest the canister rejects with
+     * InvalidSignature, so the shape pins in tests.
      */
     fun buildBatchV1Request(
         evmAddress: String,
-        transportPublicKeyHex: String,
+        transportKeyHashHex: String,
         cidsCommitmentHex: String,
         nonceDecimal: String,
     ): String {
@@ -44,7 +45,7 @@ class GateRequestBuilder {
                     ],
                     "BatchGateRequest": [
                         {"name": "evmAddress", "type": "address"},
-                        {"name": "transportPublicKey", "type": "bytes"},
+                        {"name": "transportKeyHash", "type": "bytes32"},
                         {"name": "cidsCommitment", "type": "bytes32"},
                         {"name": "nonce", "type": "uint256"}
                     ]
@@ -57,7 +58,7 @@ class GateRequestBuilder {
                 },
                 "message": {
                     "evmAddress": "$evmAddress",
-                    "transportPublicKey": "$transportPublicKeyHex",
+                    "transportKeyHash": "$transportKeyHashHex",
                     "cidsCommitment": "$cidsCommitmentHex",
                     "nonce": "$nonceDecimal"
                 }

@@ -24,7 +24,7 @@ class GateRequestBuilderTest {
     private fun builtBatch() = JSONObject(
         builder.buildBatchV1Request(
             evmAddress = "0xabc",
-            transportPublicKeyHex = "0x" + "ab".repeat(48),
+            transportKeyHashHex = "0x" + "ab".repeat(32),
             cidsCommitmentHex = "0x" + "cd".repeat(32),
             nonceDecimal = "12345678901234567890",
         ),
@@ -36,7 +36,7 @@ class GateRequestBuilderTest {
         assertEquals("BatchGateRequest", root.getString("primaryType"))
         val message = root.getJSONObject("message")
         assertEquals("0xabc", message.getString("evmAddress"))
-        assertEquals("0x" + "ab".repeat(48), message.getString("transportPublicKey"))
+        assertEquals("0x" + "ab".repeat(32), message.getString("transportKeyHash"))
         assertEquals("0x" + "cd".repeat(32), message.getString("cidsCommitment"))
         assertEquals("12345678901234567890", message.getString("nonce"))
     }
@@ -48,8 +48,8 @@ class GateRequestBuilderTest {
         assertEquals(4, fields.length())
         assertEquals("evmAddress", fields.getJSONObject(0).getString("name"))
         assertEquals("address", fields.getJSONObject(0).getString("type"))
-        assertEquals("transportPublicKey", fields.getJSONObject(1).getString("name"))
-        assertEquals("bytes", fields.getJSONObject(1).getString("type"))
+        assertEquals("transportKeyHash", fields.getJSONObject(1).getString("name"))
+        assertEquals("bytes32", fields.getJSONObject(1).getString("type"))
         assertEquals("cidsCommitment", fields.getJSONObject(2).getString("name"))
         assertEquals("bytes32", fields.getJSONObject(2).getString("type"))
         assertEquals("nonce", fields.getJSONObject(3).getString("name"))
@@ -58,6 +58,20 @@ class GateRequestBuilderTest {
         val domain = builtBatch().getJSONObject("domain")
         assertEquals("HavenAOL", domain.getString("name"))
         assertTrue(!builtBatch().getJSONObject("types").getJSONArray("EIP712Domain").toString().contains("version"))
+    }
+
+    @org.junit.Test
+    fun `batch canonical type string hashes to the canister pinned typehash`() {
+        // `EIP712_BATCH_GATE_REQUEST_TYPEHASH_HEX` in the canister: a wallet and the
+        // canister both derive this from the type table, so the field names, types
+        // and order pinned above must hash to exactly this value — otherwise every
+        // batch signature fails with InvalidSignature.
+        val canonical =
+            "BatchGateRequest(address evmAddress,bytes32 transportKeyHash,bytes32 cidsCommitment,uint256 nonce)"
+        assertEquals(
+            "b4633d97ed58755b24090d30395e8a391cb37f4e9c10d3478dc052697cf78394",
+            haven.mobile.core.crypto.Keccak256.hashHex(canonical.toByteArray(Charsets.UTF_8)),
+        )
     }
 
     @org.junit.Test
