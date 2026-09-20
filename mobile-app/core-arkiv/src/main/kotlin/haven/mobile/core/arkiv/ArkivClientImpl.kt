@@ -251,12 +251,25 @@ class ArkivClientImpl @Inject constructor(
     }
 
     /** One page of normalized entities plus the next cursor (null when iteration ends). */
-    private fun queryPage(query: String, pageSize: Int, cursor: String?): Pair<List<JSONObject>, String?> {
+    private fun queryPage(
+        query: String,
+        pageSize: Int,
+        cursor: String?,
+    ): Triple<List<JSONObject>, String?, Long?> {
         val result = arkivQuery(query, pageSize, cursor)
         val data = result.optJSONArray("data") ?: JSONArray()
         val items = List(data.length()) { idx -> normalizeRpcEntity(data.getJSONObject(idx)) }
-        return items to nextCursorOrNull(result, items.size, pageSize)
+        return Triple(items, nextCursorOrNull(result, items.size, pageSize), headBlockOrNull(result))
     }
+
+    /**
+     * Chain head from an `arkiv_query` result, or null when the node omits it.
+     *
+     * Expiry is decided from `expiresAtBlock` against this head (dapp parity — no entity
+     * carries its own "expired" flag), so a missing head fails open to "not expired".
+     */
+    internal fun headBlockOrNull(result: JSONObject): Long? =
+        runCatching { decodeRpcInt(result.opt("blockNumber")) }.getOrNull()
 
     /**
      * Fills in wall-clock creation dates from the chain.
@@ -350,7 +363,7 @@ class ArkivClientImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 // Same `$owner` lookup the SDK emits for `ownedBy` (lowercase verifies OK on-chain).
-                val (items, nextCursor) = queryPage("\$owner = addr(${owner.lowercase()})", pageSize, cursor)
+                val (items, nextCursor, _) = queryPage("\$owner = addr(${owner.lowercase()})", pageSize, cursor)
                 val mapped = resolveCreatedAt(items.map { it.toMediaItem() })
                 Result.success(ArkivPage(items = mapped, nextCursor = nextCursor))
             } catch (e: HavenError) {
@@ -377,7 +390,7 @@ class ArkivClientImpl @Inject constructor(
                         HavenError.Internal("Unknown gate chain: ${gate.chain}"),
                     )
                 val query = "${eqStr("gate_token", gate.tokenAddress)} AND ${eqNum("gate_chain", chainId)}"
-                val (items, nextCursor) = queryPage(query, pageSize, cursor)
+                val (items, nextCursor, _) = queryPage(query, pageSize, cursor)
                 val mapped = resolveCreatedAt(items.map { it.toMediaItem() })
                 Result.success(ArkivPage(items = mapped, nextCursor = nextCursor))
             } catch (e: HavenError) {
@@ -396,13 +409,17 @@ class ArkivClientImpl @Inject constructor(
                 // (`gate_token`/`gate_chain`/`gate_threshold`, stamped at publish time). So discovery
                 // mirrors the dapp: page Haven video entities and collect distinct gate attributes
                 // client-side. Bounded: discovery pages the listing, it never crawls the archive.
+                // Active means at least one non-expired entity: expiry is `expiresAtBlock`
+                // against the query head, so expired rows contribute no gate.
                 val gates = mutableListOf<TokenGate>()
                 var cursor: String? = null
                 var pages = 0
                 do {
-                    val (items, next) = queryPage(VIDEO_GROUPS_QUERY, SCAN_PAGE_SIZE, cursor)
+                    val (items, next, head) = queryPage(VIDEO_GROUPS_QUERY, SCAN_PAGE_SIZE, cursor)
                     for (item in items) {
-                        runCatching { item.toMediaItem().gate }.getOrNull()?.let { gates.add(it) }
+                        val media = runCatching { item.toMediaItem() }.getOrNull() ?: continue
+                        if (isExpired(media.expiresAtBlock, head)) continue
+                        media.gate?.let { gates.add(it) }
                     }
                     cursor = next
                     pages++
@@ -415,6 +432,15 @@ class ArkivClientImpl @Inject constructor(
             }
         }
     }
+
+    /**
+     * Expired when the entity names an expiry at or below the chain head.
+     *
+     * Null expiry means "no expiry recorded" (active); null head means the node omitted
+     * it, which fails open to active rather than hiding a live DAO. Pure for testing.
+     */
+    internal fun isExpired(expiresAtBlock: Long?, headBlock: Long?): Boolean =
+        expiresAtBlock != null && headBlock != null && expiresAtBlock <= headBlock
 
     /**
      * One gate per (chain, contract): thresholds vary per entity, and the lowest is the one
@@ -473,8 +499,12 @@ class ArkivClientImpl @Inject constructor(
                 // Dapp parity (`discoverUserCommunities`): the wallet's own entities, gate attributes
                 // read locally. Answers "nothing" for a reader who never published — that is why
                 // `discoverGates` exists alongside it.
-                val (items, _) = queryPage("\$owner = addr(${address.lowercase()})", SCAN_PAGE_SIZE, null)
+                val (items, _, head) = queryPage("\$owner = addr(${address.lowercase()})", SCAN_PAGE_SIZE, null)
                 val communities = items
+                    .filter { item ->
+                        val expires = runCatching { item.toMediaItem().expiresAtBlock }.getOrNull()
+                        !isExpired(expires, head)
+                    }
                     .mapNotNull { runCatching { it.toCommunity() }.getOrNull() }
                     // Local key, not the checker: core-collections owns gate keys and already
                     // depends on this module, so importing it here would be circular.
@@ -499,7 +529,7 @@ class ArkivClientImpl @Inject constructor(
                 var cursor: String? = null
                 var pages = 0
                 do {
-                    val (items, next) = queryPage(DRIP_PARTS_QUERY, SCAN_PAGE_SIZE, cursor)
+                    val (items, next, _) = queryPage(DRIP_PARTS_QUERY, SCAN_PAGE_SIZE, cursor)
                     parts += items.filter { it.optString("grp", null) == DRIP_PART_GROUP }
                     cursor = next
                     pages++
@@ -528,7 +558,7 @@ class ArkivClientImpl @Inject constructor(
 
     /** The SERIES header for one `drip_id`, or null when it has expired or never existed. */
     private fun findDripSeries(dripId: String): JSONObject? {
-        val (items, _) = queryPage(eqStr("drip_id", dripId), SERIES_LOOKUP_LIMIT, null)
+        val (items, _, _) = queryPage(eqStr("drip_id", dripId), SERIES_LOOKUP_LIMIT, null)
         return items.firstOrNull { it.optString("grp", null) == DRIP_SERIES_GROUP }
     }
 
@@ -541,7 +571,7 @@ class ArkivClientImpl @Inject constructor(
                 if (clean.length != 64 || !clean.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
                     return@withContext Result.success(null)
                 }
-                val (items, _) = queryPage("\$key = key(0x${clean.lowercase()})", 1, null)
+                val (items, _, _) = queryPage("\$key = key(0x${clean.lowercase()})", 1, null)
                 val found = items.firstOrNull()?.let { runCatching { it.toMediaItem() }.getOrNull() }
                 Result.success(found?.let { resolveCreatedAt(listOf(it)).first() })
             } catch (e: HavenError) {

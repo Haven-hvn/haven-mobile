@@ -41,7 +41,7 @@ internal class CollectionRepositoryImpl @Inject constructor(
 ) : CollectionRepository {
 
     override suspend fun collections(chains: Set<HavenChain>): List<CollectionAccess> {
-        val entries = catalog.entries()
+        val entries = catalog.entries(chains)
         if (entries.isEmpty()) return emptyList()
 
         val address = walletSession.address.value
@@ -71,7 +71,7 @@ internal class CollectionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun accessibleGates(chains: Set<HavenChain>): List<TokenGate> {
-        val entries = catalog.entries()
+        val entries = catalog.entries(chains)
         if (entries.isEmpty()) return emptyList()
         val address = walletSession.address.value ?: return emptyList()
 
