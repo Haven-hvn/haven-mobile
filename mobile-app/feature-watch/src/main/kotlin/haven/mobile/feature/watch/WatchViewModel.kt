@@ -43,6 +43,13 @@ enum class UnlockStage(val label: String) {
 sealed interface ContentState {
     data object Idle : ContentState
 
+    /**
+     * The item is gated and no session key exists, so opening it needs a wallet
+     * signature. Shown *before* any signing prompt: a cold wallet popup with no
+     * explanation is how readers learn to blind-sign. Explicit [unlock] proceeds.
+     */
+    data object NeedsSignature : ContentState
+
     /** [progress] is 0f..1f when the size is known, null when it is not. */
     data class Working(val stage: UnlockStage, val progress: Float? = null) : ContentState
 
@@ -119,11 +126,41 @@ class WatchViewModel @Inject constructor(
         viewModelScope.launch { mediaRepository.refreshItem(id) }
     }
 
-    /** Idempotent, so it is safe to drive from a `LaunchedEffect`. */
+    /**
+     * Idempotent, so it is safe to drive from a `LaunchedEffect`.
+     *
+     * Never signs on entry: when the item is gated and no session key exists the
+     * screen stops at [ContentState.NeedsSignature] and explains the coming wallet
+     * prompt first. Cached keys and ungated items flow straight through to staging.
+     */
     fun prepare(media: MediaItem) {
         val current = content.value
-        if (current is ContentState.Working || current is ContentState.Ready) return
+        if (current is ContentState.Working || current is ContentState.Ready ||
+            current is ContentState.NeedsSignature
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            if (media.isEncrypted && !hasUnlockKey(media)) {
+                content.value = ContentState.NeedsSignature
+            } else {
+                stage(media)
+            }
+        }
+    }
+
+    /** Explicit consent from the disclosure — the only path that may pop the wallet. */
+    fun unlock(media: MediaItem) {
+        if (content.value !is ContentState.NeedsSignature) return
         viewModelScope.launch { stage(media) }
+    }
+
+    /** Staged file, piece cache, or session gate key — any hit means no signature needed. */
+    private suspend fun hasUnlockKey(media: MediaItem): Boolean {
+        val cid = media.pieceRef?.pieceCid ?: return false
+        if (plaintextSpool.find(cid) != null) return true
+        if (aesKeyCache.getSuspend(cid) != null) return true
+        return havenAol.hasCachedKey(media)
     }
 
     fun retry(media: MediaItem) {

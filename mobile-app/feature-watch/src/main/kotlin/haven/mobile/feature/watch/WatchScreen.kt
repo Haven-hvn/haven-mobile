@@ -137,6 +137,11 @@ fun WatchScreen(
                     }
 
                     when (val content = state.content) {
+                        ContentState.NeedsSignature ->
+                            SignatureDisclosure(
+                                onUnlock = { viewModel.unlock(media) },
+                            )
+
                         ContentState.Idle ->
                             if (media.kind == MediaKind.FILE) {
                                 FileViewer(media = media, staged = null, viewModel = viewModel)
@@ -662,6 +667,48 @@ private fun ProgressBlock(label: String, progress: Float? = null) {
             style = HavenTheme.text.mono,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Pre-disclosure before the first wallet signature for an item.
+ *
+ * The signature prompt is the scariest moment in the app — a cold MetaMask popup
+ * with no context teaches blind-signing. This states what the signature does
+ * (prove holdings, nothing more) and waits for an explicit tap; nothing here
+ * signs on entry. Cached keys and ungated items never reach this screen.
+ */
+@Composable
+private fun SignatureDisclosure(onUnlock: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(HavenSpacing.xl),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "One signature to open this",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(HavenSpacing.sm))
+        Text(
+            text = "This file is locked to its community's token. Tapping below asks " +
+                "your wallet to sign a message proving you hold it. That is all the " +
+                "signature does — no transaction, no gas fee, nothing leaves your wallet.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(HavenSpacing.lg))
+        Button(
+            onClick = onUnlock,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HavenSpacing.touchTarget),
+        ) {
+            Text("Sign to open")
+        }
     }
 }
 
