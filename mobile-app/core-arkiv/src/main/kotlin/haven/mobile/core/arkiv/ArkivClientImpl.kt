@@ -657,6 +657,20 @@ class ArkivClientImpl @Inject constructor(
         // Gate presence decides encryption — 2.0 carries no is_encrypted flag.
         val gateMetadata = parseGateMetadata("gate")
         val cidGateMetadata = parseGateMetadata("cid_gate", "cidGate")
+        val tokenGate = toTokenGate()
+
+        // Retrieval scoping the record does not carry: the 2.0 payload holds only the
+        // `piece` locator. foc-cache builds /piece candidates solely from this ref
+        // (RemoteStore throws "No candidate endpoints" on an empty one), so supply
+        // what the writer guarantees by convention: haven-cli uploads withCDN
+        // (Filecoin Beam) on the gate's network, and the Beam per-account subdomain
+        // is keyed by the uploader wallet (the record owner).
+        val focChain = tokenGate?.chain
+            ?.let { HavenChain.parse(it) }
+            ?.let { if (it.isTestnet) FocChain.CALIBRATION else FocChain.MAINNET }
+            ?: FocChain.MAINNET
+        val beamWallet = (firstString("owner") ?: "").lowercase()
+            .takeIf { it.matches(Regex("^0x[0-9a-f]{40}$")) }
 
         return MediaItem(
             // `key` is the entity id in Arkiv; `id` is what a gateway usually renames it to.
@@ -677,14 +691,15 @@ class ArkivClientImpl @Inject constructor(
             pieceRef = pieceCid?.let { cid ->
                 PieceRef(
                     pieceCid = cid,
-                    // Unknown here, and foc does not need telling: it resolves size, providers, CDN and
-                    // gateways itself. A stale provider list baked in from an index would send fetches
-                    // at the wrong hosts.
+                    // Size/providers/gateways stay unknown: foc hedges the Beam URL
+                    // (front of the race when cdnEnabled) with any SP endpoints.
+                    // A stale provider list baked in from an index would send
+                    // fetches at the wrong hosts.
                     size = 0L,
                     providerServiceUrls = emptyList(),
-                    walletAddress = null,
-                    cdnEnabled = false,
-                    chain = FocChain.MAINNET,
+                    walletAddress = beamWallet,
+                    cdnEnabled = beamWallet != null,
+                    chain = focChain,
                     ipfsIndexed = false,
                     unixFsRoot = null,
                     trustlessGateways = emptyList(),
@@ -694,7 +709,7 @@ class ArkivClientImpl @Inject constructor(
             // 2.0 never indexes the encrypted locator — always null (kept on the model for API stability).
             encryptedCid = null,
             cidHash = firstString("sha256_ct", "cidHash"),
-            gate = toTokenGate(),
+            gate = tokenGate,
             isEncrypted = gateMetadata != null,
             encryptionMetadata = gateMetadata,
             cidEncryptionMetadata = cidGateMetadata,
