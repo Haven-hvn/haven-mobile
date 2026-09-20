@@ -1,6 +1,7 @@
 package haven.mobile.core.haven.aol
 
 import haven.mobile.core.crypto.AesKeyCache
+import haven.mobile.core.crypto.Keccak256
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.wallet.WalletSession
@@ -327,6 +328,45 @@ open class HavenAolImpl @Inject constructor(
         return Result.failure(HavenError.CanisterCallFailed("Canister returned an unexpected response."))
     }
 
+    /**
+     * `batchRequestDecryptionKey` reply -> per-cid keys. Field ids, never positions.
+     * `err` variants share the single-call mapping; a malformed `keys` entry is
+     * skipped rather than failing the group (the missing cid then fails closed
+     * per item, exactly like a single call that returned no key).
+     */
+    internal fun parseBatchKeyResult(
+        decoded: List<dev.ic.kotlin.candid.CandidValue>,
+    ): Result<BatchKeyBundle> {
+        val variant = decoded.firstOrNull() as? dev.ic.kotlin.candid.CandidValue.CandidVariant
+            ?: return Result.failure(HavenError.CanisterCallFailed("Canister returned an unexpected response."))
+        if (variant.tag == dev.ic.kotlin.candid.fieldId("ok")) {
+            val fields = (variant.value as? dev.ic.kotlin.candid.CandidValue.CandidRecord)?.fields
+            val keys = fields?.get(dev.ic.kotlin.candid.fieldId("keys"))
+                as? dev.ic.kotlin.candid.CandidValue.CandidVec
+            val verificationKey = fields?.get(dev.ic.kotlin.candid.fieldId("verification_key"))
+                as? dev.ic.kotlin.candid.CandidValue.CandidBlob
+            if (keys == null || verificationKey == null) {
+                return Result.failure(HavenError.CanisterCallFailed("Canister returned an incomplete response."))
+            }
+            val entries = keys.items.mapNotNull { entry ->
+                val rec = (entry as? dev.ic.kotlin.candid.CandidValue.CandidRecord)?.fields
+                    ?: return@mapNotNull null
+                val cid = (rec[dev.ic.kotlin.candid.fieldId("cid")]
+                    as? dev.ic.kotlin.candid.CandidValue.CandidText)?.value
+                    ?: return@mapNotNull null
+                val enc = (rec[dev.ic.kotlin.candid.fieldId("encrypted_key")]
+                    as? dev.ic.kotlin.candid.CandidValue.CandidBlob)?.bytes
+                    ?: return@mapNotNull null
+                BatchKeyEntry(cid = cid, encryptedKey = enc)
+            }
+            return Result.success(BatchKeyBundle(entries, verificationKey.bytes))
+        }
+        if (variant.tag == dev.ic.kotlin.candid.fieldId("err")) {
+            return Result.failure(mapGateError(variant.value))
+        }
+        return Result.failure(HavenError.CanisterCallFailed("Canister returned an unexpected response."))
+    }
+
     /** Canister `GateError` variant -> reader-facing failure, mirroring dapp `mapGateError`. */
     internal fun mapGateError(value: dev.ic.kotlin.candid.CandidValue): HavenError {
         val err = value as? dev.ic.kotlin.candid.CandidValue.CandidVariant
@@ -384,6 +424,135 @@ open class HavenAolImpl @Inject constructor(
     /** Record threshold -> positive integer string, mirroring `normalizeDerivationThreshold`. */
     internal fun normalizeSealedThreshold(raw: String): String =
         raw.trim().toLongOrNull()?.coerceAtLeast(1L)?.toString() ?: "1"
+
+    /**
+     * Batch commitment for `batchRequestDecryptionKey`: `keccak256` over the
+     * concatenated per-cid derivation inputs, in submitted order — exactly the
+     * canister's `eip712BatchGateStructHash` commitment. Same inputs the single
+     * path derives with, so one formula serves signing and unwrapping.
+     */
+    internal fun batchCidsCommitmentHex(
+        chainVariant: String,
+        tokenAddress: String,
+        thresholdNorm: String,
+        cids: List<String>,
+    ): String {
+        require(cids.isNotEmpty() && cids.size <= MAX_BATCH_CIDS) {
+            "batch needs 1..$MAX_BATCH_CIDS cids"
+        }
+        val packed = ByteArray(32 * cids.size)
+        cids.forEachIndexed { index, cid ->
+            vetkdDerivationInput(chainVariant, tokenAddress, thresholdNorm, cid)
+                .copyInto(packed, index * 32)
+        }
+        return "0x" + Keccak256.hashHex(packed)
+    }
+
+    /**
+     * True v1 batch unlock: one transport keypair, one nonce, ONE wallet signature
+     * and ONE canister call (single EVM check) for every cid in the group, then a
+     * per-cid local unwrap. Fails closed per item — a missing key or bad unwrap
+     * for one cid never poisons its neighbours.
+     */
+    private suspend fun decryptBatchSealedV1(
+        items: List<MediaItem>,
+        key: V1BatchKey,
+        session: WalletSession,
+        address: String,
+    ): List<Result<ByteArray>> {
+        fun allFailed(throwable: Throwable): List<Result<ByteArray>> =
+            items.map { Result.failure<ByteArray>(throwable) }
+        if (!vetKdUnwrap.isAvailable()) {
+            return allFailed(
+                HavenError.Internal("Sealed unlock needs the native vetkeys library, which is missing from this build."),
+            )
+        }
+        val transport = vetKdUnwrap.generateTransportKeypair().getOrElse {
+            timber.log.Timber.w(it, "VetKD transport keypair failed")
+            return allFailed(HavenError.Internal("Could not prepare the sealed unlock."))
+        }
+        val nonce = nonceManager.getNonce(address, config.canisterId)
+        val cids = items.map { (it.encryptionMetadata as haven.mobile.core.domain.GateMetadata.Sealed).cid }
+        val commitment = batchCidsCommitmentHex(key.chainVariant, key.tokenAddress, key.thresholdNorm, cids)
+        val typedData = gateRequestBuilder.buildBatchV1Request(
+            evmAddress = address,
+            transportPublicKeyHex = "0x" + transport.publicKey.toHex(),
+            cidsCommitmentHex = commitment,
+            nonceDecimal = nonce,
+        )
+        val sig = session.signTypedDataV4(typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+            return allFailed(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
+        }
+        val sigBytes = parseWalletSignature(sig) ?: return allFailed(
+            HavenError.InvalidSignatureFormat("The wallet returned an unusable signature."),
+        )
+        val nonceNat = try {
+            java.math.BigInteger(nonce)
+        } catch (_: Exception) {
+            return allFailed(HavenError.Internal("Could not prepare the sealed unlock."))
+        }
+        val record = dev.ic.kotlin.candid.CandidValue.CandidRecord(
+            mapOf(
+                dev.ic.kotlin.candid.fieldId("chain") to dev.ic.kotlin.candid.CandidValue.CandidVariant(
+                    dev.ic.kotlin.candid.fieldId(key.chainVariant), dev.ic.kotlin.candid.CandidValue.CandidNull,
+                ),
+                dev.ic.kotlin.candid.fieldId("tokenAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(key.tokenAddress),
+                dev.ic.kotlin.candid.fieldId("threshold") to dev.ic.kotlin.candid.CandidValue.CandidNat(java.math.BigInteger(key.thresholdNorm)),
+                dev.ic.kotlin.candid.fieldId("cids") to dev.ic.kotlin.candid.CandidValue.CandidVec(
+                    cids.map { dev.ic.kotlin.candid.CandidValue.CandidText(it) },
+                ),
+                dev.ic.kotlin.candid.fieldId("evmAddress") to dev.ic.kotlin.candid.CandidValue.CandidText(address),
+                dev.ic.kotlin.candid.fieldId("transportPublicKey") to dev.ic.kotlin.candid.CandidValue.CandidBlob(transport.publicKey),
+                dev.ic.kotlin.candid.fieldId("nonce") to dev.ic.kotlin.candid.CandidValue.CandidNat(nonceNat),
+                dev.ic.kotlin.candid.fieldId("signature") to dev.ic.kotlin.candid.CandidValue.CandidBlob(sigBytes),
+                dev.ic.kotlin.candid.fieldId("eip712ChainId") to dev.ic.kotlin.candid.CandidValue.CandidNat(
+                    java.math.BigInteger.valueOf(GateRequestBuilder.EIP712_CHAIN_ID),
+                ),
+                dev.ic.kotlin.candid.fieldId("eip712VerifyingContract") to dev.ic.kotlin.candid.CandidValue.CandidText(
+                    GateRequestBuilder.EIP712_VERIFYING_CONTRACT,
+                ),
+            ),
+        )
+        val replyArg = try {
+            callCanister("batchRequestDecryptionKey", dev.ic.kotlin.candid.CandidEncoder.encode(listOf(record)))
+                .getOrElse { return allFailed(it) }
+        } catch (e: Exception) {
+            timber.log.Timber.w(e, "Sealed v1 batch unlock failed")
+            return allFailed(HavenError.CanisterCallFailed("Haven couldn't unlock these sealed items."))
+        }
+        val decoded = try {
+            dev.ic.kotlin.candid.CandidDecoder.decode(replyArg)
+        } catch (_: Exception) {
+            null
+        } ?: return allFailed(HavenError.CanisterCallFailed("Canister returned an unreadable response."))
+        val batch = parseBatchKeyResult(decoded).getOrElse { return allFailed(it) }
+        val byCid = batch.entries.associate { it.cid to it.encryptedKey }
+        return items.map { item ->
+            val sealed = item.encryptionMetadata as haven.mobile.core.domain.GateMetadata.Sealed
+            val encryptedVetKey = byCid[sealed.cid]
+                ?: return@map Result.failure<ByteArray>(
+                    HavenError.CanisterCallFailed("Canister returned no key for this item."),
+                )
+            val derivation = vetkdDerivationInput(key.chainVariant, key.tokenAddress, key.thresholdNorm, sealed.cid)
+            val aesKey = vetKdUnwrap.unwrapContentKey(
+                haven.mobile.core.haven.aol.vetkeys.UnwrapParams(
+                    encryptedVetKey = encryptedVetKey,
+                    transportSecret = transport.secretKey,
+                    verificationKey = batch.verificationKey,
+                    derivationInput = derivation,
+                    sealedKeyUtf8 = sealed.encryptedAesKey.toByteArray(Charsets.UTF_8),
+                ),
+            ).getOrElse {
+                timber.log.Timber.w(it, "VetKD batch unwrap failed")
+                return@map Result.failure<ByteArray>(HavenError.PlaybackDecryptFailed("The sealed key would not open (${it.message})."))
+            }
+            if (aesKey.size != 32) {
+                return@map Result.failure<ByteArray>(HavenError.PlaybackDecryptFailed("The sealed key unwrapped to the wrong size."))
+            }
+            aesKeyCache.put(cacheKeyFor(item), aesKey)
+            Result.success(aesKey)
+        }
+    }
 
     /**
      * Wallet signature -> 65 bytes, mirroring `parseSignatureHex`. Anything else fails closed
@@ -459,14 +628,12 @@ open class HavenAolImpl @Inject constructor(
         "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
 
     /**
-     * Batch unlock with fan-out: V3 epoch groups and V1 items decrypt concurrently.
-     *
-     * Each group still makes exactly the calls it would alone (one per V3 epoch, one per
-     * V1 item — nonces are fresh per request, so no replay collision), but the 10s+
-     * canister executions overlap instead of adding up. Order is preserved, one item's
-     * failure never cancels the rest (`supervisorScope`), and wallet signature prompts
-     * surface in group order as each concurrent request reaches signing — the batch UI
-     * says how many to expect up front.
+     * Batch unlock: sealed-v1 items sharing a gate go out as ONE
+     * `batchRequestDecryptionKey` (one signature, one EVM check, per-cid keys
+     * back); V3 epoch groups keep one single call whose key is shared; the rest
+     * decrypt per item. Groups run concurrently, order is preserved, one item's
+     * failure never cancels the rest (`supervisorScope`) — the batch UI states
+     * the signature count up front.
      */
     override suspend fun decryptAll(
         items: List<MediaItem>,
@@ -478,18 +645,52 @@ open class HavenAolImpl @Inject constructor(
         // Correct grouping is epochId+gateReference, not full V3 object (which includes wrappedKey per-item)
         // See HavenAolBatchGroupingTest and planning/mobile-v1-tasking/sprint-2…/2.4-core-haven-aol-v3-batch.md
         data class V3BatchKey(val epochId: Long, val gateReference: String)
-        val keyFor: (MediaItem) -> V3BatchKey? = { item ->
+        val keyForV3: (MediaItem) -> V3BatchKey? = { item ->
             val v3 = item.cidEncryptionMetadata as? haven.mobile.core.domain.GateMetadata.V3
                 ?: item.encryptionMetadata as? haven.mobile.core.domain.GateMetadata.V3
             v3?.let { V3BatchKey(it.epochId, it.gateReference) }
         }
-        // Group indices by batch key to preserve input order later
-        val groupedIndices = mutableMapOf<V3BatchKey?, MutableList<Int>>()
-        items.forEachIndexed { idx, item -> groupedIndices.getOrPut(keyFor(item)) { mutableListOf() }.add(idx) }
+        // Sealed-v1 items with a complete record share one true batch call per gate.
+        // Anything failing the preconditions falls through to single decrypt, which
+        // fails it closed before signing — batching never signs for what it can't do.
+        val v1Groups = mutableMapOf<V1BatchKey, MutableList<Int>>()
+        val rest = mutableListOf<Int>()
+        items.forEachIndexed { idx, item ->
+            val key = v1BatchKeyOrNull(item)
+            if (key != null) v1Groups.getOrPut(key) { mutableListOf() }.add(idx)
+            else rest.add(idx)
+        }
+        // v3 grouping over the remainder only; null key means single decrypt.
+        val v3Groups = mutableMapOf<V3BatchKey?, MutableList<Int>>()
+        rest.forEach { idx -> v3Groups.getOrPut(keyForV3(items[idx])) { mutableListOf() }.add(idx) }
+        val address = session.address.value
         val completed = java.util.concurrent.atomic.AtomicInteger(0)
+        suspend fun finish(pairs: List<Pair<Int, Result<ByteArray>>>): List<Pair<Int, Result<ByteArray>>> {
+            onProgress(completed.addAndGet(pairs.size), items.size)
+            return pairs
+        }
         return supervisorScope {
-            groupedIndices.map { (batchKey, indices) ->
-                async {
+            val jobs = mutableListOf<kotlinx.coroutines.Deferred<List<Pair<Int, Result<ByteArray>>>>>()
+            // True v1 batches, chunked at the canister cap — one signature per chunk.
+            v1Groups.forEach { (key, indices) ->
+                indices.chunked(MAX_BATCH_CIDS).forEach { chunk ->
+                    jobs += async {
+                        val pairs = if (address == null) {
+                            chunk.map { idx ->
+                                idx to Result.failure<ByteArray>(
+                                    HavenError.WalletNotConnected("No wallet connected"),
+                                )
+                            }
+                        } else {
+                            val results = decryptBatchSealedV1(chunk.map { items[it] }, key, session, address)
+                            chunk.zip(results)
+                        }
+                        finish(pairs)
+                    }
+                }
+            }
+            v3Groups.forEach { (batchKey, indices) ->
+                jobs += async {
                     val pairs = if (batchKey != null) {
                         // V3 epoch group — one GateRequestV3 unlocks whole epoch (FR-ACL-1)
                         val single = decrypt(items[indices.first()], session)
@@ -501,14 +702,33 @@ open class HavenAolImpl @Inject constructor(
                         // Reuse same key/error for all cids in this epoch (response shapes cids, derivation does not)
                         indices.map { idx -> idx to single }
                     } else {
-                        // V1 — per-item decrypt (preserves v1 parity, each cid has distinct wrappedKey/nonce)
+                        // Anything else — per-item decrypt preserves existing parity.
                         indices.map { idx -> async { idx to decrypt(items[idx], session) } }.awaitAll()
                     }
-                    onProgress(completed.addAndGet(pairs.size), items.size)
-                    pairs
+                    finish(pairs)
                 }
-            }.awaitAll().flatten().sortedBy { it.first }.map { it.second }
+            }
+            jobs.awaitAll().flatten().sortedBy { it.first }.map { it.second }
         }
+    }
+
+    /**
+     * Sealed-v1 batch precondition, mirroring `decryptSealedV1`'s fail-closed
+     * gates: v1, complete record, known chain. Null routes to single decrypt,
+     * which fails the item closed before any signing prompt.
+     */
+    private fun v1BatchKeyOrNull(item: MediaItem): V1BatchKey? {
+        val sealed = item.encryptionMetadata as? haven.mobile.core.domain.GateMetadata.Sealed
+            ?: return null
+        if (sealed.version != 1L) return null
+        if (sealed.cid.isBlank() || sealed.chain.isBlank() || sealed.tokenAddress.isBlank()) return null
+        val chainVariant = haven.mobile.core.domain.HavenChain.parse(sealed.chain)?.aolVariant
+            ?: return null
+        return V1BatchKey(
+            chainVariant = chainVariant,
+            tokenAddress = sealed.tokenAddress,
+            thresholdNorm = normalizeSealedThreshold(sealed.threshold),
+        )
     }
 
     override suspend fun clearFor(walletAddress: String) {
@@ -522,6 +742,32 @@ internal data class GateKeys(
     val encryptedKey: ByteArray,
     val verificationKey: ByteArray,
 )
+
+/** One entry of a `BatchGateResult.ok.keys` vector: which cid this key opens. */
+internal data class BatchKeyEntry(
+    val cid: String,
+    val encryptedKey: ByteArray,
+)
+
+/** A parsed batch reply: per-cid keys plus the shared verification key. */
+internal data class BatchKeyBundle(
+    val entries: List<BatchKeyEntry>,
+    val verificationKey: ByteArray,
+)
+
+/**
+ * One sealed-v1 batch group: every item derives under the same gate, so one
+ * signature and one EVM check unlocks them all. Thresholds are normalized
+ * before grouping — records disagreeing only in spelling share a call.
+ */
+internal data class V1BatchKey(
+    val chainVariant: String,
+    val tokenAddress: String,
+    val thresholdNorm: String,
+)
+
+/** Canister cap on `BatchGateRequest.cids` — larger groups chunk. */
+internal const val MAX_BATCH_CIDS = 20
 
 /**
  * Pooled IC client: `requestDecryptionKey` needs 90s reads (EVM-RPC + VetKD),

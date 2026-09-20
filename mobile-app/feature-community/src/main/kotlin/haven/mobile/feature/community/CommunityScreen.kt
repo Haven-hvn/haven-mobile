@@ -207,9 +207,8 @@ fun CommunityScreen(
 }
 
 /**
- * One tap replaces N open-wait-back navigations: unlocks every gated row shown,
- * with the signature count stated up front (each item still needs its own until
- * the canister offers a batch method). Afterwards unlocked rows open instantly
+ * One tap replaces N open-wait-back navigations: unlocks every gated row shown
+ * with one signature per community gate. Afterwards unlocked rows open instantly
  * from the session key cache.
  */
 @Composable
@@ -234,9 +233,9 @@ private fun UnlockAllHeader(
                     }
                     Spacer(Modifier.height(HavenSpacing.xs))
                     Text(
-                        text = "Your wallet will ask for $gatedCount signature" +
-                            (if (gatedCount == 1) "" else "s") +
-                            " — afterwards every row below opens instantly.",
+                        text = "Your wallet will ask you to sign — once per community gate, " +
+                            "however many of these $gatedCount share it — afterwards every " +
+                            "row below opens instantly.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -42,8 +42,8 @@ sealed interface CommunityUiState {
 /**
  * One-shot batch unlock state. Null means no batch has run (or it was dismissed).
  *
- * Counts items, not signatures: each gated item still needs its own wallet
- * signature until the canister offers a batch method, and the UI says so up front.
+ * Counts items; signatures are per gate (the canister's batch endpoint signs
+ * once per community gate), and the header says so up front.
  */
 sealed interface UnlockBatch {
     data class Working(val done: Int, val total: Int) : UnlockBatch
@@ -165,8 +165,8 @@ class CommunityViewModel @Inject constructor(
      * Unlock every gated item currently shown, in one batch.
      *
      * One tap replaces N open-wait-back navigations; after this, tapping any unlocked
-     * row opens instantly (session key cache, no re-sign). Each item still costs its
-     * own wallet signature — the header says the count up front. Ungated items need
+     * row opens instantly (session key cache, no re-sign). Items sharing a gate are
+     * unlocked by one true batch call — one signature per gate. Ungated items need
      * no key and are skipped, not failed.
      */
     fun unlockAll(visible: List<MediaItem>) {
