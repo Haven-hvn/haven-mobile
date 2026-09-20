@@ -10,6 +10,7 @@ import haven.mobile.core.cache.PlaintextSpool
 import haven.mobile.core.cache.mirror.MediaRepository
 import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.crypto.HavenCipher
+import haven.mobile.core.crypto.stripCarContainer
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
@@ -180,7 +181,9 @@ class WatchViewModel @Inject constructor(
         val plaintext = if (contentKey == null) {
             ciphertext
         } else {
-            havenCipher.decryptStream(contentKey, ciphertext, null)
+            // Retrieval serves the stored CAR file; the cipher expects the raw chunked
+            // ciphertext inside it. Non-CAR bytes pass through untouched.
+            havenCipher.decryptStream(contentKey, ciphertext.stripCarContainer(), null)
         }
 
         val staged = plaintextSpool.write(piece.pieceCid, plaintext) { written ->
