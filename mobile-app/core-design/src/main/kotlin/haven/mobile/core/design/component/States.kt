@@ -116,6 +116,11 @@ fun ErrorState(
     message: String,
     modifier: Modifier = Modifier,
     code: String? = null,
+    /**
+     * Optional diagnostics trail (newest last), shown small under the code so
+     * a report needs no adb. Null hides it.
+     */
+    details: String? = null,
     onRetry: (() -> Unit)? = null,
 ) {
     Column(
@@ -151,6 +156,15 @@ fun ErrorState(
                 text = code,
                 style = HavenTheme.text.monoSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (details != null) {
+            Spacer(Modifier.height(HavenSpacing.sm))
+            Text(
+                text = details,
+                style = HavenTheme.text.monoSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
         if (onRetry != null) {

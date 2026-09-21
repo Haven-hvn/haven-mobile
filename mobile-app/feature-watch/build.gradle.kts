@@ -18,6 +18,8 @@ dependencies {
     implementation(project(":core-cache"))
     implementation(project(":core-cache-mirror"))
     implementation(project(":core-wallet"))
+    // Pipeline transitions go to the log and the diagnostics trail.
+    implementation("com.jakewharton.timber:timber:5.0.1")
     implementation(libs.okhttp)
     implementation(libs.androidx.compose.navigation)
     implementation(libs.hilt.navigation)

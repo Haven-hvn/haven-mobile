@@ -98,6 +98,7 @@ fun WatchScreen(
     viewModel: WatchViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val diagnostics by viewModel.diagnostics.collectAsState()
 
     LaunchedEffect(itemId) { viewModel.open(itemId) }
 
@@ -168,6 +169,8 @@ fun WatchScreen(
                         is ContentState.Failed -> ErrorState(
                             title = "Couldn't open this",
                             message = content.message,
+                            code = content.code,
+                            details = diagnostics.joinToString("\n").takeIf { it.isNotEmpty() },
                             onRetry = { viewModel.retry(media) },
                         )
 

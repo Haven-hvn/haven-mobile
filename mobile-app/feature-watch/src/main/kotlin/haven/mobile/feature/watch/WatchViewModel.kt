@@ -37,6 +37,8 @@ enum class UnlockStage(val label: String) {
     /** "Gate" is Haven's word, not a reader's — they are waiting on an access check. */
     UNLOCKING("Checking your access\u2026"),
     STREAMING("Decrypting\u2026"),
+    /** Fetching bytes with nothing to decrypt — ungated items must never claim otherwise. */
+    LOADING("Loading\u2026"),
 }
 
 /** Content lifecycle for the open item. */
@@ -103,6 +105,14 @@ class WatchViewModel @Inject constructor(
 
     private val itemId = MutableStateFlow<String?>(null)
     private val content = MutableStateFlow<ContentState>(ContentState.Idle)
+
+    /**
+     * In-app diagnostics trail: every pipeline transition, newest last, capped.
+     * Rendered under the failure screen so a report needs no adb — logcat
+     * gets the same lines via [logStage].
+     */
+    private val _diagnostics = MutableStateFlow<List<String>>(emptyList())
+    val diagnostics: StateFlow<List<String>> = _diagnostics
 
     private val item: StateFlow<MediaItem?> = itemId
         .flatMapLatest { id ->
@@ -174,6 +184,7 @@ class WatchViewModel @Inject constructor(
      */
     private suspend fun stage(media: MediaItem): Result<File> {
         (content.value as? ContentState.Ready)?.let { return Result.success(it.file) }
+        logStage("start id=${media.id} encrypted=${media.isEncrypted}")
 
         val piece = media.pieceRef
             ?: return fail("NO_PIECE_REF", "This item has no stored content reference.")
@@ -196,10 +207,27 @@ class WatchViewModel @Inject constructor(
         if (media.isEncrypted) {
             content.value = ContentState.Working(UnlockStage.UNLOCKING)
             key = aesKeyCache.getSuspend(piece.pieceCid)
+            logStage("key id=${media.id} cached=${key != null}")
             if (key == null) {
                 val unlocked = havenAol.decrypt(media, walletSession)
                 unlocked.exceptionOrNull()?.let { throwable ->
-                    content.value = throwable.toFailure("Could not unlock this item.")
+                    if (throwable.isOutOfCycles()) {
+                        // The community's key service is dry — not a wallet problem.
+                        // Say who can fix it (anyone holding ICP) and where it goes.
+                        val canister = havenAol.canisterId.ifBlank { "the key-service canister" }
+                        val failure = ContentState.Failed(
+                            code = "CANISTER_OUT_OF_CYCLES",
+                            message = "This community's key service is out of cycles, so it " +
+                                "can't unlock anything right now. Topping up $canister keeps " +
+                                "this archive readable for everyone.",
+                        )
+                        logStage("unlock failed id=${media.id} code=${failure.code} (canister dry)")
+                        content.value = failure
+                        return Result.failure(throwable)
+                    }
+                    val failure = throwable.toFailure("Could not unlock this item.")
+                    logStage("unlock failed id=${media.id} code=${failure.code} msg=${failure.message}")
+                    content.value = failure
                     return Result.failure(throwable)
                 }
                 key = unlocked.getOrNull()
@@ -211,9 +239,12 @@ class WatchViewModel @Inject constructor(
         // 2. Stream: ciphertext chunks from foc (which owns provider selection, the hedged race and
         //    PDP proofs) through the cipher, into the staging file. Nothing here holds the payload.
         val expectedBytes = media.sizeBytes ?: piece.size.takeIf { it > 0 }
-        content.value = ContentState.Working(UnlockStage.STREAMING, progress = 0f)
-
         val contentKey = key
+        // Ungated items have no key and nothing to decrypt — label the fetch
+        // honestly instead of borrowing the decrypting copy.
+        val fetchStage = if (contentKey != null) UnlockStage.STREAMING else UnlockStage.LOADING
+        content.value = ContentState.Working(fetchStage, progress = 0f)
+
         val ciphertext = havenCache.stream(piece)
         val plaintext = if (contentKey == null) {
             ciphertext
@@ -230,16 +261,19 @@ class WatchViewModel @Inject constructor(
             val fraction = expectedBytes
                 ?.takeIf { it > 0 }
                 ?.let { (written.toFloat() / it.toFloat()).coerceIn(0f, 1f) }
-            content.value = ContentState.Working(UnlockStage.STREAMING, fraction)
+            content.value = ContentState.Working(fetchStage, fraction)
         }
 
         staged.exceptionOrNull()?.let { throwable ->
-            content.value = throwable.toFailure("This item could not be decrypted.")
+            val failure = throwable.toFailure("This item could not be decrypted.")
+            logStage("fetch failed id=${media.id} code=${failure.code} msg=${failure.message}")
+            content.value = failure
             return Result.failure(throwable)
         }
         val file = staged.getOrNull()
             ?: return fail("CACHE_WRITE_FAILED", "Decrypted content could not be staged.")
 
+        logStage("ready id=${media.id} bytes=${file.length()}")
         content.value = ContentState.Ready(file)
         // Playing is caching: the stream just filled the piece cache, so touch
         // the mirror row and every residency label (here, library, community)
@@ -293,6 +327,7 @@ class WatchViewModel @Inject constructor(
 
     /** Publish a terminal failure and hand the same reason back to the caller. */
     private fun fail(code: String, message: String): Result<File> {
+        logStage("failed code=$code msg=$message")
         content.value = ContentState.Failed(code = code, message = message)
         return Result.failure(HavenError.Internal("$code: $message"))
     }
@@ -300,7 +335,31 @@ class WatchViewModel @Inject constructor(
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
         const val COPY_BUFFER_BYTES = 64 * 1024
+        /** How many pipeline lines the failure screen can show. */
+        const val DIAGNOSTICS_CAP = 12
     }
+
+    /**
+     * One line per pipeline transition, to logcat (`adb logcat -s HavenWatch`)
+     * and to the in-app [diagnostics] trail. Timber is a no-op on the JVM
+     * without a planted tree, so unit tests stay green.
+     */
+    private fun logStage(msg: String) {
+        timber.log.Timber.tag("HavenWatch").i(msg)
+        _diagnostics.value = (_diagnostics.value + msg).takeLast(DIAGNOSTICS_CAP)
+    }
+}
+
+/**
+ * True when the key service itself is dry (out of cycles) rather than the
+ * wallet or gate being at fault — the cue for the donation wording instead
+ * of the signing wording.
+ */
+internal fun Throwable.isOutOfCycles(): Boolean {
+    val haystack = ((message ?: "") + " " + (cause?.message ?: "")).lowercase()
+    return "out of cycles" in haystack ||
+        "out-of-cycles" in haystack ||
+        "insufficient cycles" in haystack
 }
 
 /** Map a pipeline throwable onto a stable code the Settings event log can also show. */

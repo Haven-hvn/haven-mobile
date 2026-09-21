@@ -20,6 +20,11 @@ interface HavenAol {
         session: WalletSession,
         onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
     ): List<Result<ByteArray>>
+    /**
+     * The key-service canister this instance talks to. Surfaced so failure
+     * screens can name where donations go when it runs dry.
+     */
+    val canisterId: String
     suspend fun verificationKey(): Result<ByteArray>
     /**
      * The canister's Ed25519 attestation key (`getAttestationPublicKey`, 32 bytes) for

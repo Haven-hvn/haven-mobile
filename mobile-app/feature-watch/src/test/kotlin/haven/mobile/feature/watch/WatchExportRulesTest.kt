@@ -8,6 +8,7 @@ import haven.mobile.core.domain.error.HavenError
 import kotlinx.datetime.Instant
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -80,6 +81,20 @@ class WatchExportRulesTest {
     fun `unlock stages are ordered from gate to bytes`() {
         assertEquals("Checking your access\u2026", UnlockStage.UNLOCKING.label)
         assertEquals("Decrypting\u2026", UnlockStage.STREAMING.label)
+    }
+
+    @Test
+    fun `ungated fetch never claims to decrypt`() {
+        assertEquals("Loading\u2026", UnlockStage.LOADING.label)
+        assertNotEquals(UnlockStage.STREAMING, UnlockStage.LOADING)
+    }
+
+    @Test
+    fun `dry canister reads as donation case, not wallet failure`() {
+        assertTrue(RuntimeException("canister out of cycles").isOutOfCycles())
+        assertTrue(RuntimeException("wrapping", RuntimeException("Insufficient cycles")).isOutOfCycles())
+        assertFalse(RuntimeException("Invalid signature. Please try signing again.").isOutOfCycles())
+        assertFalse(RuntimeException().isOutOfCycles())
     }
 
     private fun item(status: ContentCacheStatus) = MediaItem(

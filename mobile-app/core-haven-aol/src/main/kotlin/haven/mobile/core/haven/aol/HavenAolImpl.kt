@@ -29,6 +29,8 @@ open class HavenAolImpl @Inject constructor(
     private val icHttp: OkHttpClient = defaultIcHttpClient(),
 ) : HavenAol {
 
+    override val canisterId: String get() = config.canisterId
+
     override suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray> {
         if (config.canisterId.isBlank() || config.icHost.isBlank()) {
             // Rendered directly by the viewer's error state, so it says what the reader can conclude
