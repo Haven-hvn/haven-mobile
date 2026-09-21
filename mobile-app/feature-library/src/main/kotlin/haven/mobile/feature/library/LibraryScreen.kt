@@ -212,7 +212,9 @@ fun LibraryScreen(
 
                     state.layout == LibraryLayout.GRID -> LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 168.dp),
-                        modifier = Modifier.fillMaxSize(),
+                        // Weight, not fillMaxSize: the selection action bar below needs
+                        // room in this Column, otherwise it is pushed off-screen.
+                        modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(
                             start = HavenSpacing.gutter,
                             end = HavenSpacing.gutter,
@@ -235,7 +237,8 @@ fun LibraryScreen(
                     }
 
                     else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        // Weight, not fillMaxSize: see the grid above.
+                        modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(bottom = HavenSpacing.xxl),
                     ) {
                         items(items = state.items, key = { it.id }) { item ->
