@@ -21,6 +21,7 @@ import haven.mobile.core.collections.GateAccessChecker
 import haven.mobile.core.collections.gateKeyOrNull
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.Dispatchers
+import kotlin.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -283,6 +284,17 @@ class MediaRepositoryImpl @Inject constructor(
                 Result.failure(e)
             } catch (e: Exception) {
                 Result.failure(HavenError.Internal(e.message ?: "Unknown error"))
+            }
+        }
+    }
+
+    override suspend fun noteAccessed(id: String) {
+        withContext(Dispatchers.IO) {
+            // A touched row re-emits through observeItem/observeAccessible, and
+            // residency recomputes live — never write the status itself, so a
+            // surprising cache state can never be baked in from here.
+            runCatching {
+                getDatabase().mediaDao().touchLastAccessed(id, Clock.System.now().toString())
             }
         }
     }

@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import haven.mobile.core.design.HavenSpacing
 
@@ -46,8 +50,17 @@ fun Explain(
     question: String,
     modifier: Modifier = Modifier,
     body: String,
+    /**
+     * Optional clipboard action shown under the expanded body, e.g. a content
+     * reference the reader will paste elsewhere. Null (the default) keeps the
+     * expander a single tap target; non-null adds a second target, so the
+     * header row alone carries the toggle and the body is not clickable.
+     */
+    copyText: String? = null,
+    copyLabel: String = "Copy",
 ) {
     var expanded by rememberSaveable(question) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -57,10 +70,6 @@ fun Explain(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // One target for the whole row: a chevron alone is a 24dp hit area, and this is
-                // exactly the affordance an unsure reader is reaching for.
-                .clickable { expanded = !expanded }
-                .semantics(mergeDescendants = true) {}
                 .animateContentSize()
                 .padding(HavenSpacing.md),
             verticalArrangement = Arrangement.spacedBy(HavenSpacing.sm),
@@ -68,7 +77,11 @@ fun Explain(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = HavenSpacing.touchTarget - HavenSpacing.md * 2),
+                    .heightIn(min = HavenSpacing.touchTarget - HavenSpacing.md * 2)
+                    // One target for the header: a chevron alone is a 24dp hit area, and this
+                    // is exactly the affordance an unsure reader is reaching for.
+                    .clickable { expanded = !expanded }
+                    .semantics(mergeDescendants = true) {},
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -92,7 +105,21 @@ fun Explain(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(HavenSpacing.xxs))
+                if (copyText != null) {
+                    TextButton(
+                        onClick = { clipboard.setText(AnnotatedString(copyText)) },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(HavenSpacing.xs))
+                        Text(text = copyLabel)
+                    }
+                } else {
+                    Spacer(Modifier.height(HavenSpacing.xxs))
+                }
             }
         }
     }
