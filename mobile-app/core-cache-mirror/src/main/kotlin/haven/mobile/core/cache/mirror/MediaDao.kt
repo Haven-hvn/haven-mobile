@@ -45,4 +45,7 @@ interface MediaDao {
 
     @Query("UPDATE media_items SET contentCacheStatus = :status WHERE id = :id")
     suspend fun updateContentCacheStatus(id: String, status: String)
+
+    @Query("UPDATE media_items SET lastAccessedAt = :timestamp WHERE id = :id")
+    suspend fun touchLastAccessed(id: String, timestamp: String)
 }

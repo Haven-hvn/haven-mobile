@@ -50,5 +50,13 @@ interface MediaRepository {
 
     suspend fun refreshItem(id: String): Result<Unit>
 
+    /**
+     * Records that the item's bytes were staged for playback. This only touches
+     * `lastAccessedAt` — the row re-emits, residency recomputes against the
+     * piece cache (which staging just filled), and every observer's label flips
+     * without a network round trip.
+     */
+    suspend fun noteAccessed(id: String)
+
     suspend fun clearFor(walletAddress: String)
 }

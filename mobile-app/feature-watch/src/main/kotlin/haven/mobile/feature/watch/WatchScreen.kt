@@ -633,6 +633,8 @@ private fun MediaMeta(media: MediaItem, inset: Boolean = true) {
                 question = "Where this is stored",
                 body = "Haven finds this file by its content, not by a location — the reference below " +
                     "is what identifies it across every provider holding a copy.\n\n$cid",
+                copyText = cid,
+                copyLabel = "Copy CID",
             )
         }
         Spacer(Modifier.height(HavenSpacing.lg))

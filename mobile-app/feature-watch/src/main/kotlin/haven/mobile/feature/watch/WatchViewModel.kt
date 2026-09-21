@@ -241,6 +241,10 @@ class WatchViewModel @Inject constructor(
             ?: return fail("CACHE_WRITE_FAILED", "Decrypted content could not be staged.")
 
         content.value = ContentState.Ready(file)
+        // Playing is caching: the stream just filled the piece cache, so touch
+        // the mirror row and every residency label (here, library, community)
+        // recomputes live instead of going stale until the next refresh.
+        runCatching { mediaRepository.noteAccessed(media.id) }
         return Result.success(file)
     }
 
