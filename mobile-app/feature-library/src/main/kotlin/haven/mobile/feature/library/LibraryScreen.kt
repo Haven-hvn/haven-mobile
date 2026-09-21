@@ -1,6 +1,7 @@
 package haven.mobile.feature.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -42,6 +45,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -56,6 +62,7 @@ import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaCard
 import haven.mobile.core.design.component.MediaRow
+import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.captionLine
 
 /**
@@ -156,6 +163,8 @@ fun LibraryScreen(
             )
 
             is LibraryUiState.Ready -> {
+                // Long-press target for the per-item Hide/Unhide menu; null hides the menu.
+                var menuItemId by remember { mutableStateOf<String?>(null) }
                 if (state.isRefreshing) {
                     LinearProgressIndicator(
                         modifier = Modifier
@@ -179,6 +188,18 @@ fun LibraryScreen(
                     onCategoryChange = viewModel::selectCategory,
                     onToggleOffline = viewModel::toggleOfflineOnly,
                 )
+                if (state.hiddenCount > 0) {
+                    // Hidden items are out of the list, not gone: this is the way back.
+                    TextButton(onClick = { viewModel.toggleShowHidden() }) {
+                        Text(
+                            if (state.showHidden) {
+                                "Showing ${state.hiddenCount} hidden — tap to hide"
+                            } else {
+                                "Show ${state.hiddenCount} hidden"
+                            },
+                        )
+                    }
+                }
 
                 when {
                     state.totalCount == 0 -> EmptyState(
@@ -227,15 +248,27 @@ fun LibraryScreen(
                         verticalArrangement = Arrangement.spacedBy(HavenSpacing.md),
                     ) {
                         items(items = state.items, key = { it.id }) { item ->
-                            MediaCard(
-                                item = item,
-                                onClick = {
-                                    if (state.selecting) viewModel.toggleSelection(item.id)
-                                    else navController.navigate("watch/${item.id}")
-                                },
-                                selected = if (state.selecting) item.id in state.selectedIds else null,
-                                caption = item.captionLine(walletAddress),
-                            )
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                MediaCard(
+                                    item = item,
+                                    onClick = {
+                                        if (state.selecting) viewModel.toggleSelection(item.id)
+                                        else navController.navigate("watch/${item.id}")
+                                    },
+                                    onLongClick = { menuItemId = item.id },
+                                    selected = if (state.selecting) item.id in state.selectedIds else null,
+                                    caption = item.captionLine(walletAddress),
+                                )
+                                if (menuItemId == item.id) {
+                                    ItemContextMenu(
+                                        item = item,
+                                        hidden = item.id in state.hiddenIds,
+                                        onDismiss = { menuItemId = null },
+                                        onHide = { viewModel.hideItem(item.id) },
+                                        onUnhide = { viewModel.unhideItem(item.id) },
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -245,15 +278,27 @@ fun LibraryScreen(
                         contentPadding = PaddingValues(bottom = HavenSpacing.xxl),
                     ) {
                         items(items = state.items, key = { it.id }) { item ->
-                            MediaRow(
-                                item = item,
-                                onClick = {
-                                    if (state.selecting) viewModel.toggleSelection(item.id)
-                                    else navController.navigate("watch/${item.id}")
-                                },
-                                selected = if (state.selecting) item.id in state.selectedIds else null,
-                                caption = item.captionLine(walletAddress),
-                            )
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                MediaRow(
+                                    item = item,
+                                    onClick = {
+                                        if (state.selecting) viewModel.toggleSelection(item.id)
+                                        else navController.navigate("watch/${item.id}")
+                                    },
+                                    onLongClick = { menuItemId = item.id },
+                                    selected = if (state.selecting) item.id in state.selectedIds else null,
+                                    caption = item.captionLine(walletAddress),
+                                )
+                                if (menuItemId == item.id) {
+                                    ItemContextMenu(
+                                        item = item,
+                                        hidden = item.id in state.hiddenIds,
+                                        onDismiss = { menuItemId = null },
+                                        onHide = { viewModel.hideItem(item.id) },
+                                        onUnhide = { viewModel.unhideItem(item.id) },
+                                    )
+                                }
+                            }
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = HavenSpacing.gutter),
                                 thickness = HavenSpacing.hairline,
@@ -358,6 +403,45 @@ private fun LibraryHeader(
             }
         }
         Spacer(Modifier.height(HavenSpacing.md))
+    }
+}
+
+/**
+ * Long-press menu for one library item: hide it from the list, or bring it
+ * back while hidden items are shown. Hidden is per-device and survives
+ * refresh — the mirror upserts rows, never this DataStore set.
+ */
+@Composable
+private fun ItemContextMenu(
+    item: MediaItem,
+    hidden: Boolean,
+    onDismiss: () -> Unit,
+    onHide: () -> Unit,
+    onUnhide: () -> Unit,
+) {
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(item.title) },
+            enabled = false,
+            onClick = {},
+        )
+        if (hidden) {
+            DropdownMenuItem(
+                text = { Text("Unhide") },
+                onClick = {
+                    onUnhide()
+                    onDismiss()
+                },
+            )
+        } else {
+            DropdownMenuItem(
+                text = { Text("Hide from list") },
+                onClick = {
+                    onHide()
+                    onDismiss()
+                },
+            )
+        }
     }
 }
 

@@ -126,12 +126,34 @@ class LibraryFilterTest {
         query: String = "",
         category: LibraryCategory = LibraryCategory.ALL,
         offlineOnly: Boolean = false,
+        hiddenIds: Set<String> = emptySet(),
+        showHidden: Boolean = false,
     ) = Filters(
         query = query,
         category = category,
         layout = LibraryLayout.GRID,
         offlineOnly = offlineOnly,
+        hiddenIds = hiddenIds,
+        showHidden = showHidden,
     )
+
+    @Test
+    fun `hidden items leave the list by default`() {
+        val result = applyFilters(all, filters(hiddenIds = setOf("2", "4")))
+        assertEquals(listOf("1", "3"), result.map { it.id })
+    }
+
+    @Test
+    fun `showHidden brings hidden items back in newest-first order`() {
+        val result = applyFilters(all, filters(hiddenIds = setOf("2"), showHidden = true))
+        assertEquals(listOf("2", "1", "4", "3"), result.map { it.id })
+    }
+
+    @Test
+    fun `hidden composes with category and query`() {
+        val result = applyFilters(all, filters(hiddenIds = setOf("1"), query = "founding"))
+        assertEquals(listOf("3"), result.map { it.id })
+    }
 
     /** `pieceRef` stays null so this fixture needs nothing from the foc composite build. */
     private fun item(

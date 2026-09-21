@@ -69,6 +69,11 @@ sealed interface LibraryUiState {
         val selectedIds: Set<String>,
         /** Batch unlock/download progress; null when idle or dismissed. */
         val batch: SelectionBatch?,
+        /** Hidden items in this mirror (shown only while [showHidden]). */
+        val hiddenCount: Int,
+        val showHidden: Boolean,
+        /** Ids hidden via the long-press menu — drives Hide vs Unhide per row. */
+        val hiddenIds: Set<String>,
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -79,6 +84,8 @@ internal data class Filters(
     val category: LibraryCategory,
     val layout: LibraryLayout,
     val offlineOnly: Boolean = false,
+    val hiddenIds: Set<String> = emptySet(),
+    val showHidden: Boolean = false,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -88,6 +95,7 @@ class LibraryViewModel @Inject constructor(
     private val walletSession: WalletSession,
     private val havenAol: HavenAol,
     private val havenCache: HavenCache,
+    private val hiddenItems: HiddenItemsStore,
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
@@ -100,6 +108,11 @@ class LibraryViewModel @Inject constructor(
     private val selecting = MutableStateFlow(false)
     private val selectedIds = MutableStateFlow<Set<String>>(emptySet())
     private val batch = MutableStateFlow<SelectionBatch?>(null)
+    private val showHidden = MutableStateFlow(false)
+
+    /** Ids the reader hid via the long-press menu; persisted in DataStore. */
+    private val hiddenIds: StateFlow<Set<String>> = hiddenItems.hiddenIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptySet())
 
     /**
      * Connected wallet, for provenance language (`My contribution` vs `The pool`).
@@ -134,8 +147,16 @@ class LibraryViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     private val filters: StateFlow<Filters> =
-        combine(query, category, layout, offlineOnly) { q, c, l, offline ->
-            Filters(query = q, category = c, layout = l, offlineOnly = offline)
+        combine(query, category, layout, offlineOnly, showHidden, hiddenIds) { args ->
+            @Suppress("UNCHECKED_CAST")
+            Filters(
+                query = args[0] as String,
+                category = args[1] as LibraryCategory,
+                layout = args[2] as LibraryLayout,
+                offlineOnly = args[3] as Boolean,
+                showHidden = args[4] as Boolean,
+                hiddenIds = args[5] as Set<String>,
+            )
         }.stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -179,6 +200,9 @@ class LibraryViewModel @Inject constructor(
                     selecting = isSelecting,
                     selectedIds = checked,
                     batch = batchState,
+                    hiddenCount = items.count { it.id in f.hiddenIds },
+                    showHidden = f.showHidden,
+                    hiddenIds = f.hiddenIds,
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState.Loading)
@@ -222,6 +246,22 @@ class LibraryViewModel @Inject constructor(
 
     fun toggleLayout() {
         layout.value = if (layout.value == LibraryLayout.GRID) LibraryLayout.LIST else LibraryLayout.GRID
+    }
+
+    /** Hide from the list (long-press menu). Persisted; refresh never resurrects it. */
+    fun hideItem(id: String) {
+        if (batch.value is SelectionBatch.Working) return
+        selectedIds.value = selectedIds.value - id
+        viewModelScope.launch { hiddenItems.setHidden(id, true) }
+    }
+
+    /** Restore a hidden item to the list. */
+    fun unhideItem(id: String) {
+        viewModelScope.launch { hiddenItems.setHidden(id, false) }
+    }
+
+    fun toggleShowHidden() {
+        showHidden.value = !showHidden.value
     }
 
     fun dismissRefreshError() {
@@ -380,6 +420,7 @@ internal fun applyFilters(items: List<MediaItem>, filters: Filters): List<MediaI
     return items.asSequence()
         .filter { kind == null || it.kind == kind }
         .filter { !filters.offlineOnly || it.isOnDevice() }
+        .filter { filters.showHidden || it.id !in filters.hiddenIds }
         .filter { item ->
             needle.isEmpty() ||
                 item.title.lowercase().contains(needle) ||

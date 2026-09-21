@@ -19,5 +19,6 @@ dependencies {
     implementation(project(":core-cache"))
     implementation(project(":core-wallet"))
     implementation(libs.androidx.compose.navigation)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.hilt.navigation)
 }

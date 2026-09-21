@@ -1,7 +1,9 @@
 package haven.mobile.core.design.component
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,7 @@ import haven.mobile.core.domain.MediaKind
  * `selected` is a visual state only: non-null draws a leading checkbox whose tap is the
  * row's own click (selection mode), so the row stays a single tap target.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaRow(
     item: MediaItem,
@@ -59,12 +62,19 @@ fun MediaRow(
     selected: Boolean? = null,
     /** Library caption (`My contribution · Members`); null hides it. */
     caption: String? = null,
+    /** Long-press action (library context menu); null disables long-press. */
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val pressModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = HavenSpacing.rowHeight)
-            .clickable(onClick = onClick)
+            .then(pressModifier)
             .semantics(mergeDescendants = true) {}
             .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
@@ -121,6 +131,7 @@ fun MediaRow(
  * `selected` mirrors the row: a non-null value overlays a checkbox on the plate while
  * the card itself stays the single tap target.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaCard(
     item: MediaItem,
@@ -130,11 +141,18 @@ fun MediaCard(
     selected: Boolean? = null,
     /** Library caption (`My contribution · Members`); null hides it. */
     caption: String? = null,
+    /** Long-press action (library context menu); null disables long-press. */
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val pressModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(pressModifier)
             .semantics(mergeDescendants = true) {},
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
