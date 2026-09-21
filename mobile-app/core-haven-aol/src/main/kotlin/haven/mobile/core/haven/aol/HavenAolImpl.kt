@@ -5,6 +5,7 @@ import haven.mobile.core.crypto.Keccak256
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.wallet.WalletSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
@@ -646,6 +647,23 @@ open class HavenAolImpl @Inject constructor(
         onProgress: suspend (done: Int, total: Int) -> Unit,
     ): List<Result<ByteArray>> {
         if (items.isEmpty()) return emptyList()
+        return try {
+            decryptAllInner(items, session, onProgress)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The batch screen reports per-item Results — an unexpected throw here
+            // used to escape as an app crash with no error screen at all.
+            timber.log.Timber.e(e, "decryptAll failed closed for ${items.size} items")
+            items.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
+        }
+    }
+
+    private suspend fun decryptAllInner(
+        items: List<MediaItem>,
+        session: WalletSession,
+        onProgress: suspend (done: Int, total: Int) -> Unit,
+    ): List<Result<ByteArray>> {
         // v3 batch: group by (epochId + gateReference) — one canister call per epoch, as in haven-aol-decrypt-v3.ts
         // Correct grouping is epochId+gateReference, not full V3 object (which includes wrappedKey per-item)
         // See HavenAolBatchGroupingTest and planning/mobile-v1-tasking/sprint-2…/2.4-core-haven-aol-v3-batch.md

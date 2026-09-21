@@ -8,8 +8,10 @@ import haven.mobile.core.cache.mirror.MediaRepository
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.haven.aol.HavenAol
 import haven.mobile.core.wallet.WalletSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -274,8 +276,16 @@ class LibraryViewModel @Inject constructor(
         if (walletSession.address.value == null) return
         viewModelScope.launch {
             batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = 0, total = targets.size)
-            val results = havenAol.decryptAll(targets, walletSession) { done, total ->
-                batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = done, total = total)
+            val results = try {
+                havenAol.decryptAll(targets, walletSession) { done, total ->
+                    batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = done, total = total)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // decryptAll promises per-item Results, but a batch tap must never
+                // take the app down: degrade to per-item failures with a screen.
+                targets.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
             }
             batch.value = SelectionBatch.Done(
                 op = BatchOp.UNLOCK,
@@ -304,10 +314,16 @@ class LibraryViewModel @Inject constructor(
                 batch.value = SelectionBatch.Working(
                     BatchOp.DOWNLOAD, phase = "Unlocking keys", done = 0, total = gated.size,
                 )
-                val keyResults = havenAol.decryptAll(gated, walletSession) { done, total ->
-                    batch.value = SelectionBatch.Working(
-                        BatchOp.DOWNLOAD, phase = "Unlocking keys", done = done, total = total,
-                    )
+                val keyResults = try {
+                    havenAol.decryptAll(gated, walletSession) { done, total ->
+                        batch.value = SelectionBatch.Working(
+                            BatchOp.DOWNLOAD, phase = "Unlocking keys", done = done, total = total,
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    gated.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
                 }
                 gated.map { it.id }.zip(keyResults.map { it.isSuccess }).toMap()
             }
@@ -316,7 +332,13 @@ class LibraryViewModel @Inject constructor(
             targets.forEachIndexed { index, item ->
                 val ref = item.pieceRef
                 val fetched = if (ref != null && (keyOkById[item.id] ?: true)) {
-                    havenCache.fetch(ref).isSuccess
+                    try {
+                        havenCache.fetch(ref).isSuccess
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        false
+                    }
                 } else {
                     false
                 }
