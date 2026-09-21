@@ -62,4 +62,31 @@ class LibrarySelectionTest {
         contentCacheStatus = ContentCacheStatus.CACHED,
         lastAccessedAt = null,
     )
+
+    @Test
+    fun `failed titles follow list order`() {
+        val results = listOf(
+            Result.success(ByteArray(0)),
+            Result.failure<ByteArray>(RuntimeException("no")),
+            Result.failure<ByteArray>(RuntimeException("no")),
+        )
+        assertEquals(listOf("Second", "Third"), failedTitles(all, results))
+    }
+
+    @Test
+    fun `failed titles cap at three`() {
+        val targets = (1..5).map { item("$it", "Title $it") }
+        val results = targets.map { Result.failure<ByteArray>(RuntimeException("no")) }
+        assertEquals(listOf("Title 1", "Title 2", "Title 3"), failedTitles(targets, results))
+    }
+
+    @Test
+    fun `failed suffix is empty when nothing failed`() {
+        assertEquals("", failedNamesSuffix(emptyList()))
+    }
+
+    @Test
+    fun `failed suffix wraps names in parens`() {
+        assertEquals(" (Second)", failedNamesSuffix(listOf("Second")))
+    }
 }

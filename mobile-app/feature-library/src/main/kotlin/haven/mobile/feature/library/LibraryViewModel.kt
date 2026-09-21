@@ -331,6 +331,7 @@ class LibraryViewModel @Inject constructor(
                 op = BatchOp.UNLOCK,
                 succeeded = results.count { it.isSuccess },
                 failed = results.count { !it.isSuccess },
+                failedNames = failedTitles(targets, results),
             )
         }
     }
@@ -369,6 +370,7 @@ class LibraryViewModel @Inject constructor(
             }
             var succeeded = 0
             var failed = 0
+            val failedNames = mutableListOf<String>()
             targets.forEachIndexed { index, item ->
                 val ref = item.pieceRef
                 val fetched = if (ref != null && (keyOkById[item.id] ?: true)) {
@@ -382,12 +384,22 @@ class LibraryViewModel @Inject constructor(
                 } else {
                     false
                 }
-                if (fetched) succeeded++ else failed++
+                if (fetched) {
+                    succeeded++
+                } else {
+                    failed++
+                    if (failedNames.size < 3) failedNames += item.title
+                }
                 batch.value = SelectionBatch.Working(
                     BatchOp.DOWNLOAD, phase = "Downloading", done = index + 1, total = targets.size,
                 )
             }
-            batch.value = SelectionBatch.Done(BatchOp.DOWNLOAD, succeeded = succeeded, failed = failed)
+            batch.value = SelectionBatch.Done(
+                BatchOp.DOWNLOAD,
+                succeeded = succeeded,
+                failed = failed,
+                failedNames = failedNames.toList(),
+            )
         }
     }
 
@@ -403,8 +415,35 @@ enum class BatchOp { UNLOCK, DOWNLOAD }
 /** Batch unlock/download progress for the selection action bar; null when idle or dismissed. */
 sealed interface SelectionBatch {
     data class Working(val op: BatchOp, val phase: String, val done: Int, val total: Int) : SelectionBatch
-    data class Done(val op: BatchOp, val succeeded: Int, val failed: Int) : SelectionBatch
+    /**
+     * Counts plus the failed titles (capped) — "1 unlocked, 1 failed" never
+     * again leaves the reader guessing which row to retry alone.
+     */
+    data class Done(
+        val op: BatchOp,
+        val succeeded: Int,
+        val failed: Int,
+        val failedNames: List<String> = emptyList(),
+    ) : SelectionBatch
 }
+
+/**
+ * Pure: titles of the failed targets, in list order, capped for one-line display.
+ * `results` must align with `targets` by index (both batch paths zip them so).
+ */
+internal fun failedTitles(
+    targets: List<MediaItem>,
+    results: List<Result<ByteArray>>,
+    max: Int = 3,
+): List<String> =
+    targets.zip(results)
+        .filter { !it.second.isSuccess }
+        .map { it.first.title }
+        .take(max)
+
+/** Pure: "" when nothing failed, otherwise " (A, B)" for the summary line. */
+internal fun failedNamesSuffix(names: List<String>): String =
+    if (names.isEmpty()) "" else " (" + names.joinToString() + ")"
 
 /**
  * Pure: the checked rows, in list order. Ids that left the list (a refresh narrowed it)

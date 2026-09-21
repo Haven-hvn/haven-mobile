@@ -69,7 +69,7 @@ import haven.mobile.core.design.component.byteLabel
 import haven.mobile.core.design.component.label
 import haven.mobile.core.design.component.summaryLine
 import haven.mobile.core.domain.CREATOR_UNVERIFIABLE
-import haven.mobile.core.domain.GATE_FAILED_HEADLINE
+import haven.mobile.core.domain.SIGN_DISCLOSURE_HEADLINE
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.captionLine
@@ -732,7 +732,7 @@ private fun SignatureDisclosure(media: MediaItem, onUnlock: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = GATE_FAILED_HEADLINE,
+            text = SIGN_DISCLOSURE_HEADLINE,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )

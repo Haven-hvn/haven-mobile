@@ -22,6 +22,15 @@ const val CREATOR_UNVERIFIABLE = "Contribution not yet verified"
 /** Detail sheet, gate closed for this viewer — describes the viewer's state. */
 const val GATE_FAILED_HEADLINE = "You don't hold this gate's token"
 
+/**
+ * Pre-signature disclosure headline, before any gate verdict exists.
+ *
+ * This screen appears on every first unlock — including gates that stand open —
+ * so it must never claim the gate is closed. [GATE_FAILED_HEADLINE] stays
+ * reserved for an actual failed gate check.
+ */
+const val SIGN_DISCLOSURE_HEADLINE = "Unlock with your wallet"
+
 /** Detail sheet, gate closed — always names what would open it. */
 fun gateRequirement(tokenName: String): String = "Requires the $tokenName token"
 

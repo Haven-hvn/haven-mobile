@@ -498,14 +498,16 @@ private fun SelectionActionBar(
                                     if (done.failed == 0) {
                                         "${done.succeeded} unlocked — rows open instantly."
                                     } else {
-                                        "${done.succeeded} unlocked, ${done.failed} failed — " +
+                                        "${done.succeeded} unlocked, ${done.failed} failed" +
+                                            failedNamesSuffix(done.failedNames) + " — " +
                                             "open a failed row to retry it alone."
                                     }
                                 BatchOp.DOWNLOAD ->
                                     if (done.failed == 0) {
                                         "${done.succeeded} saved — they play with no signal."
                                     } else {
-                                        "${done.succeeded} saved, ${done.failed} failed — " +
+                                        "${done.succeeded} saved, ${done.failed} failed" +
+                                            failedNamesSuffix(done.failedNames) + " — " +
                                             "retry the failed rows alone."
                                     }
                             },

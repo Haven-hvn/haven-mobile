@@ -471,7 +471,7 @@ class WalletSessionImpl @Inject constructor(
         } catch (e: Exception) {
             when (e) {
                 is WalletError -> Result.failure(e)
-                else -> Result.failure(WalletError.SigningFailed(e.message ?: "Unknown error"))
+                else -> Result.failure(WalletError.SigningFailed(signFailureMessage(e, chainId)))
             }
         }
     }
@@ -595,3 +595,18 @@ sealed class WalletError : Exception() {
     data class SigningFailed(override val message: String) : WalletError()
     data class TransactionFailed(override val message: String) : WalletError()
 }
+
+/**
+ * Pure: reader-facing copy for a failed signature request.
+ *
+ * A timeout means the wallet never answered — usually its app is closed or
+ * the request went to a chain the wallet isn't on — so it names the chain
+ * and the fix instead of leaking `Timed out waiting for 120000 ms`.
+ */
+internal fun signFailureMessage(cause: Exception, chainId: Long): String =
+    if (cause is kotlinx.coroutines.TimeoutCancellationException) {
+        "Your wallet didn't answer the signature request within 2 minutes. " +
+            "Open your wallet app, approve the request on eip155:$chainId, and try again."
+    } else {
+        cause.message ?: "Unknown error"
+    }
