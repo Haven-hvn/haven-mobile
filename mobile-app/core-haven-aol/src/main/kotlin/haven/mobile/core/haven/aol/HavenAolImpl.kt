@@ -9,6 +9,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -31,6 +33,27 @@ open class HavenAolImpl @Inject constructor(
 ) : HavenAol {
 
     override val canisterId: String get() = config.canisterId
+
+    /**
+     * Serializes every wallet signature this singleton requests.
+     *
+     * The wallet stack serves one request pipeline behind a single global
+     * delegate: two overlapping `eth_signTypedData_v4` calls corrupt each
+     * other and kill the process, which is exactly what a bulk unlock of
+     * items on different gates used to do (each gate group signed in its own
+     * coroutine). Gates sharing one batch still cost one signature; gates on
+     * different groups queue behind it. Canister calls and native unwraps
+     * stay parallel — only the wallet request is exclusive.
+     */
+    private val signMutex = Mutex()
+
+    internal suspend fun signSerialized(
+        session: WalletSession,
+        json: String,
+        chainId: Long,
+    ): Result<String> = signMutex.withLock {
+        session.signTypedDataV4(json, chainId)
+    }
 
     override suspend fun decrypt(item: MediaItem, session: WalletSession): Result<ByteArray> {
         if (config.canisterId.isBlank() || config.icHost.isBlank()) {
@@ -115,7 +138,7 @@ open class HavenAolImpl @Inject constructor(
             transportPublicKeyHex = "0x" + transport.publicKey.toHex(),
             nonceDecimal = nonce,
         )
-        val sig = session.signTypedDataV4(typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+        val sig = signSerialized(session, typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
             return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
         }
         val sigBytes = parseWalletSignature(sig) ?: return Result.failure(
@@ -207,7 +230,7 @@ open class HavenAolImpl @Inject constructor(
             )
         }
         val json = gateRequestBuilder.buildV3Request(item, nonce, address, chain.chainId)
-        val sig = session.signTypedDataV4(json, chain.chainId).getOrElse { return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}")) }
+        val sig = signSerialized(session, json, chain.chainId).getOrElse { return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}")) }
         // Live VetKD flow via ic-kotlin (parity with haven-aol-decrypt.ts / haven-aol-decrypt-v3.ts):
         // Agent call is attempted; on offline / --offline build no network is hit at compile time,
         // and at runtime an offline host returns a typed failure that callers surface as haven error.
@@ -486,7 +509,7 @@ open class HavenAolImpl @Inject constructor(
             cidsCommitmentHex = commitment,
             nonceDecimal = nonce,
         )
-        val sig = session.signTypedDataV4(typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+        val sig = signSerialized(session, typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
             return allFailed(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
         }
         val sigBytes = parseWalletSignature(sig) ?: return allFailed(

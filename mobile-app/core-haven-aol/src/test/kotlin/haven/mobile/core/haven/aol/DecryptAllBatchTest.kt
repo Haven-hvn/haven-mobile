@@ -168,7 +168,7 @@ class DecryptAllBatchTest {
     }
 
     @org.junit.Test
-    fun `different gates unlock concurrently with one signature each`() {
+    fun `different gates serialize signatures with one each`() {
         runBlocking {
             val tracker = SignTracker(signDelayMs = 100)
             val session = trackingSession(tracker)
@@ -184,8 +184,15 @@ class DecryptAllBatchTest {
             assertTrue(results.all { it.isSuccess })
             assertEquals(2, tracker.signs.get())
             assertEquals(2, impl.batchCalls)
-            // Sequential execution could never overlap; fan-out must be observed.
-            assertTrue("groups should overlap, max was ${tracker.maxObserved.get()}", tracker.maxObserved.get() > 1)
+            // The wallet stack serves one request pipeline behind a single global
+            // delegate: overlapping eth_signTypedData_v4 calls corrupt each other
+            // and kill the process on device (bulk unlock of different-gate items).
+            // Groups still run together — only the signature itself is exclusive.
+            assertEquals(
+                "signatures must never overlap, max was ${tracker.maxObserved.get()}",
+                1,
+                tracker.maxObserved.get(),
+            )
         }
     }
 
