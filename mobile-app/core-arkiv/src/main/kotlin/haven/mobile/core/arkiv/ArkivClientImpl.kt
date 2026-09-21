@@ -698,7 +698,11 @@ class ArkivClientImpl @Inject constructor(
         val focChain = tokenGate?.chain
             ?.let { HavenChain.parse(it) }
             ?.let { if (it.isTestnet) FocChain.CALIBRATION else FocChain.MAINNET }
-            ?: FocChain.MAINNET
+            // Ungated records carry no chain signal at all (no gate, no network).
+            // Default to CALIBRATION: every record published to date is testnet
+            // content, and Beam hosts are per-network — guessing MAINNET 404s on
+            // calibration pieces. Revisit if mainnet-ungated records appear.
+            ?: FocChain.CALIBRATION
         val beamWallet = (firstString("owner") ?: "").lowercase()
             .takeIf { it.matches(Regex("^0x[0-9a-f]{40}$")) }
 
