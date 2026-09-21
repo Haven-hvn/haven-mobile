@@ -3,10 +3,12 @@ package haven.mobile.feature.library
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.MediaRepository
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import haven.mobile.core.haven.aol.HavenAol
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +62,11 @@ sealed interface LibraryUiState {
         val isRefreshing: Boolean,
         /** Non-fatal: the mirror still has content, but the last refresh failed. */
         val refreshError: String? = null,
+        /** Selection mode is on while true; ids are the checked rows. */
+        val selecting: Boolean,
+        val selectedIds: Set<String>,
+        /** Batch unlock/download progress; null when idle or dismissed. */
+        val batch: SelectionBatch?,
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -77,6 +84,8 @@ internal data class Filters(
 class LibraryViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val walletSession: WalletSession,
+    private val havenAol: HavenAol,
+    private val havenCache: HavenCache,
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
@@ -86,6 +95,9 @@ class LibraryViewModel @Inject constructor(
     private val refreshing = MutableStateFlow(false)
     private val refreshError = MutableStateFlow<String?>(null)
     private val fatalError = MutableStateFlow<String?>(null)
+    private val selecting = MutableStateFlow(false)
+    private val selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    private val batch = MutableStateFlow<SelectionBatch?>(null)
 
     /**
      * Everything this wallet can read.
@@ -123,7 +135,25 @@ class LibraryViewModel @Inject constructor(
         )
 
     val uiState: StateFlow<LibraryUiState> =
-        combine(mirror, filters, refreshing, refreshError, fatalError) { items, f, isRefreshing, softError, hardError ->
+        combine(
+            mirror,
+            filters,
+            refreshing,
+            refreshError,
+            fatalError,
+            selecting,
+            selectedIds,
+            batch,
+        ) { args ->
+            @Suppress("UNCHECKED_CAST")
+            val items = args[0] as List<MediaItem>?
+            val f = args[1] as Filters
+            val isRefreshing = args[2] as Boolean
+            val softError = args[3] as String?
+            val hardError = args[4] as String?
+            val isSelecting = args[5] as Boolean
+            val checked = args[6] as Set<String>
+            val batchState = args[7] as SelectionBatch?
             when {
                 hardError != null -> LibraryUiState.Error(hardError)
                 items == null -> LibraryUiState.Disconnected
@@ -138,6 +168,9 @@ class LibraryViewModel @Inject constructor(
                     offlineOnly = f.offlineOnly,
                     isRefreshing = isRefreshing,
                     refreshError = softError,
+                    selecting = isSelecting,
+                    selectedIds = checked,
+                    batch = batchState,
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState.Loading)
@@ -192,11 +225,125 @@ class LibraryViewModel @Inject constructor(
         refresh()
     }
 
+    /** Enter/exit multi-select. Exiting drops the checked set and any finished summary. */
+    fun setSelecting(value: Boolean) {
+        if (batch.value is SelectionBatch.Working) return
+        selecting.value = value
+        if (!value) {
+            selectedIds.value = emptySet()
+            batch.value = null
+        }
+    }
+
+    fun toggleSelection(id: String) {
+        if (batch.value is SelectionBatch.Working) return
+        if (!selecting.value) selecting.value = true
+        selectedIds.value = if (id in selectedIds.value) {
+            selectedIds.value - id
+        } else {
+            selectedIds.value + id
+        }
+    }
+
+    fun selectAllVisible(visible: List<MediaItem>) {
+        if (batch.value is SelectionBatch.Working) return
+        selecting.value = true
+        selectedIds.value = visible.map { it.id }.toSet()
+    }
+
+    fun dismissBatch() {
+        if (batch.value !is SelectionBatch.Working) batch.value = null
+    }
+
+    /**
+     * Unlock every checked gated item in one batch.
+     *
+     * One tap replaces N open-wait-back navigations; items sharing a gate cost one
+     * signature via `decryptAll`, and afterwards every unlocked row opens instantly
+     * from the session key cache. Ungated rows need no key and are not counted.
+     */
+    fun unlockSelected(visible: List<MediaItem>) {
+        val targets = selectionTargets(visible, selectedIds.value).filter { it.isEncrypted }
+        if (targets.isEmpty() || batch.value is SelectionBatch.Working) return
+        if (walletSession.address.value == null) return
+        viewModelScope.launch {
+            batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = 0, total = targets.size)
+            val results = havenAol.decryptAll(targets, walletSession) { done, total ->
+                batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = done, total = total)
+            }
+            batch.value = SelectionBatch.Done(
+                op = BatchOp.UNLOCK,
+                succeeded = results.count { it.isSuccess },
+                failed = results.count { !it.isSuccess },
+            )
+        }
+    }
+
+    /**
+     * Save every checked item on this device so it plays with no signal.
+     *
+     * Keys first (one `decryptAll`, one signature per gate — the session cache keeps
+     * them), then each piece fetches into the device cache. An item whose key fails
+     * is counted failed without spending bandwidth on ciphertext it could not open.
+     */
+    fun downloadSelected(visible: List<MediaItem>) {
+        val targets = selectionTargets(visible, selectedIds.value).filter { it.pieceRef != null }
+        if (targets.isEmpty() || batch.value is SelectionBatch.Working) return
+        if (walletSession.address.value == null) return
+        viewModelScope.launch {
+            val gated = targets.filter { it.isEncrypted }
+            val keyOkById: Map<String, Boolean> = if (gated.isEmpty()) {
+                emptyMap()
+            } else {
+                batch.value = SelectionBatch.Working(
+                    BatchOp.DOWNLOAD, phase = "Unlocking keys", done = 0, total = gated.size,
+                )
+                val keyResults = havenAol.decryptAll(gated, walletSession) { done, total ->
+                    batch.value = SelectionBatch.Working(
+                        BatchOp.DOWNLOAD, phase = "Unlocking keys", done = done, total = total,
+                    )
+                }
+                gated.map { it.id }.zip(keyResults.map { it.isSuccess }).toMap()
+            }
+            var succeeded = 0
+            var failed = 0
+            targets.forEachIndexed { index, item ->
+                val ref = item.pieceRef
+                val fetched = if (ref != null && (keyOkById[item.id] ?: true)) {
+                    havenCache.fetch(ref).isSuccess
+                } else {
+                    false
+                }
+                if (fetched) succeeded++ else failed++
+                batch.value = SelectionBatch.Working(
+                    BatchOp.DOWNLOAD, phase = "Downloading", done = index + 1, total = targets.size,
+                )
+            }
+            batch.value = SelectionBatch.Done(BatchOp.DOWNLOAD, succeeded = succeeded, failed = failed)
+        }
+    }
+
     private companion object {
         /** Keeps the Room subscription alive across a configuration change. */
         const val STOP_TIMEOUT_MS = 5_000L
     }
 }
+
+/** Which batch ran: keys only, or keys plus on-device files. */
+enum class BatchOp { UNLOCK, DOWNLOAD }
+
+/** Batch unlock/download progress for the selection action bar; null when idle or dismissed. */
+sealed interface SelectionBatch {
+    data class Working(val op: BatchOp, val phase: String, val done: Int, val total: Int) : SelectionBatch
+    data class Done(val op: BatchOp, val succeeded: Int, val failed: Int) : SelectionBatch
+}
+
+/**
+ * Pure: the checked rows, in list order. Ids that left the list (a refresh narrowed it)
+ * select nothing rather than unlocking something the reader can no longer see.
+ */
+internal fun selectionTargets(items: List<MediaItem>, ids: Set<String>): List<MediaItem> =
+    items.filter { it.id in ids }
 
 /** Pure so it can be tested without Room, a wallet, or a coroutine dispatcher. */
 internal fun applyFilters(items: List<MediaItem>, filters: Filters): List<MediaItem> {
