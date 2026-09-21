@@ -84,9 +84,13 @@ class PieceRefScopingTest {
     }
 
     @Test
-    fun `missing gate falls back to mainnet`() {
+    fun `missing gate falls back to calibration`() {
+        // Ungated records carry no chain signal; every record published to
+        // date is testnet content, and the mainnet Beam host 404s on
+        // calibration pieces (proven live: same piece 200 on calibration,
+        // 404 without the infix).
         val ref = refOf("0x5C32469325d4093AB142dDDC1305F91d76e45141", null)
-        assertEquals(FocChain.MAINNET, ref.chain)
+        assertEquals(FocChain.CALIBRATION, ref.chain)
         assertTrue(ref.cdnEnabled)
     }
 }
