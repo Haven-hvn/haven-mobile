@@ -56,6 +56,7 @@ import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaCard
 import haven.mobile.core.design.component.MediaRow
+import haven.mobile.core.domain.captionLine
 
 /**
  * The library.
@@ -73,6 +74,7 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val walletAddress by viewModel.walletAddress.collectAsState()
 
     val selecting = (uiState as? LibraryUiState.Ready)?.selecting == true
     val selectedCount = (uiState as? LibraryUiState.Ready)?.selectedIds?.size ?: 0
@@ -232,6 +234,7 @@ fun LibraryScreen(
                                     else navController.navigate("watch/${item.id}")
                                 },
                                 selected = if (state.selecting) item.id in state.selectedIds else null,
+                                caption = item.captionLine(walletAddress),
                             )
                         }
                     }
@@ -249,6 +252,7 @@ fun LibraryScreen(
                                     else navController.navigate("watch/${item.id}")
                                 },
                                 selected = if (state.selecting) item.id in state.selectedIds else null,
+                                caption = item.captionLine(walletAddress),
                             )
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = HavenSpacing.gutter),

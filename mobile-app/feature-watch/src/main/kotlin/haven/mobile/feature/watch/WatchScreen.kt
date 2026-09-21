@@ -68,8 +68,13 @@ import haven.mobile.core.design.component.MediaKindGlyph
 import haven.mobile.core.design.component.byteLabel
 import haven.mobile.core.design.component.label
 import haven.mobile.core.design.component.summaryLine
+import haven.mobile.core.domain.CREATOR_UNVERIFIABLE
+import haven.mobile.core.domain.GATE_FAILED_HEADLINE
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import haven.mobile.core.domain.captionLine
+import haven.mobile.core.domain.gateRequirementLine
+import haven.mobile.core.domain.isCreatorVerifiable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -118,12 +123,12 @@ fun WatchScreen(
             is WatchUiState.Ready -> {
                 val media = state.item
                 val pump = media.dripPump()
+                val walletAddress by viewModel.walletSession.address.collectAsState()
 
                 if (pump != null) {
                     // Method 4 (gate_type 4): the chunk unlocks collectively when the gate
                     // token is pumped to its market-cap target. Say so up front with the
                     // buy link — never send viewers into a decrypt that cannot succeed.
-                    val walletAddress by viewModel.walletSession.address.collectAsState()
                     DripPumpScreen(
                         media = media,
                         pump = pump,
@@ -139,12 +144,18 @@ fun WatchScreen(
                     when (val content = state.content) {
                         ContentState.NeedsSignature ->
                             SignatureDisclosure(
+                                media = media,
                                 onUnlock = { viewModel.unlock(media) },
                             )
 
                         ContentState.Idle ->
                             if (media.kind == MediaKind.FILE) {
-                                FileViewer(media = media, staged = null, viewModel = viewModel)
+                                FileViewer(
+                                    media = media,
+                                    staged = null,
+                                    viewModel = viewModel,
+                                    walletAddress = walletAddress,
+                                )
                             } else {
                                 ProgressBlock(label = "Preparing\u2026")
                             }
@@ -165,18 +176,29 @@ fun WatchScreen(
                                 media = media,
                                 file = content.file,
                                 aspect = 16f / 9f,
+                                walletAddress = walletAddress,
                             )
                             MediaKind.AUDIO -> PlayerViewer(
                                 media = media,
                                 file = content.file,
                                 aspect = null,
+                                walletAddress = walletAddress,
                             )
-                            MediaKind.IMAGE -> ImageViewer(media = media, file = content.file)
-                            MediaKind.DOCUMENT -> DocumentViewer(media = media, file = content.file)
+                            MediaKind.IMAGE -> ImageViewer(
+                                media = media,
+                                file = content.file,
+                                walletAddress = walletAddress,
+                            )
+                            MediaKind.DOCUMENT -> DocumentViewer(
+                                media = media,
+                                file = content.file,
+                                walletAddress = walletAddress,
+                            )
                             MediaKind.FILE -> FileViewer(
                                 media = media,
                                 staged = content.file,
                                 viewModel = viewModel,
+                                walletAddress = walletAddress,
                             )
                         }
                     }
@@ -204,6 +226,7 @@ private fun PlayerViewer(
     media: MediaItem,
     file: File,
     aspect: Float?,
+    walletAddress: String? = null,
 ) {
     val controller by rememberPlaybackController(file)
 
@@ -247,7 +270,7 @@ private fun PlayerViewer(
                 )
             }
         }
-        MediaMeta(media = media)
+        MediaMeta(media = media, walletAddress = walletAddress)
     }
 }
 
@@ -261,7 +284,7 @@ private fun PlayerViewer(
  * still sharper than the display can show.
  */
 @Composable
-private fun ImageViewer(media: MediaItem, file: File) {
+private fun ImageViewer(media: MediaItem, file: File, walletAddress: String? = null) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val targetWidthPx = remember(configuration.screenWidthDp) {
@@ -303,7 +326,7 @@ private fun ImageViewer(media: MediaItem, file: File) {
                 )
             }
         }
-        MediaMeta(media = media)
+        MediaMeta(media = media, walletAddress = walletAddress)
     }
 }
 
@@ -340,7 +363,7 @@ private fun decodeDownsampled(file: File, targetWidthPx: Int): Bitmap? {
  * in memory instead of linear in page count.
  */
 @Composable
-private fun DocumentViewer(media: MediaItem, file: File) {
+private fun DocumentViewer(media: MediaItem, file: File, walletAddress: String? = null) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val pageWidthPx = remember(configuration.screenWidthDp) {
@@ -374,7 +397,7 @@ private fun DocumentViewer(media: MediaItem, file: File) {
         ),
         verticalArrangement = Arrangement.spacedBy(HavenSpacing.md),
     ) {
-        item { MediaMeta(media = media, inset = false) }
+        item { MediaMeta(media = media, inset = false, walletAddress = walletAddress) }
 
         items(count = opened.pageCount, key = { index -> "page-$index" }) { index ->
             PdfPage(
@@ -436,6 +459,7 @@ private fun FileViewer(
     media: MediaItem,
     staged: File?,
     viewModel: WatchViewModel,
+    walletAddress: String? = null,
 ) {
     val context = LocalContext.current
     var showWarning by rememberSaveable { mutableStateOf(false) }
@@ -563,7 +587,7 @@ private fun FileViewer(
         }
 
         Spacer(Modifier.height(HavenSpacing.lg))
-        MediaMeta(media = media, inset = false)
+        MediaMeta(media = media, inset = false, walletAddress = walletAddress)
     }
 
     if (showWarning) {
@@ -596,7 +620,7 @@ private fun FileViewer(
  * one tap for the rare moment somebody needs it.
  */
 @Composable
-private fun MediaMeta(media: MediaItem, inset: Boolean = true) {
+private fun MediaMeta(media: MediaItem, inset: Boolean = true, walletAddress: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -617,6 +641,21 @@ private fun MediaMeta(media: MediaItem, inset: Boolean = true) {
             thickness = HavenSpacing.hairline,
             color = MaterialTheme.colorScheme.outlineVariant,
         )
+        Spacer(Modifier.height(HavenSpacing.md))
+        // Library wording, one vocabulary everywhere: provenance first, shade second.
+        Text(
+            text = media.captionLine(walletAddress),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!media.isCreatorVerifiable()) {
+            Spacer(Modifier.height(HavenSpacing.xs))
+            Text(
+                text = CREATOR_UNVERIFIABLE,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(HavenSpacing.md))
         Row(verticalAlignment = Alignment.CenterVertically) {
             CacheStatusChip(status = media.contentCacheStatus, compact = true)
@@ -681,7 +720,7 @@ private fun ProgressBlock(label: String, progress: Float? = null) {
  * signs on entry. Cached keys and ungated items never reach this screen.
  */
 @Composable
-private fun SignatureDisclosure(onUnlock: () -> Unit) {
+private fun SignatureDisclosure(media: MediaItem, onUnlock: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -690,13 +729,13 @@ private fun SignatureDisclosure(onUnlock: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "One signature to open this",
+            text = GATE_FAILED_HEADLINE,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(HavenSpacing.sm))
         Text(
-            text = "This file is locked to its community's token. Tapping below asks " +
+            text = media.gateRequirementLine() + ". Tapping below asks " +
                 "your wallet to sign a message proving you hold it. That is all the " +
                 "signature does — no transaction, no gas fee, nothing leaves your wallet.",
             style = MaterialTheme.typography.bodyMedium,

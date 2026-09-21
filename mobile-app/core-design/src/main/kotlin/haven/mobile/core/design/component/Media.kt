@@ -36,7 +36,9 @@ import haven.mobile.core.domain.MediaKind
  * render it the same way — a list row and a grid card, defined once here.
  *
  * Both carry what a reader can act on: what it is, how big, how recent, and whether it will open
- * without a connection. **No piece CIDs, no owner addresses, no chain names.** Those are storage
+ * without a connection. The optional `caption` line carries the library wording
+ * (`My contribution · Members`, see `LibraryLabels`). **No piece CIDs, no owner addresses,
+ * no chain names.** Those are storage
  * internals; an earlier revision printed a `bafkzcib…` hash under every title, which made a media
  * library read like a debugging console. Identifiers live behind a details affordance on the
  * viewer, for the rare moment somebody genuinely needs one.
@@ -55,6 +57,8 @@ fun MediaRow(
     modifier: Modifier = Modifier,
     attestation: AttestationState? = null,
     selected: Boolean? = null,
+    /** Library caption (`My contribution · Members`); null hides it. */
+    caption: String? = null,
 ) {
     Row(
         modifier = modifier
@@ -79,6 +83,16 @@ fun MediaRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (caption != null) {
+                Spacer(Modifier.height(HavenSpacing.xxs))
+                Text(
+                    text = caption,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(HavenSpacing.xxs))
             Text(
                 text = item.summaryLine(),
@@ -114,6 +128,8 @@ fun MediaCard(
     modifier: Modifier = Modifier,
     attestation: AttestationState? = null,
     selected: Boolean? = null,
+    /** Library caption (`My contribution · Members`); null hides it. */
+    caption: String? = null,
 ) {
     Surface(
         modifier = modifier
@@ -170,6 +186,16 @@ fun MediaCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (caption != null) {
+                    Spacer(Modifier.height(HavenSpacing.xs))
+                    Text(
+                        text = caption,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Spacer(Modifier.height(HavenSpacing.xs))
                 Text(
                     text = item.summaryLine(),

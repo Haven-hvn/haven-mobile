@@ -100,6 +100,12 @@ class LibraryViewModel @Inject constructor(
     private val batch = MutableStateFlow<SelectionBatch?>(null)
 
     /**
+     * Connected wallet, for provenance language (`My contribution` vs `The pool`).
+     * See `LibraryLabels`: "mine" is an on-chain comparison, not a text handle.
+     */
+    val walletAddress: StateFlow<String?> = walletSession.address
+
+    /**
      * Everything this wallet can read.
      *
      * You join a community and that is how you read, so the library is the union of every archive the
