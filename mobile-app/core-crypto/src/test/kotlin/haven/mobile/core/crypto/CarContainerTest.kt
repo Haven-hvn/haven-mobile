@@ -19,8 +19,9 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Retrieval serves the stored CAR file; [HavenCipher] expects the raw chunked ciphertext
  * inside it. These pin the strip step with synthetic containers (no fixtures needed):
- * single-block CARs pass through byte-identical under any network chunking, anything else
- * either passes through untouched (legacy) or fails loud (multi-block).
+ * single-block CARs pass through byte-identical under any network chunking, flat
+ * multi-block raws reassemble when the dag-pb root names them in order, and anything
+ * else either passes through untouched (legacy) or fails loud.
  */
 class CarContainerTest {
 
@@ -53,6 +54,39 @@ class CarContainerTest {
 
     private fun rawCid(seed: Byte = 0x11): ByteArray =
         byteArrayOf(0x01, 0x55, 0x12, 0x20) + ByteArray(32) { (seed + it).toByte() }
+
+    private fun sha256(bytes: ByteArray): ByteArray =
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+
+    /** Minimal dag-pb root node linking the given leaf CIDs, in order. */
+    private fun dagPbRoot(leafCids: List<ByteArray>): Pair<ByteArray, ByteArray> {
+        val out = mutableListOf<Byte>()
+        leafCids.forEachIndexed { index, cid ->
+            val multihash = cid.copyOfRange(2, cid.size)
+            val link = mutableListOf<Byte>()
+            link += 0x0A.toByte()
+            link.addAll(varint(multihash.size.toLong()).toList())
+            link.addAll(multihash.toList())
+            link += 0x18.toByte()
+            link.addAll(varint((100 + index).toLong()).toList())
+            out += 0x12.toByte()
+            out.addAll(varint(link.size.toLong()).toList())
+            out.addAll(link)
+        }
+        val data = out.toByteArray()
+        val cid = byteArrayOf(0x01, 0x70, 0x12, 0x20) + sha256(data)
+        return cid to data
+    }
+
+    private fun carHeaderFor(rootCid: ByteArray): ByteArray {
+        // Definite byte-string with one-byte length (0x58), like real encoders emit.
+        val header = byteArrayOf(0xA2.toByte(), 0x67.toByte()) +
+            "version".toByteArray(Charsets.US_ASCII) + byteArrayOf(0x01) +
+            byteArrayOf(0x65.toByte()) + "roots".toByteArray(Charsets.US_ASCII) +
+            byteArrayOf(0x81.toByte()) +
+            byteArrayOf(0x58.toByte(), rootCid.size.toByte()) + rootCid
+        return varint(header.size.toLong()) + header
+    }
 
     private fun chunkedCiphertext(plaintext: ByteArray): ByteArray {
         val baseIv = ByteArray(12) { it.toByte() }
@@ -124,6 +158,84 @@ class CarContainerTest {
             runBlocking { flowOf(car).stripCarContainer().toList() }
         }
         assertTrue(error.message!!.contains("Multi-block"))
+    }
+
+    @Test
+    fun `flat multi-block raw leaves reassemble in root order`() = runBlocking {
+        val leafA = rawCid(0x22)
+        val leafB = rawCid(0x33)
+        val (rootCid, rootData) = dagPbRoot(listOf(leafA, leafB))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leafA, byteArrayOf(1, 2, 3)) +
+            carBlock(leafB, byteArrayOf(4, 5, 6)) +
+            carBlock(rootCid, rootData)
+        // Hostile chunking: through CIDs, frames, and the root node.
+        val chunks = split(car, listOf(3, 41, 7, 200, 13))
+        val out = flow { chunks.forEach { emit(it) } }.stripCarContainer().toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6), out)
+    }
+
+    @Test
+    fun `root first order also reassembles`() = runBlocking {
+        val leafA = rawCid(0x22)
+        val leafB = rawCid(0x33)
+        val (rootCid, rootData) = dagPbRoot(listOf(leafA, leafB))
+        val car = carHeaderFor(rootCid) +
+            carBlock(rootCid, rootData) +
+            carBlock(leafA, byteArrayOf(1, 2, 3)) +
+            carBlock(leafB, byteArrayOf(4, 5, 6))
+        val out = flowOf(car).stripCarContainer().toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6), out)
+    }
+
+    @Test
+    fun `reordered leaves against the root fail loud`() {
+        val leafA = rawCid(0x22)
+        val leafB = rawCid(0x33)
+        val (rootCid, rootData) = dagPbRoot(listOf(leafB, leafA))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leafA, byteArrayOf(1, 2, 3)) +
+            carBlock(leafB, byteArrayOf(4, 5, 6)) +
+            carBlock(rootCid, rootData)
+        val error = assertThrows(HavenError.PlaybackDecryptFailed::class.java) {
+            runBlocking { flowOf(car).stripCarContainer().toList() }
+        }
+        assertTrue(error.message!!.contains("does not match"))
+    }
+
+    @Test
+    fun `nested dag-pb node fails loud`() {
+        val leaf = rawCid(0x22)
+        val (rootCid, rootData) = dagPbRoot(listOf(leaf))
+        val (otherCid, otherData) = dagPbRoot(listOf(rawCid(0x44)))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leaf, byteArrayOf(1, 2, 3)) +
+            carBlock(otherCid, otherData) +
+            carBlock(rootCid, rootData)
+        val error = assertThrows(HavenError.PlaybackDecryptFailed::class.java) {
+            runBlocking { flowOf(car).stripCarContainer().toList() }
+        }
+        assertTrue(error.message!!.contains("Nested"))
+    }
+
+    @Test
+    fun `multi-block ciphertext decrypts end to end`() = runBlocking {
+        val plaintext = ByteArray(500) { (it * 7).toByte() }
+        val ct = chunkedCiphertext(plaintext)
+        val mid = ct.size / 2
+        val leafA = rawCid(0x22)
+        val leafB = rawCid(0x33)
+        val (rootCid, rootData) = dagPbRoot(listOf(leafA, leafB))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leafA, ct.copyOfRange(0, mid)) +
+            carBlock(leafB, ct.copyOfRange(mid, ct.size)) +
+            carBlock(rootCid, rootData)
+        val stripped = flowOf(car).stripCarContainer()
+        val decrypted = cipher.decryptStream(key, stripped, null).toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(plaintext, decrypted)
     }
 
     @Test
