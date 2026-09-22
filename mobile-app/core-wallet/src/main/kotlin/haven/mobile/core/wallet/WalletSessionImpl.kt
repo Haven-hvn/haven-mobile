@@ -244,7 +244,10 @@ class WalletSessionImpl @Inject constructor(
             }
             // A session proposal with no namespaces is approved by the wallet but never settles —
             // the wallet must be offered concrete chains/methods/events to grant.
-            val chains = AppKitChainsPresets.ethChains.values.toList()
+            // Sepolia is appended explicitly: the presets ship mainnet L1s/L2s only,
+            // and Haven gates live on Sepolia — a session approved without it
+            // rejects every Sepolia signature instantly at request time.
+            val chains = withSepolia(AppKitChainsPresets.ethChains.values.toList())
             val chainRefs = chains.map { "${it.chainNamespace}:${it.chainReference}" }
             val proposal = Modal.Model.Namespace.Proposal(
                 chains = chainRefs,
@@ -594,6 +597,26 @@ sealed class WalletError : Exception() {
     }
     data class SigningFailed(override val message: String) : WalletError()
     data class TransactionFailed(override val message: String) : WalletError()
+}
+
+/**
+ * Pure: the SDK preset chains plus Sepolia (absent from the presets), exactly once.
+ * Approved chains are fixed at session approval, so sessions connected before
+ * this existed must disconnect + reconnect to gain Sepolia.
+ */
+internal fun withSepolia(
+    preset: List<com.reown.appkit.client.Modal.Model.Chain>,
+): List<com.reown.appkit.client.Modal.Model.Chain> {
+    if (preset.any { it.chainNamespace == "eip155" && it.chainReference == "11155111" }) return preset
+    val mainnet = preset.firstOrNull { it.chainNamespace == "eip155" && it.chainReference == "1" }
+        ?: return preset
+    val sepolia = mainnet.copy(
+        chainName = "Sepolia",
+        chainReference = "11155111",
+        rpcUrl = "https://rpc.sepolia.org",
+        blockExplorerUrl = "https://sepolia.etherscan.io",
+    )
+    return preset + sepolia
 }
 
 /**
