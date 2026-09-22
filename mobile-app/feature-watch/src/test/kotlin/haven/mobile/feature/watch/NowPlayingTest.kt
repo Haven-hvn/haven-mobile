@@ -95,6 +95,45 @@ class NowPlayingTest {
     }
 
     @Test
+    fun `halfway progress is one half`() {
+        assertEquals(0.5f, progressFraction(30_000L, 60_000L), 0.001f)
+    }
+
+    @Test
+    fun `unknown duration renders an empty edge`() {
+        assertEquals(0f, progressFraction(30_000L, 0L), 0.001f)
+        assertEquals(0f, progressFraction(30_000L, -1L), 0.001f)
+    }
+
+    @Test
+    fun `overrun clamps to full rather than overflowing`() {
+        assertEquals(1f, progressFraction(70_000L, 60_000L), 0.001f)
+    }
+
+    @Test
+    fun `zero position renders empty`() {
+        assertEquals(0f, progressFraction(0L, 60_000L), 0.001f)
+    }
+
+    @Test
+    fun `short clock is minutes and seconds`() {
+        assertEquals("0:00", formatPlaybackTime(0L))
+        assertEquals("1:05", formatPlaybackTime(65_000L))
+        assertEquals("59:59", formatPlaybackTime(3_599_000L))
+    }
+
+    @Test
+    fun `long clock grows an hour field`() {
+        assertEquals("1:00:00", formatPlaybackTime(3_600_000L))
+        assertEquals("1:06:29", formatPlaybackTime(3_989_000L))
+    }
+
+    @Test
+    fun `unknown time never shows a bogus zero`() {
+        assertEquals("--:--", formatPlaybackTime(-1L))
+    }
+
+    @Test
     fun `clear hides the bar`() {
         val repository = NowPlayingRepository()
         repository.open(track)

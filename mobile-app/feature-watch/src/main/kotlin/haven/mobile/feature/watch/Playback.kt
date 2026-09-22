@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,12 +17,15 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 import java.util.concurrent.Executor
@@ -196,6 +200,92 @@ internal fun rememberIsPlaying(player: Player?): Boolean {
 
     return isPlaying
 }
+
+/**
+ * Position snapshot for the mini player, in the spirit of AntennaPod's collapsed player: the bar
+ * shows a thin progress edge rather than a seekbar, so it needs position/duration but never
+ * seeks from here — tapping expands the full viewer for that.
+ *
+ * Media3 pushes state changes but not a position tick, so the snapshot refreshes on every
+ * player event plus a half-second poll while something is playing. Stale reads are harmless:
+ * the worst case is a progress edge a beat behind.
+ */
+data class PlaybackProgress(
+    val positionMs: Long,
+    val durationMs: Long,
+    val isBuffering: Boolean,
+)
+
+@Composable
+internal fun rememberPlaybackProgress(player: Player?): PlaybackProgress {
+    var progress by remember(player) {
+        mutableStateOf(PlaybackProgress(positionMs = 0L, durationMs = 0L, isBuffering = false))
+    }
+
+    DisposableEffect(player) {
+        if (player == null) {
+            return@DisposableEffect onDispose {}
+        }
+        val listener = object : Player.Listener {
+            override fun onEvents(p: Player, events: Player.Events) {
+                progress = p.readProgress()
+            }
+        }
+        player.addListener(listener)
+        progress = player.readProgress()
+        onDispose { player.removeListener(listener) }
+    }
+
+    val playing = rememberIsPlaying(player)
+    LaunchedEffect(player, playing) {
+        // Poll only while playing; a paused bar is static, so there is nothing to refresh.
+        // Each write to `progress` recomposes on its own — no extra tick state needed.
+        while (isActive && playing && player != null) {
+            delay(PROGRESS_POLL_MS)
+            progress = player.readProgress()
+        }
+    }
+
+    return progress
+}
+
+private fun Player.readProgress(): PlaybackProgress {
+    val position = currentPosition.coerceAtLeast(0L)
+    val duration = duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0L) ?: 0L
+    return PlaybackProgress(
+        positionMs = position,
+        durationMs = duration,
+        isBuffering = playbackState == Player.STATE_BUFFERING,
+    )
+}
+
+/**
+ * Fraction for the progress edge, 0..1. Unknown or zero duration yields 0 rather than NaN —
+ * the bar renders empty instead of flashing full.
+ */
+fun progressFraction(positionMs: Long, durationMs: Long): Float {
+    if (durationMs <= 0L || positionMs <= 0L) return 0f
+    return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+}
+
+/**
+ * Compact clock label (`m:ss`, or `h:mm:ss` past the hour). Unknown/negative time renders as
+ * `--:--` so the bar never shows a bogus `0:00` for a stream with no duration yet.
+ */
+fun formatPlaybackTime(ms: Long): String {
+    if (ms < 0L) return "--:--"
+    val totalSeconds = ms / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
+private const val PROGRESS_POLL_MS = 500L
 
 /**
  * Swipe-down-to-collapse accumulator.
