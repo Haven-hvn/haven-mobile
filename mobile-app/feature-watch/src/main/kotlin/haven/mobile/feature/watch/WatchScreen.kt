@@ -109,6 +109,13 @@ fun WatchScreen(
 
     LaunchedEffect(itemId) { viewModel.open(itemId) }
 
+    // The drag lives here, around the whole screen (top bar included), not inside one
+    // viewer: inner scrollables consume what they can, so only genuine overscroll at the
+    // top reaches the drag — from any viewer kind, from any Compose-drawn chrome. One
+    // exception nothing app-side can fix: the video surface is a native view, so drags
+    // starting on the picture itself never reach Compose. There the top bar (drag or
+    // back button) is the way out.
+    DismissableViewer(onCollapse = { navController.popBackStack() }) {
     Column(modifier = Modifier.fillMaxSize()) {
         val item = (uiState as? WatchUiState.Ready)?.item
         HavenTopBar(
@@ -187,14 +194,12 @@ fun WatchScreen(
                                 file = content.file,
                                 aspect = 16f / 9f,
                                 walletAddress = walletAddress,
-                                onCollapse = { navController.popBackStack() },
                             )
                             MediaKind.AUDIO -> PlayerViewer(
                                 media = media,
                                 file = content.file,
                                 aspect = null,
                                 walletAddress = walletAddress,
-                                onCollapse = { navController.popBackStack() },
                             )
                             MediaKind.IMAGE -> ImageViewer(
                                 media = media,
@@ -218,6 +223,7 @@ fun WatchScreen(
             }
         }
     }
+    }
 }
 
 /* ── Video / audio ─────────────────────────────────────────────────────────────────────────── */
@@ -239,7 +245,6 @@ private fun PlayerViewer(
     file: File,
     aspect: Float?,
     walletAddress: String? = null,
-    onCollapse: () -> Unit = {},
 ) {
     val controller by rememberPlaybackController(file)
 
@@ -247,56 +252,12 @@ private fun PlayerViewer(
     // playing through the service.
     EnablePictureInPicture(player = controller, enabled = media.kind == MediaKind.VIDEO)
 
-    // Swipe-down collapses into the mini bar: popping the viewer leaves the service player
-    // untouched, so playback continues behind the bar. The whole content follows the finger
-    // (YouTube-style drag-to-dismiss) and settles on release: past the threshold — or on a
-    // fast downward fling — it exits and collapses, otherwise it springs back. The decision
-    // itself is the pure shouldCollapseOnRelease, so the gesture math stays unit-tested.
-    //
-    // The draggable sits outside the scroll, so normal scrolling wins first: the inner column
-    // consumes what it can, and only genuine overscroll at the top reaches this drag. Drags
-    // starting on the player surface itself still cannot reach Compose — a native view
-    // consumes its own touches — so for video the drag starts on the surrounding chrome,
-    // and the top bar's back button always collapses explicitly.
-    val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
-    val collapseThresholdPx = remember(density) { with(density) { COLLAPSE_SWIPE_DISTANCE.toPx() } }
-    val exitDistancePx = remember(density, configuration) {
-        with(density) { configuration.screenHeightDp.dp.toPx() }
-    }
-    val dismissOffset = remember { Animatable(0f) }
-    val dismissDrag = rememberDraggableState { delta ->
-        val current = dismissOffset.value
-        if (delta > 0f || current > 0f) {
-            scope.launch { dismissOffset.snapTo((current + delta).coerceAtLeast(0f)) }
-        }
-    }
-
+    // Popping the viewer leaves the service player untouched, so playback continues
+    // behind the mini bar. Swipe-down-to-collapse lives one level up in DismissableViewer,
+    // around the whole screen, so every viewer kind shares one gesture.
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                translationY = dismissOffset.value
-                // Fade slightly with the drag so the motion reads as dismissing the screen
-                // rather than the content tearing into blank space.
-                alpha = 1f - (dismissOffset.value / (collapseThresholdPx * 2f))
-                    .coerceIn(0f, 1f) * 0.4f
-            }
-            .draggable(
-                state = dismissDrag,
-                orientation = Orientation.Vertical,
-                onDragStopped = { velocity ->
-                    scope.launch {
-                        if (shouldCollapseOnRelease(dismissOffset.value, collapseThresholdPx, velocity)) {
-                            dismissOffset.animateTo(exitDistancePx)
-                            onCollapse()
-                        } else {
-                            dismissOffset.animateTo(0f)
-                        }
-                    }
-                },
-            )
             .verticalScroll(rememberScrollState()),
     ) {
         Surface(
@@ -810,6 +771,67 @@ private fun SignatureDisclosure(media: MediaItem, onUnlock: () -> Unit) {
         ) {
             Text("Sign to open")
         }
+    }
+}
+
+/**
+ * Whole-screen drag-to-dismiss, shared by every viewer kind.
+ *
+ * The content follows the finger with a slight fade and settles on release: past
+ * [COLLAPSE_SWIPE_DISTANCE] — or on a fast downward fling — it exits off the bottom and
+ * [onCollapse] fires; otherwise it springs back. The settle rule itself is the pure
+ * [shouldCollapseOnRelease], so the gesture math stays unit-tested without a device.
+ *
+ * Placement matters: this wraps the screen *outside* the viewers' own scrollables, so
+ * normal scrolling wins first and only genuine overscroll at the top reaches the drag.
+ */
+@Composable
+private fun DismissableViewer(
+    onCollapse: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val thresholdPx = remember(density) { with(density) { COLLAPSE_SWIPE_DISTANCE.toPx() } }
+    val exitDistancePx = remember(density, configuration) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
+    }
+    val dismissOffset = remember { Animatable(0f) }
+    val dismissDrag = rememberDraggableState { delta ->
+        val current = dismissOffset.value
+        if (delta > 0f || current > 0f) {
+            scope.launch { dismissOffset.snapTo((current + delta).coerceAtLeast(0f)) }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationY = dismissOffset.value
+                // Fade slightly with the drag so the motion reads as dismissing the screen
+                // rather than the content tearing into blank space.
+                alpha = 1f - (dismissOffset.value / (thresholdPx * 2f))
+                    .coerceIn(0f, 1f) * 0.4f
+            }
+            .draggable(
+                state = dismissDrag,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    scope.launch {
+                        if (shouldCollapseOnRelease(dismissOffset.value, thresholdPx, velocity)) {
+                            dismissOffset.animateTo(exitDistancePx)
+                            onCollapse()
+                        } else {
+                            dismissOffset.animateTo(0f)
+                        }
+                    }
+                },
+            ),
+    ) {
+        content()
     }
 }
 
