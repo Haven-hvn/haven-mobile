@@ -199,6 +199,19 @@ open class HavenAolImpl @Inject constructor(
             if (aesKey.size != 32) {
                 return Result.failure(HavenError.PlaybackDecryptFailed("The sealed key unwrapped to the wrong size."))
             }
+            // TEMP-DIAG (mp3 bad_decrypt): the unwrap can succeed with a wrong key when the
+            // request/derivation inputs disagree with the wrap identity (IBE gives garbage,
+            // not an error). Log everything needed to compare against the CLI-side repro:
+            // expected derivation 6ab58693… and key sha256 27baa5f2… for the Sepolia mp3.
+            timber.log.Timber.d(
+                "sealed unlock diag chain=%s token=%s thr=%s cid=%s deriv=%s keySha=%s",
+                chainVariant,
+                sealed.tokenAddress,
+                thresholdNorm,
+                sealed.cid,
+                derivation.toHex(),
+                java.security.MessageDigest.getInstance("SHA-256").digest(aesKey).toHex(),
+            )
             aesKeyCache.put(cacheKey, aesKey)
             Result.success(aesKey)
         } catch (e: Exception) {

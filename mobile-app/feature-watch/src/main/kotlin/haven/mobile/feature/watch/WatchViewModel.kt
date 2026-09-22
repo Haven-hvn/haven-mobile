@@ -277,9 +277,24 @@ class WatchViewModel @Inject constructor(
 
         staged.exceptionOrNull()?.let { throwable ->
             val failure = throwable.toFailure("This item could not be decrypted.")
+            // TEMP-DIAG (mp3 bad_decrypt): a silent-wrong unwrapped key reads identical to a
+            // fetch problem without the key/derivation facts. CLI-side repro unwraps key
+            // sha256 27baa5f2… under derivation 6ab58693… — compare on the next bad_decrypt.
+            val unlockDiag = (media.encryptionMetadata as? haven.mobile.core.domain.GateMetadata.Sealed)?.let { sealed ->
+                val variant = haven.mobile.core.domain.HavenChain.parse(sealed.chain)?.aolVariant ?: sealed.chain
+                val thr = sealed.threshold.trim().toLongOrNull()?.coerceAtLeast(1L)?.toString() ?: "1"
+                val deriv = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest("accessol:$variant:${sealed.tokenAddress}:$thr:${sealed.cid}".toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                val keySha = key?.let {
+                    java.security.MessageDigest.getInstance("SHA-256").digest(it)
+                        .joinToString("") { b -> "%02x".format(b.toInt() and 0xFF) }
+                } ?: "none"
+                " keySha=${keySha.take(16)} deriv=${deriv.take(16)} f=$variant|${sealed.tokenAddress}|$thr|${sealed.cid}"
+            } ?: ""
             logStage(
                 "fetch failed id=${media.id} code=${failure.code} " +
-                    "msg=${failure.message} ctBytes=$cipherBytes ptBytes=$plainBytes",
+                    "msg=${failure.message} ctBytes=$cipherBytes ptBytes=$plainBytes$unlockDiag",
             )
             content.value = failure
             return Result.failure(throwable)
