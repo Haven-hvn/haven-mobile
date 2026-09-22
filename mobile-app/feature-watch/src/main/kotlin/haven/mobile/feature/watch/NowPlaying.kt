@@ -12,14 +12,28 @@ import kotlinx.coroutines.flow.asStateFlow
  * service player ([HavenPlaybackService]), which is the single owner of audio. The bar is a
  * remote view onto that player, not a second one.
  *
- * Entities carry no thumbnails (there is no `thumbnail_cid` in practice), so the bar renders
- * the kind glyph as its artwork rather than pretending a cover exists.
+ * Entities carry no thumbnails (there is no `thumbnail_cid` in practice), so [artworkPath]
+ * points at cover art pulled out of the media itself — the MP3's embedded picture, extracted
+ * once at staging into the app cache — and the bar falls back to the kind glyph when it is
+ * absent. A local file path, never a URL: staged content is already-decrypted plaintext on
+ * disk, so there is nothing to download and no image-loader disk cache to consult.
  */
 data class NowPlayingTrack(
     val itemId: String,
     val title: String,
     val kind: MediaKind,
+    val artworkPath: String? = null,
 )
+
+/**
+ * Cache slot for one item's extracted cover art. The id is sanitised — entity ids have
+ * produced path-hostile characters before — so the art can never escape [cacheDir]'s
+ * artwork corner. Pure so the mapping stays unit-tested without a device.
+ */
+fun artworkFileFor(cacheDir: java.io.File, itemId: String): java.io.File {
+    val safe = itemId.map { c -> if (c.isLetterOrDigit() || c == '-' || c == '_') c else '_' }.joinToString("")
+    return java.io.File(java.io.File(cacheDir, "haven-artwork"), "$safe.jpg")
+}
 
 /**
  * Session-wide "what is playing", shared between the full viewer and the shell's mini bar.

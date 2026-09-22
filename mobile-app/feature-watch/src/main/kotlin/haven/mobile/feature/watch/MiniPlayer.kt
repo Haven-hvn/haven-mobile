@@ -1,5 +1,8 @@
 package haven.mobile.feature.watch
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,14 +25,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.component.MediaKindGlyph
 import haven.mobile.core.design.component.label
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Persistent "Now Playing" bar: artwork, title, and play/pause, one tap from anywhere.
@@ -71,7 +81,7 @@ fun MiniPlayerBar(
                     .padding(start = HavenSpacing.sm, end = HavenSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MediaKindGlyph(kind = track.kind, size = 48.dp)
+                MiniPlayerArtwork(track = track)
                 Spacer(Modifier.width(HavenSpacing.md))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -126,6 +136,54 @@ fun MiniPlayerBar(
         }
     }
 }
+
+/**
+ * The cover slot: the track's embedded picture when staging found one, the kind glyph
+ * otherwise. Decoded off-main and downsampled to the slot — a 3000px embedded JPEG must
+ * never become a 36MB bitmap for a 48dp thumbnail.
+ */
+@Composable
+private fun MiniPlayerArtwork(track: NowPlayingTrack) {
+    val path = track.artworkPath
+    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
+        value = if (path == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) { decodeArtwork(File(path), ARTWORK_TARGET_PX) }
+        }
+    }
+
+    val art = bitmap
+    if (art == null) {
+        MediaKindGlyph(kind = track.kind, size = 48.dp)
+    } else {
+        Image(
+            bitmap = art.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(MaterialTheme.shapes.small),
+        )
+    }
+}
+
+/** Two-pass decode: measure, pick a power-of-two sample size, then decode at that size. */
+private fun decodeArtwork(file: File, targetPx: Int): Bitmap? {
+    if (!file.exists()) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0) return null
+
+    var sampleSize = 1
+    while (bounds.outWidth / (sampleSize * 2) >= targetPx) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    return runCatching { BitmapFactory.decodeFile(file.absolutePath, options) }.getOrNull()
+}
+
+private const val ARTWORK_TARGET_PX = 144
 
 private val MINI_PLAYER_HEIGHT = 64.dp
 private val PLAY_BUTTON_SIZE = 48.dp

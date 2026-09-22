@@ -1,10 +1,13 @@
 package haven.mobile.feature.watch
 
 import android.content.ContentResolver
+import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.PlaintextSpool
 import haven.mobile.core.cache.mirror.MediaRepository
@@ -103,6 +106,7 @@ class WatchViewModel @Inject constructor(
     private val nowPlaying: NowPlayingRepository,
     /** Exposed so the drip sheet can offer in-app trading when a wallet is connected. */
     val walletSession: WalletSession,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     private val itemId = MutableStateFlow<String?>(null)
@@ -318,12 +322,52 @@ class WatchViewModel @Inject constructor(
      */
     private fun markReady(media: MediaItem, file: File): Result<File> {
         if (media.kind == MediaKind.VIDEO || media.kind == MediaKind.AUDIO) {
+            // Cover art comes out of the media itself: an MP3 with an embedded picture
+            // (ID3 APIC) publishes its cache path with the track, and the bar renders it.
+            // Extracted once per item — the file is skipped when a previous open left it.
+            // Video has no embedded still in this sense, so it keeps the glyph.
+            val artwork = if (media.kind == MediaKind.AUDIO) {
+                extractEmbeddedArtwork(file, artworkFileFor(appContext.cacheDir, media.id))
+            } else {
+                null
+            }
             nowPlaying.open(
-                NowPlayingTrack(itemId = media.id, title = media.title, kind = media.kind),
+                NowPlayingTrack(
+                    itemId = media.id,
+                    title = media.title,
+                    kind = media.kind,
+                    artworkPath = artwork?.absolutePath,
+                ),
             )
         }
         content.value = ContentState.Ready(file)
         return Result.success(file)
+    }
+
+    /**
+     * Pulls the embedded picture (ID3 APIC / MP4 covr) out of staged plaintext and files it
+     * under [target] for the bar to render. Returns null — not failure — when the media
+     * carries no picture: most tracks simply have none, and that must not break playback.
+     * Runs on the caller's thread; the caller stages off-main already.
+     */
+    private fun extractEmbeddedArtwork(source: File, target: File): File? {
+        if (target.exists()) return target
+        // release() in a finally, not use{}: retriever only grew AutoCloseable on API 29
+        // and this module still supports 26.
+        val retriever = MediaMetadataRetriever()
+        val bytes = try {
+            runCatching {
+                retriever.setDataSource(source.absolutePath)
+                retriever.embeddedPicture
+            }.getOrNull()
+        } finally {
+            runCatching { retriever.release() }
+        } ?: return null
+        return runCatching {
+            target.parentFile?.mkdirs()
+            target.writeBytes(bytes)
+            target
+        }.getOrNull()
     }
 
     /**
