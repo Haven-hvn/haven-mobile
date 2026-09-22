@@ -123,10 +123,14 @@ open class HavenAolImpl @Inject constructor(
                 HavenError.UnsupportedGateMetadata("This item's seal record is incomplete — this build can't unwrap it."),
             )
         }
-        val chainVariant = haven.mobile.core.domain.HavenChain.parse(sealed.chain)?.aolVariant
+        val gateChain = haven.mobile.core.domain.HavenChain.parse(sealed.chain)
             ?: return Result.failure(
                 HavenError.UnsupportedGateMetadata("This item is gated on a network Haven can't check."),
             )
+        val chainVariant = gateChain.aolVariant
+        // The signature must commit to the chain actually checked: Sepolia gates sign
+        // a Sepolia domain over a Sepolia wallet request (v3 already does this).
+        val domainChainId = gateChain.chainId
         val thresholdNorm = normalizeSealedThreshold(sealed.threshold)
         val transport = vetKdUnwrap.generateTransportKeypair().getOrElse {
             timber.log.Timber.w(it, "VetKD transport keypair failed")
@@ -137,8 +141,9 @@ open class HavenAolImpl @Inject constructor(
             evmAddress = address,
             transportPublicKeyHex = "0x" + transport.publicKey.toHex(),
             nonceDecimal = nonce,
+            domainChainId = domainChainId,
         )
-        val sig = signSerialized(session, typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+        val sig = signSerialized(session, typedData, domainChainId).getOrElse {
             return Result.failure(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
         }
         val sigBytes = parseWalletSignature(sig) ?: return Result.failure(
@@ -162,7 +167,7 @@ open class HavenAolImpl @Inject constructor(
                 dev.ic.kotlin.candid.fieldId("nonce") to dev.ic.kotlin.candid.CandidValue.CandidNat(nonceNat),
                 dev.ic.kotlin.candid.fieldId("signature") to dev.ic.kotlin.candid.CandidValue.CandidBlob(sigBytes),
                 dev.ic.kotlin.candid.fieldId("eip712ChainId") to dev.ic.kotlin.candid.CandidValue.CandidNat(
-                    java.math.BigInteger.valueOf(GateRequestBuilder.EIP712_CHAIN_ID),
+                    java.math.BigInteger.valueOf(domainChainId),
                 ),
                 dev.ic.kotlin.candid.fieldId("eip712VerifyingContract") to dev.ic.kotlin.candid.CandidValue.CandidText(
                     GateRequestBuilder.EIP712_VERIFYING_CONTRACT,
@@ -503,13 +508,15 @@ open class HavenAolImpl @Inject constructor(
         // The batch struct hashes the transport key itself (`bytes32 transportKeyHash`),
         // unlike the single request where the wallet hashes the dynamic `bytes` field —
         // so the raw key goes in the Candid call but only its keccak goes in the typed data.
+        val domainChainId = eip155ForChainVariant(key.chainVariant)
         val typedData = gateRequestBuilder.buildBatchV1Request(
             evmAddress = address,
             transportKeyHashHex = "0x" + Keccak256.hashHex(transport.publicKey),
             cidsCommitmentHex = commitment,
             nonceDecimal = nonce,
+            domainChainId = domainChainId,
         )
-        val sig = signSerialized(session, typedData, GateRequestBuilder.EIP712_CHAIN_ID).getOrElse {
+        val sig = signSerialized(session, typedData, domainChainId).getOrElse {
             return allFailed(HavenError.CanisterCallFailed("Signing failed: ${it.message}"))
         }
         val sigBytes = parseWalletSignature(sig) ?: return allFailed(
@@ -535,7 +542,7 @@ open class HavenAolImpl @Inject constructor(
                 dev.ic.kotlin.candid.fieldId("nonce") to dev.ic.kotlin.candid.CandidValue.CandidNat(nonceNat),
                 dev.ic.kotlin.candid.fieldId("signature") to dev.ic.kotlin.candid.CandidValue.CandidBlob(sigBytes),
                 dev.ic.kotlin.candid.fieldId("eip712ChainId") to dev.ic.kotlin.candid.CandidValue.CandidNat(
-                    java.math.BigInteger.valueOf(GateRequestBuilder.EIP712_CHAIN_ID),
+                    java.math.BigInteger.valueOf(domainChainId),
                 ),
                 dev.ic.kotlin.candid.fieldId("eip712VerifyingContract") to dev.ic.kotlin.candid.CandidValue.CandidText(
                     GateRequestBuilder.EIP712_VERIFYING_CONTRACT,
@@ -811,6 +818,16 @@ internal data class V1BatchKey(
     val tokenAddress: String,
     val thresholdNorm: String,
 )
+
+/**
+ * EIP-155 id for a gate chain variant name. The signature domain, the wallet
+ * request, and the canister balance check must all name the chain actually
+ * gated — Sepolia gates sign Sepolia. Falls back to the dapp default when
+ * the variant is unknown (callers fail closed on unknown chains first).
+ */
+internal fun eip155ForChainVariant(chainVariant: String): Long =
+    haven.mobile.core.domain.HavenChain.parse(chainVariant)?.chainId
+        ?: GateRequestBuilder.EIP712_CHAIN_ID
 
 /** Canister cap on `BatchGateRequest.cids` — larger groups chunk. */
 internal const val MAX_BATCH_CIDS = 20

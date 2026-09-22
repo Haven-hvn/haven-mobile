@@ -34,6 +34,7 @@ class GateRequestBuilder {
         transportKeyHashHex: String,
         cidsCommitmentHex: String,
         nonceDecimal: String,
+        domainChainId: Long = EIP712_CHAIN_ID,
     ): String {
         return """
             {
@@ -53,7 +54,7 @@ class GateRequestBuilder {
                 "primaryType": "BatchGateRequest",
                 "domain": {
                     "name": "HavenAOL",
-                    "chainId": $EIP712_CHAIN_ID,
+                    "chainId": $domainChainId,
                     "verifyingContract": "$EIP712_VERIFYING_CONTRACT"
                 },
                 "message": {
@@ -70,6 +71,7 @@ class GateRequestBuilder {
         evmAddress: String,
         transportPublicKeyHex: String,
         nonceDecimal: String,
+        domainChainId: Long = EIP712_CHAIN_ID,
     ): String {
         return """
             {
@@ -88,7 +90,7 @@ class GateRequestBuilder {
                 "primaryType": "GateRequest",
                 "domain": {
                     "name": "HavenAOL",
-                    "chainId": $EIP712_CHAIN_ID,
+                    "chainId": $domainChainId,
                     "verifyingContract": "$EIP712_VERIFYING_CONTRACT"
                 },
                 "message": {
@@ -102,10 +104,13 @@ class GateRequestBuilder {
 
     companion object {
         /**
-         * EIP-712 domain, dapp defaults (`NEXT_PUBLIC_EIP712_CHAIN_ID=1`, zero verifier). The
-         * canister rebuilds the domain separator from the request's values, so these just have
-         * to match between the signed data and the Candid call — and matching the dapp keeps
-         * one tested path. Shared constants so the two can never drift apart.
+         * EIP-712 domain fallback, dapp defaults (`NEXT_PUBLIC_EIP712_CHAIN_ID=1`, zero
+         * verifier). The canister rebuilds the domain separator from the request's values,
+         * so the signed data and the Candid call just have to match each other — and for
+         * sealed-v1 the app now sends the gate's own chain (Sepolia gates sign a Sepolia
+         * domain) instead of always 1, so the signature commits to the chain actually
+         * checked and the wallet request surfaces on the session the reader uses.
+         * Shared constants so the two can never drift apart.
          */
         const val EIP712_CHAIN_ID = 1L
         const val EIP712_VERIFYING_CONTRACT = "0x0000000000000000000000000000000000000000"

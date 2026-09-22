@@ -85,6 +85,32 @@ class GateRequestBuilderTest {
     }
 
     @org.junit.Test
+    fun `gate chain overrides the domain chain id`() {
+        val sepolia = JSONObject(
+            builder.buildV1Request(
+                evmAddress = "0xabc",
+                transportPublicKeyHex = "0x" + "ab".repeat(48),
+                nonceDecimal = "1",
+                domainChainId = 11155111L,
+            ),
+        ).getJSONObject("domain")
+        assertEquals(11155111L, sepolia.getLong("chainId"))
+        assertEquals("HavenAOL", sepolia.getString("name"))
+        assertTrue(!sepolia.has("version"))
+
+        val batch = JSONObject(
+            builder.buildBatchV1Request(
+                evmAddress = "0xabc",
+                transportKeyHashHex = "0x" + "ab".repeat(32),
+                cidsCommitmentHex = "0x" + "cd".repeat(32),
+                nonceDecimal = "1",
+                domainChainId = 11155111L,
+            ),
+        ).getJSONObject("domain")
+        assertEquals(11155111L, batch.getLong("chainId"))
+    }
+
+    @org.junit.Test
     fun `message binds wallet transport key and nonce`() {
         val message = built().getJSONObject("message")
 

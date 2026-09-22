@@ -133,8 +133,9 @@ class SealedGateTest {
 
             assertTrue(result.isSuccess)
             assertTrue(aesKey.contentEquals(result.getOrThrow()))
-            // The wallet signed the canonical shape on the EIP-712 domain chain.
-            assertEquals(1L, signedChain)
+            // The wallet signed the canonical shape on the gate's own chain
+            // (fixture gates EthSepolia), never the hardcoded dapp default.
+            assertEquals(11155111L, signedChain)
             val signed = JSONObject(signedJson!!)
             assertEquals("GateRequest", signed.getString("primaryType"))
             assertEquals("0xabc", signed.getJSONObject("message").getString("evmAddress"))
@@ -179,7 +180,7 @@ class SealedGateTest {
                 ),
             )
             assertEquals(
-                java.math.BigInteger.ONE,
+                java.math.BigInteger.valueOf(11155111L),
                 (fields[fieldId("eip712ChainId")] as? CandidValue.CandidNat)?.value,
             )
             assertEquals(

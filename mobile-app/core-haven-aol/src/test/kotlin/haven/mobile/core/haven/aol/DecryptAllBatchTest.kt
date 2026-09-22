@@ -93,6 +93,7 @@ class DecryptAllBatchTest {
         val signs = AtomicInteger(0)
         val current = AtomicInteger(0)
         val maxObserved = AtomicInteger(0)
+        val chainIds = java.util.Collections.synchronizedList(mutableListOf<Long>())
     }
 
     private fun trackingSession(tracker: SignTracker) = object : WalletSession {
@@ -103,6 +104,7 @@ class DecryptAllBatchTest {
         override suspend fun disconnect() = Unit
         override suspend fun signTypedDataV4(json: String, chainId: Long): Result<String> {
             tracker.signs.incrementAndGet()
+            tracker.chainIds += chainId
             val now = tracker.current.incrementAndGet()
             tracker.maxObserved.updateAndGet { m -> maxOf(m, now) }
             try {
@@ -159,6 +161,8 @@ class DecryptAllBatchTest {
             assertEquals(listOf("batchRequestDecryptionKey"), impl.methods)
             assertEquals(1, impl.batchCalls)
             assertEquals(1, tracker.signs.get())
+            // EthSepolia gates sign a Sepolia domain over a Sepolia request.
+            assertEquals(listOf(11155111L), tracker.chainIds.toList())
             assertEquals(3, results.size)
             results.forEachIndexed { i, result ->
                 assertTrue("item $i should succeed", result.isSuccess)
@@ -239,6 +243,13 @@ class DecryptAllBatchTest {
         assertNotEquals("submitted order commits", a, c)
         assertTrue(a.startsWith("0x"))
         assertEquals(66, a.length)
+    }
+
+    @org.junit.Test
+    fun `chain resolver follows the gate with dapp fallback`() {
+        assertEquals(11155111L, eip155ForChainVariant("EthSepolia"))
+        assertEquals(1L, eip155ForChainVariant("EthMainnet"))
+        assertEquals(1L, eip155ForChainVariant("NoSuchChain"))
     }
 
     @org.junit.Test
