@@ -13,7 +13,7 @@ import javax.inject.Singleton
 private val Context.hiddenItemsDataStore by preferencesDataStore(name = "haven_library_hidden")
 
 /**
- * Ids the reader hid from the library list (long-press menu).
+ * Ids the reader hid from the library list (top-bar Hide on the checked set).
  *
  * A DataStore set — not a Room column — so a mirror refresh (which upserts
  * every row from Arkiv) can never resurrect a hidden item, and no database

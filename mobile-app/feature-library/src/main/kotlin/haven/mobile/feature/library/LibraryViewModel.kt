@@ -248,7 +248,7 @@ class LibraryViewModel @Inject constructor(
         layout.value = if (layout.value == LibraryLayout.GRID) LibraryLayout.LIST else LibraryLayout.GRID
     }
 
-    /** Hide from the list (long-press menu). Persisted; refresh never resurrects it. */
+    /** Hide from the list (top-bar action on the checked set). Persisted; refresh never resurrects it. */
     fun hideItem(id: String) {
         if (batch.value is SelectionBatch.Working) return
         selectedIds.value = selectedIds.value - id
@@ -291,6 +291,27 @@ class LibraryViewModel @Inject constructor(
         } else {
             selectedIds.value + id
         }
+    }
+
+    /**
+     * Conventional long-press: enters selection mode with this item checked.
+     * Never unchecks — holding a checked row keeps it checked.
+     */
+    fun checkItem(id: String) {
+        if (batch.value is SelectionBatch.Working) return
+        selecting.value = true
+        if (id !in selectedIds.value) selectedIds.value = selectedIds.value + id
+    }
+
+    /** Hide every checked item; hidden rows leave the list and the checked set. */
+    fun hideChecked() {
+        if (batch.value is SelectionBatch.Working) return
+        selectedIds.value.toList().forEach { hideItem(it) }
+    }
+
+    /** Restore every checked item to the list. */
+    fun unhideChecked() {
+        selectedIds.value.toList().forEach { unhideItem(it) }
     }
 
     fun selectAllVisible(visible: List<MediaItem>) {

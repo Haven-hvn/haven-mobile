@@ -62,7 +62,7 @@ fun MediaRow(
     selected: Boolean? = null,
     /** Library caption (`My contribution · Members`); null hides it. */
     caption: String? = null,
-    /** Long-press action (library context menu); null disables long-press. */
+    /** Long-press action (library: enters selection with the item checked); null disables. */
     onLongClick: (() -> Unit)? = null,
 ) {
     val pressModifier = if (onLongClick != null) {
@@ -141,7 +141,7 @@ fun MediaCard(
     selected: Boolean? = null,
     /** Library caption (`My contribution · Members`); null hides it. */
     caption: String? = null,
-    /** Long-press action (library context menu); null disables long-press. */
+    /** Long-press action (library: enters selection with the item checked); null disables. */
     onLongClick: (() -> Unit)? = null,
 ) {
     val pressModifier = if (onLongClick != null) {
