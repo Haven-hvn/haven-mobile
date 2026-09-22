@@ -288,30 +288,18 @@ fun formatPlaybackTime(ms: Long): String {
 private const val PROGRESS_POLL_MS = 500L
 
 /**
- * Swipe-down-to-collapse accumulator.
+ * Drag-to-dismiss settle decision for the viewer.
  *
- * Fires [onCollapse] once the downward overscroll passes [thresholdPx], then resets so one
- * gesture collapses exactly once. Anything else (upward motion, a fresh gesture) resets the
- * count. Pure so the gesture math stays unit-tested without a device.
+ * Release past [thresholdPx] collapses; so does a fast downward fling even from a short drag
+ * (velocity is in px/s, positive downward). Anything else — short slow drags, upward flings,
+ * zero offset — springs back. Pure so the gesture math stays unit-tested without a device.
  */
-class OverscrollCollapse(
-    private val thresholdPx: Float,
-    private val onCollapse: () -> Unit,
-) {
-    private var accumulated = 0f
-
-    fun onOverscroll(downwardPx: Float) {
-        if (downwardPx <= 0f) {
-            accumulated = 0f
-            return
-        }
-        accumulated += downwardPx
-        if (accumulated >= thresholdPx) {
-            accumulated = 0f
-            onCollapse()
-        }
-    }
+fun shouldCollapseOnRelease(offsetPx: Float, thresholdPx: Float, velocityPxPerSec: Float): Boolean {
+    if (offsetPx <= 0f) return false
+    return offsetPx >= thresholdPx || velocityPxPerSec >= DISMISS_FLING_PX_PER_SEC
 }
+
+private const val DISMISS_FLING_PX_PER_SEC = 1_800f
 
 /** Compose gives a `Context`, PiP needs the `Activity` behind it. */
 private tailrec fun Context.findActivity(): ComponentActivity? = when (this) {

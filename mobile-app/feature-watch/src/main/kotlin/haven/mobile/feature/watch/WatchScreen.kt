@@ -6,7 +6,11 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,15 +47,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -80,6 +82,7 @@ import haven.mobile.core.domain.captionLine
 import haven.mobile.core.domain.gateRequirementLine
 import haven.mobile.core.domain.isCreatorVerifiable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -245,32 +248,56 @@ private fun PlayerViewer(
     EnablePictureInPicture(player = controller, enabled = media.kind == MediaKind.VIDEO)
 
     // Swipe-down collapses into the mini bar: popping the viewer leaves the service player
-    // untouched, so playback continues behind the bar. The gesture rides on overscroll because
-    // the player surface itself is a native view that consumes its own touches before Compose
-    // sees them — only drags starting on Compose-drawn chrome reach this connection.
-    val scrollState = rememberScrollState()
+    // untouched, so playback continues behind the bar. The whole content follows the finger
+    // (YouTube-style drag-to-dismiss) and settles on release: past the threshold — or on a
+    // fast downward fling — it exits and collapses, otherwise it springs back. The decision
+    // itself is the pure shouldCollapseOnRelease, so the gesture math stays unit-tested.
+    //
+    // The draggable sits outside the scroll, so normal scrolling wins first: the inner column
+    // consumes what it can, and only genuine overscroll at the top reaches this drag. Drags
+    // starting on the player surface itself still cannot reach Compose — a native view
+    // consumes its own touches — so for video the drag starts on the surrounding chrome,
+    // and the top bar's back button always collapses explicitly.
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
     val collapseThresholdPx = remember(density) { with(density) { COLLAPSE_SWIPE_DISTANCE.toPx() } }
-    val collapseTracker = remember(onCollapse, collapseThresholdPx) {
-        OverscrollCollapse(thresholdPx = collapseThresholdPx) { onCollapse() }
+    val exitDistancePx = remember(density, configuration) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
     }
-    val collapseNestedScroll = remember(collapseTracker, scrollState) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y > 0f && scrollState.value == 0) {
-                    collapseTracker.onOverscroll(available.y)
-                    return available
-                }
-                return Offset.Zero
-            }
+    val dismissOffset = remember { Animatable(0f) }
+    val dismissDrag = rememberDraggableState { delta ->
+        val current = dismissOffset.value
+        if (delta > 0f || current > 0f) {
+            scope.launch { dismissOffset.snapTo((current + delta).coerceAtLeast(0f)) }
         }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(collapseNestedScroll)
-            .verticalScroll(scrollState),
+            .graphicsLayer {
+                translationY = dismissOffset.value
+                // Fade slightly with the drag so the motion reads as dismissing the screen
+                // rather than the content tearing into blank space.
+                alpha = 1f - (dismissOffset.value / (collapseThresholdPx * 2f))
+                    .coerceIn(0f, 1f) * 0.4f
+            }
+            .draggable(
+                state = dismissDrag,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    scope.launch {
+                        if (shouldCollapseOnRelease(dismissOffset.value, collapseThresholdPx, velocity)) {
+                            dismissOffset.animateTo(exitDistancePx)
+                            onCollapse()
+                        } else {
+                            dismissOffset.animateTo(0f)
+                        }
+                    }
+                },
+            )
+            .verticalScroll(rememberScrollState()),
     ) {
         Surface(
             modifier = Modifier

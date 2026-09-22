@@ -65,33 +65,30 @@ class NowPlayingTest {
     }
 
     @Test
-    fun `short pulls do not collapse`() {
-        var collapses = 0
-        val tracker = OverscrollCollapse(thresholdPx = 100f) { collapses++ }
-        tracker.onOverscroll(40f)
-        tracker.onOverscroll(40f)
-        assertEquals(0, collapses)
+    fun `short slow drag springs back`() {
+        assertFalse(shouldCollapseOnRelease(offsetPx = 40f, thresholdPx = 100f, velocityPxPerSec = 0f))
     }
 
     @Test
-    fun `one long pull collapses exactly once`() {
-        var collapses = 0
-        val tracker = OverscrollCollapse(thresholdPx = 100f) { collapses++ }
-        tracker.onOverscroll(60f)
-        tracker.onOverscroll(60f)
-        // The accumulator resets on fire, so the leftover does not chain into a second collapse.
-        tracker.onOverscroll(60f)
-        assertEquals(1, collapses)
+    fun `drag past the threshold collapses`() {
+        assertTrue(shouldCollapseOnRelease(offsetPx = 120f, thresholdPx = 100f, velocityPxPerSec = 0f))
     }
 
     @Test
-    fun `upward motion resets the pull`() {
-        var collapses = 0
-        val tracker = OverscrollCollapse(thresholdPx = 100f) { collapses++ }
-        tracker.onOverscroll(80f)
-        tracker.onOverscroll(-10f)
-        tracker.onOverscroll(80f)
-        assertEquals(0, collapses)
+    fun `fast downward fling collapses from a short drag`() {
+        assertTrue(shouldCollapseOnRelease(offsetPx = 20f, thresholdPx = 100f, velocityPxPerSec = 2_500f))
+    }
+
+    @Test
+    fun `upward fling from a short drag springs back`() {
+        // Past-threshold offset still collapses (the drag already committed); velocity only
+        // rescues short drags, so an upward fling on a short drag must not dismiss.
+        assertFalse(shouldCollapseOnRelease(offsetPx = 20f, thresholdPx = 100f, velocityPxPerSec = -2_500f))
+    }
+
+    @Test
+    fun `zero offset never collapses even when moving`() {
+        assertFalse(shouldCollapseOnRelease(offsetPx = 0f, thresholdPx = 100f, velocityPxPerSec = 5_000f))
     }
 
     @Test
