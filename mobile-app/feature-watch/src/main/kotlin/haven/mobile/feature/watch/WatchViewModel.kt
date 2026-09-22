@@ -351,7 +351,12 @@ class WatchViewModel @Inject constructor(
      * Runs on the caller's thread; the caller stages off-main already.
      */
     private fun extractEmbeddedArtwork(source: File, target: File): File? {
-        if (target.exists()) return target
+        // The bar shows a glyph when this returns null, so every outcome is trailed —
+        // a silent null here is exactly how "no artwork" reports get stuck.
+        if (target.exists()) {
+            logStage("artwork hit id=${target.nameWithoutExtension} bytes=${target.length()}")
+            return target
+        }
         // release() in a finally, not use{}: retriever only grew AutoCloseable on API 29
         // and this module still supports 26.
         val retriever = MediaMetadataRetriever()
@@ -362,12 +367,21 @@ class WatchViewModel @Inject constructor(
             }.getOrNull()
         } finally {
             runCatching { retriever.release() }
-        } ?: return null
+        }
+        if (bytes == null) {
+            logStage("artwork none id=${target.nameWithoutExtension} staged=${source.length()}")
+            return null
+        }
         return runCatching {
             target.parentFile?.mkdirs()
             target.writeBytes(bytes)
             target
-        }.getOrNull()
+        }.getOrNull()?.also {
+            logStage("artwork wrote id=${target.nameWithoutExtension} bytes=${it.length()}")
+        } ?: run {
+            logStage("artwork write-failed id=${target.nameWithoutExtension}")
+            null
+        }
     }
 
     /**
