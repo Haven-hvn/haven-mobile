@@ -100,6 +100,7 @@ class WatchViewModel @Inject constructor(
     private val plaintextSpool: PlaintextSpool,
     private val aesKeyCache: AesKeyCache,
     private val mediaRepository: MediaRepository,
+    private val nowPlaying: NowPlayingRepository,
     /** Exposed so the drip sheet can offer in-app trading when a wallet is connected. */
     val walletSession: WalletSession,
 ) : ViewModel() {
@@ -195,8 +196,7 @@ class WatchViewModel @Inject constructor(
 
         // Already staged from an earlier open in this session.
         plaintextSpool.find(piece.pieceCid)?.let { staged ->
-            content.value = ContentState.Ready(staged)
-            return Result.success(staged)
+            return markReady(media, staged)
         }
 
         // 1. Key, if the item is gated. Cached per piece CID for the session (FR-ACL-2), so a repeat
@@ -303,11 +303,26 @@ class WatchViewModel @Inject constructor(
             ?: return fail("CACHE_WRITE_FAILED", "Decrypted content could not be staged.")
 
         logStage("ready id=${media.id} bytes=${file.length()} ctBytes=$cipherBytes")
-        content.value = ContentState.Ready(file)
+        markReady(media, file)
         // Playing is caching: the stream just filled the piece cache, so touch
         // the mirror row and every residency label (here, library, community)
         // recomputes live instead of going stale until the next refresh.
         runCatching { mediaRepository.noteAccessed(media.id) }
+        return Result.success(file)
+    }
+
+    /**
+     * Terminal staging step, shared by the cache-hit and freshly-decrypted paths. Audio/video
+     * also publishes here, so the mini bar appears the moment something is playable rather than
+     * only after the viewer has drawn it.
+     */
+    private fun markReady(media: MediaItem, file: File): Result<File> {
+        if (media.kind == MediaKind.VIDEO || media.kind == MediaKind.AUDIO) {
+            nowPlaying.open(
+                NowPlayingTrack(itemId = media.id, title = media.title, kind = media.kind),
+            )
+        }
+        content.value = ContentState.Ready(file)
         return Result.success(file)
     }
 

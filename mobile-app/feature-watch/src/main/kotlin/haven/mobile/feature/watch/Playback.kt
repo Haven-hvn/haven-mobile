@@ -10,8 +10,11 @@ import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
@@ -51,9 +54,15 @@ internal fun rememberPlaybackController(file: File): State<MediaController?> {
         }.getOrNull()
 
         if (controller != null) {
-            controller.setMediaItem(ExoMediaItem.fromUri(android.net.Uri.fromFile(file)))
-            controller.prepare()
-            controller.playWhenReady = true
+            // The service owns the player, so re-expanding the viewer reconnects to the same
+            // playlist and position. Only queue the file when it is not already loaded — setting
+            // it unconditionally would restart playback from zero on every expand.
+            val uri = android.net.Uri.fromFile(file)
+            if (controller.currentMediaItem?.localConfiguration?.uri != uri) {
+                controller.setMediaItem(ExoMediaItem.fromUri(uri))
+                controller.prepare()
+                controller.playWhenReady = true
+            }
         }
         value = controller
 
@@ -132,6 +141,84 @@ internal fun EnablePictureInPicture(player: Player?, enabled: Boolean) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Connects to [HavenPlaybackService] without queuing anything, for UI that observes or steers
+ * playback from outside the viewer — the shell's mini bar. Multiple controllers on one session
+ * are cheap; each is just a connection, released on dispose.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+internal fun rememberServiceController(): State<MediaController?> {
+    val context = LocalContext.current
+
+    return produceState<MediaController?>(initialValue = null) {
+        val token = SessionToken(context, ComponentName(context, HavenPlaybackService::class.java))
+        val controller = runCatching {
+            MediaController.Builder(context, token).buildAsync().await()
+        }.getOrNull()
+        value = controller
+
+        awaitDispose {
+            controller?.release()
+        }
+    }
+}
+
+/**
+ * Play state as Compose state, so a play/pause button recomposes when playback changes from
+ * anywhere — the viewer, the mini bar, the notification, the lockscreen.
+ */
+@Composable
+internal fun rememberIsPlaying(player: Player?): Boolean {
+    var isPlaying by remember(player) { mutableStateOf(player?.isPlaying == true) }
+
+    DisposableEffect(player) {
+        if (player == null) {
+            return@DisposableEffect onDispose {}
+        }
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                isPlaying = player.isPlaying
+            }
+        }
+        player.addListener(listener)
+        isPlaying = player.isPlaying
+        onDispose { player.removeListener(listener) }
+    }
+
+    return isPlaying
+}
+
+/**
+ * Swipe-down-to-collapse accumulator.
+ *
+ * Fires [onCollapse] once the downward overscroll passes [thresholdPx], then resets so one
+ * gesture collapses exactly once. Anything else (upward motion, a fresh gesture) resets the
+ * count. Pure so the gesture math stays unit-tested without a device.
+ */
+class OverscrollCollapse(
+    private val thresholdPx: Float,
+    private val onCollapse: () -> Unit,
+) {
+    private var accumulated = 0f
+
+    fun onOverscroll(downwardPx: Float) {
+        if (downwardPx <= 0f) {
+            accumulated = 0f
+            return
+        }
+        accumulated += downwardPx
+        if (accumulated >= thresholdPx) {
+            accumulated = 0f
+            onCollapse()
         }
     }
 }

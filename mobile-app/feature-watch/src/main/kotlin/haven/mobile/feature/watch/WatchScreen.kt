@@ -47,7 +47,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -180,12 +184,14 @@ fun WatchScreen(
                                 file = content.file,
                                 aspect = 16f / 9f,
                                 walletAddress = walletAddress,
+                                onCollapse = { navController.popBackStack() },
                             )
                             MediaKind.AUDIO -> PlayerViewer(
                                 media = media,
                                 file = content.file,
                                 aspect = null,
                                 walletAddress = walletAddress,
+                                onCollapse = { navController.popBackStack() },
                             )
                             MediaKind.IMAGE -> ImageViewer(
                                 media = media,
@@ -230,6 +236,7 @@ private fun PlayerViewer(
     file: File,
     aspect: Float?,
     walletAddress: String? = null,
+    onCollapse: () -> Unit = {},
 ) {
     val controller by rememberPlaybackController(file)
 
@@ -237,10 +244,33 @@ private fun PlayerViewer(
     // playing through the service.
     EnablePictureInPicture(player = controller, enabled = media.kind == MediaKind.VIDEO)
 
+    // Swipe-down collapses into the mini bar: popping the viewer leaves the service player
+    // untouched, so playback continues behind the bar. The gesture rides on overscroll because
+    // the player surface itself is a native view that consumes its own touches before Compose
+    // sees them — only drags starting on Compose-drawn chrome reach this connection.
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val collapseThresholdPx = remember(density) { with(density) { COLLAPSE_SWIPE_DISTANCE.toPx() } }
+    val collapseTracker = remember(onCollapse, collapseThresholdPx) {
+        OverscrollCollapse(thresholdPx = collapseThresholdPx) { onCollapse() }
+    }
+    val collapseNestedScroll = remember(collapseTracker, scrollState) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y > 0f && scrollState.value == 0) {
+                    collapseTracker.onOverscroll(available.y)
+                    return available
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
+            .nestedScroll(collapseNestedScroll)
+            .verticalScroll(scrollState),
     ) {
         Surface(
             modifier = Modifier
@@ -755,6 +785,9 @@ private fun SignatureDisclosure(media: MediaItem, onUnlock: () -> Unit) {
         }
     }
 }
+
+/** A deliberate pull past the top, not a stray scroll — roughly one thumb-length. */
+private val COLLAPSE_SWIPE_DISTANCE = 96.dp
 
 private const val FILE_PREFS = "haven_file_export"
 private const val KEY_WARNING_SEEN = "file_warning_seen"

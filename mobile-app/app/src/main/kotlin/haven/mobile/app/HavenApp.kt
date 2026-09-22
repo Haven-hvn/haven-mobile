@@ -1,15 +1,18 @@
 package haven.mobile.app
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -17,6 +20,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import haven.mobile.core.design.component.HavenDestination
 import haven.mobile.core.design.component.HavenNavigationBar
 import haven.mobile.core.design.component.HavenScreen
+import haven.mobile.feature.watch.MiniPlayerBar
+import haven.mobile.feature.watch.NowPlayingViewModel
+import haven.mobile.feature.watch.shouldShowMiniPlayer
 
 /**
  * App shell: the nav graph plus persistent bottom navigation.
@@ -40,14 +46,32 @@ fun HavenApp(
     }
     val showNavigationBar = destinations.any { it.route == currentRoute }
 
+    // Session playback, read at the activity scope so the bar survives every navigation. The bar
+    // hides on the viewer itself, where the full player is already visible.
+    val playerViewModel: NowPlayingViewModel = hiltViewModel()
+    val nowPlayingTrack by playerViewModel.track.collectAsState()
+
     HavenScreen(
         bottomBar = {
-            if (showNavigationBar) {
-                HavenNavigationBar(
-                    destinations = destinations,
-                    currentRoute = currentRoute,
-                    onSelect = { destination -> navController.switchTab(destination) },
-                )
+            Column {
+                val collapsed = nowPlayingTrack
+                if (collapsed != null && shouldShowMiniPlayer(collapsed, currentRoute)) {
+                    MiniPlayerBar(
+                        track = collapsed,
+                        onExpand = {
+                            navController.navigate(watchRouteFor(collapsed.itemId)) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
+                if (showNavigationBar) {
+                    HavenNavigationBar(
+                        destinations = destinations,
+                        currentRoute = currentRoute,
+                        onSelect = { destination -> navController.switchTab(destination) },
+                    )
+                }
             }
         },
     ) { innerPadding ->
