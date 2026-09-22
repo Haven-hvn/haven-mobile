@@ -406,12 +406,15 @@ private fun decide(prefix: ByteArray): Decision {
     if (frameLen <= 0) return Decision.NotCar
     pos = frameDataStart
     // Need the full CID before the first block's data starts.
-    val cid = parseCid(prefix, pos) ?: run {
+    parseCid(prefix, pos) ?: run {
         // CID might be split across network chunks — wait for more unless unreasonable.
         return if (prefix.size - pos > MAX_PREFIX_BYTES) Decision.NotCar else Decision.Undecided
     }
-    // Need the whole first frame to seed the assembler; else wait for more bytes.
-    if (prefix.size - pos < frameLen) return Decision.Undecided
+    // Commit on header + CID alone. The first frame may be megabytes (a single-block piece
+    // is one frame), and the assembler already resumes split frames across chunks — demanding
+    // the whole frame here would blow past the prefix cap first, misread the container as raw
+    // ciphertext, and fail every chunk's tag check downstream. A confident-but-wrong commit
+    // still fails closed: the assembler, the root check, and the cipher each reject garbage.
     return Decision.Car(header, pos, frameLen)
 }
 

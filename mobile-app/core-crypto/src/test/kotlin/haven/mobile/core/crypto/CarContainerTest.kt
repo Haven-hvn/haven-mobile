@@ -238,6 +238,49 @@ class CarContainerTest {
         assertArrayEquals(plaintext, decrypted)
     }
 
+    /**
+     * Byte-faithful single-block CAR, mirroring `js-services/single-block-car.ts`: one raw
+     * block whose frame dwarfs the prefix cap, header roots wrapped as tag-42 +
+     * multibase-identity-prefixed CID.
+     */
+    private fun singleBlockCar(data: ByteArray): ByteArray {
+        val digest = sha256(data)
+        val cid = byteArrayOf(0x01, 0x55, 0x12, 0x20) + digest
+        val headerBody = byteArrayOf(0xA2.toByte(), 0x65.toByte()) +
+            "roots".toByteArray(Charsets.US_ASCII) +
+            byteArrayOf(0x81.toByte(), 0xD8.toByte(), 0x2A.toByte(), 0x58.toByte(), 0x25.toByte(), 0x00.toByte()) +
+            cid +
+            byteArrayOf(0x67.toByte()) + "version".toByteArray(Charsets.US_ASCII) + byteArrayOf(0x01)
+        return varint(headerBody.size.toLong()) + headerBody + carBlock(cid, data)
+    }
+
+    @Test
+    fun `single-block car with a frame larger than the prefix cap still strips`() = runBlocking {
+        // Regression: the 8.3MB MP3 packs as ONE 8MB frame. decide() used to demand the whole
+        // first frame before committing to CAR, but the pending cap (4KB) fired first — the
+        // container sailed through raw, the cipher ate the CAR header as its IV, and every
+        // chunk failed its tag check (BAD_DECRYPT, ptBytes=0, key provably correct).
+        val data = ByteArray(200 * 1024) { (it * 5).toByte() }
+        val car = singleBlockCar(data)
+        // Network-sized reads: the header + CID confirm CAR long before the frame completes.
+        val chunks = split(car, List(300) { 997 })
+        val out = flow { chunks.forEach { emit(it) } }.stripCarContainer().toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(data, out)
+    }
+
+    @Test
+    fun `single-block car decrypts end to end through the phone pipeline`() = runBlocking {
+        // The exact phone path: stripCarContainer -> decryptStream, over hostile chunking.
+        val plaintext = ByteArray(200 * 1024) { (it * 5).toByte() }
+        val car = singleBlockCar(chunkedCiphertext(plaintext))
+        val chunks = split(car, List(300) { 997 })
+        val stripped = flow { chunks.forEach { emit(it) } }.stripCarContainer()
+        val decrypted = cipher.decryptStream(key, stripped, null).toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(plaintext, decrypted)
+    }
+
     @Test
     fun `truncated prefix fails open`() = runBlocking {
         // Dies mid-header: not provably a container, so pass through for the decrypt
