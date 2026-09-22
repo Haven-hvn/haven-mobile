@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -245,16 +246,26 @@ class WatchViewModel @Inject constructor(
         val fetchStage = if (contentKey != null) UnlockStage.STREAMING else UnlockStage.LOADING
         content.value = ContentState.Working(fetchStage, progress = 0f)
 
+        // Byte counters survive failure: a GCM bad_decrypt on full-length bytes means
+        // the key is wrong, on short bytes means the fetch truncated — the trail must
+        // tell those apart instead of printing one opaque cipher error.
+        var cipherBytes = 0L
+        var plainBytes = 0L
         val ciphertext = havenCache.stream(piece)
         val plaintext = if (contentKey == null) {
             ciphertext
         } else {
             // Retrieval serves the stored CAR file; the cipher expects the raw chunked
             // ciphertext inside it. Non-CAR bytes pass through untouched.
-            havenCipher.decryptStream(contentKey, ciphertext.stripCarContainer(), null)
+            havenCipher.decryptStream(
+                contentKey,
+                ciphertext.onEach { cipherBytes += it.size }.stripCarContainer(),
+                null,
+            )
         }
 
         val staged = plaintextSpool.write(piece.pieceCid, plaintext) { written ->
+            plainBytes = written
             // Progress is against the *declared* size. Plaintext is slightly smaller than
             // ciphertext (GCM tags), so this can reach 100% a beat early — better than a bar that
             // stalls at 97% because it was measuring the wrong thing.
@@ -266,14 +277,17 @@ class WatchViewModel @Inject constructor(
 
         staged.exceptionOrNull()?.let { throwable ->
             val failure = throwable.toFailure("This item could not be decrypted.")
-            logStage("fetch failed id=${media.id} code=${failure.code} msg=${failure.message}")
+            logStage(
+                "fetch failed id=${media.id} code=${failure.code} " +
+                    "msg=${failure.message} ctBytes=$cipherBytes ptBytes=$plainBytes",
+            )
             content.value = failure
             return Result.failure(throwable)
         }
         val file = staged.getOrNull()
             ?: return fail("CACHE_WRITE_FAILED", "Decrypted content could not be staged.")
 
-        logStage("ready id=${media.id} bytes=${file.length()}")
+        logStage("ready id=${media.id} bytes=${file.length()} ctBytes=$cipherBytes")
         content.value = ContentState.Ready(file)
         // Playing is caching: the stream just filled the piece cache, so touch
         // the mirror row and every residency label (here, library, community)

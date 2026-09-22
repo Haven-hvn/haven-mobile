@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
@@ -53,6 +54,26 @@ import haven.mobile.core.domain.MediaKind
  */
 
 /** Cache residency. Reads as information, never as a tappable control. */
+/**
+ * Unlock-key state: shown only once the key is held, so a row visibly changes
+ * the moment its gate opens. Locked is the default and gets no badge.
+ */
+@Composable
+fun KeyStatusChip(
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val accents = HavenTheme.accents
+    HavenStatusChip(
+        tint = accents.attestVerified,
+        icon = Icons.Default.LockOpen,
+        label = "Unlocked",
+        semantics = "Unlock key ready",
+        compact = compact,
+        modifier = modifier,
+    )
+}
+
 @Composable
 fun CacheStatusChip(
     status: ContentCacheStatus,

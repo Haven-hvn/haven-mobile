@@ -64,6 +64,8 @@ fun MediaRow(
     caption: String? = null,
     /** Long-press action (library: enters selection with the item checked); null disables. */
     onLongClick: (() -> Unit)? = null,
+    /** True once the unlock key is held — shows the Unlocked chip. */
+    keyReady: Boolean = false,
 ) {
     val pressModifier = if (onLongClick != null) {
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -118,6 +120,9 @@ fun MediaRow(
             verticalArrangement = Arrangement.spacedBy(HavenSpacing.xs),
         ) {
             CacheStatusChip(status = item.contentCacheStatus, compact = true)
+            if (keyReady) {
+                KeyStatusChip(compact = true)
+            }
             if (attestation != null) {
                 AttestationBadge(state = attestation, compact = true)
             }
@@ -143,6 +148,8 @@ fun MediaCard(
     caption: String? = null,
     /** Long-press action (library: enters selection with the item checked); null disables. */
     onLongClick: (() -> Unit)? = null,
+    /** True once the unlock key is held — shows the Unlocked chip. */
+    keyReady: Boolean = false,
 ) {
     val pressModifier = if (onLongClick != null) {
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -222,9 +229,17 @@ fun MediaCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (attestation != null) {
+                if (keyReady || attestation != null) {
                     Spacer(Modifier.height(HavenSpacing.sm))
-                    AttestationBadge(state = attestation, compact = true)
+                    if (keyReady) {
+                        KeyStatusChip(compact = true)
+                    }
+                    if (keyReady && attestation != null) {
+                        Spacer(Modifier.height(HavenSpacing.xs))
+                    }
+                    if (attestation != null) {
+                        AttestationBadge(state = attestation, compact = true)
+                    }
                 }
             }
         }

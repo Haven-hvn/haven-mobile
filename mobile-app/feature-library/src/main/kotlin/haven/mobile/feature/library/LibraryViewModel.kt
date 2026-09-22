@@ -74,6 +74,8 @@ sealed interface LibraryUiState {
         val showHidden: Boolean,
         /** Ids hidden via the long-press menu — drives Hide vs Unhide per row. */
         val hiddenIds: Set<String>,
+        /** Ids whose unlock key this session holds — drives the Unlocked chip. */
+        val keyReadyIds: Set<String>,
     ) : LibraryUiState
 
     data class Error(val message: String) : LibraryUiState
@@ -113,6 +115,13 @@ class LibraryViewModel @Inject constructor(
     /** Ids the reader hid via the long-press menu; persisted in DataStore. */
     private val hiddenIds: StateFlow<Set<String>> = hiddenItems.hiddenIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptySet())
+
+    /**
+     * Ids whose unlock key this session holds. Fed by batch results, so rows
+     * flip to Unlocked the moment keys land — no reopen or refresh needed.
+     * Session-scoped like the key cache itself: a restart clears both.
+     */
+    private val keyReadyIds = MutableStateFlow<Set<String>>(emptySet())
 
     /**
      * Connected wallet, for provenance language (`My contribution` vs `The pool`).
@@ -173,6 +182,7 @@ class LibraryViewModel @Inject constructor(
             selecting,
             selectedIds,
             batch,
+            keyReadyIds,
         ) { args ->
             @Suppress("UNCHECKED_CAST")
             val items = args[0] as List<MediaItem>?
@@ -183,6 +193,7 @@ class LibraryViewModel @Inject constructor(
             val isSelecting = args[5] as Boolean
             val checked = args[6] as Set<String>
             val batchState = args[7] as SelectionBatch?
+            val keyReady = args[8] as Set<String>
             when {
                 hardError != null -> LibraryUiState.Error(hardError)
                 items == null -> LibraryUiState.Disconnected
@@ -203,6 +214,7 @@ class LibraryViewModel @Inject constructor(
                     hiddenCount = items.count { it.id in f.hiddenIds },
                     showHidden = f.showHidden,
                     hiddenIds = f.hiddenIds,
+                    keyReadyIds = keyReady,
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState.Loading)
@@ -354,6 +366,10 @@ class LibraryViewModel @Inject constructor(
                 failed = results.count { !it.isSuccess },
                 failedNames = failedTitles(targets, results),
             )
+            // Rows flip to Unlocked now — no reopen or refresh needed.
+            keyReadyIds.value = keyReadyIds.value + targets.zip(results)
+                .filter { it.second.isSuccess }
+                .map { it.first.id }
         }
     }
 
@@ -421,6 +437,8 @@ class LibraryViewModel @Inject constructor(
                 failed = failed,
                 failedNames = failedNames.toList(),
             )
+            // Keys were fetched for every gated row, downloaded or not.
+            keyReadyIds.value = keyReadyIds.value + keyOkById.filterValues { it }.keys
         }
     }
 
