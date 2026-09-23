@@ -296,10 +296,21 @@ private const val PROGRESS_POLL_MS = 500L
  */
 fun shouldCollapseOnRelease(offsetPx: Float, thresholdPx: Float, velocityPxPerSec: Float): Boolean {
     if (offsetPx <= 0f) return false
-    return offsetPx >= thresholdPx || velocityPxPerSec >= DISMISS_FLING_PX_PER_SEC
+    return offsetPx >= thresholdPx || velocityPxPerSec >= GESTURE_FLING_PX_PER_SEC
 }
 
-private const val DISMISS_FLING_PX_PER_SEC = 1_800f
+/**
+ * Swipe-up-to-expand settle decision for the mini bar: the mirror of
+ * [shouldCollapseOnRelease]. Release past [thresholdPx] upward expands; so does a fast
+ * upward fling from a short drag. Downward motion means nothing here — the bar has no
+ * dismiss — so it always springs back. Pure so the gesture math stays unit-tested.
+ */
+fun shouldExpandOnRelease(offsetPx: Float, thresholdPx: Float, velocityPxPerSec: Float): Boolean {
+    if (offsetPx >= 0f) return false
+    return -offsetPx >= thresholdPx || velocityPxPerSec <= -GESTURE_FLING_PX_PER_SEC
+}
+
+private const val GESTURE_FLING_PX_PER_SEC = 1_800f
 
 /** Compose gives a `Context`, PiP needs the `Activity` behind it. */
 private tailrec fun Context.findActivity(): ComponentActivity? = when (this) {

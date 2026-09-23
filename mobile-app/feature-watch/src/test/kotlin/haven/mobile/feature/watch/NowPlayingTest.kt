@@ -165,6 +165,27 @@ class NowPlayingTest {
     }
 
     @Test
+    fun `short slow upward drag springs back`() {
+        assertFalse(shouldExpandOnRelease(offsetPx = -20f, thresholdPx = 48f, velocityPxPerSec = 0f))
+    }
+
+    @Test
+    fun `drag past the upward threshold expands`() {
+        assertTrue(shouldExpandOnRelease(offsetPx = -60f, thresholdPx = 48f, velocityPxPerSec = 0f))
+    }
+
+    @Test
+    fun `fast upward fling expands from a short drag`() {
+        assertTrue(shouldExpandOnRelease(offsetPx = -10f, thresholdPx = 48f, velocityPxPerSec = -2_500f))
+    }
+
+    @Test
+    fun `downward motion never expands`() {
+        assertFalse(shouldExpandOnRelease(offsetPx = 60f, thresholdPx = 48f, velocityPxPerSec = 0f))
+        assertFalse(shouldExpandOnRelease(offsetPx = 0f, thresholdPx = 48f, velocityPxPerSec = -5_000f))
+    }
+
+    @Test
     fun `clear hides the bar`() {
         val repository = NowPlayingRepository()
         repository.open(track)

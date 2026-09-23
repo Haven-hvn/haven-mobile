@@ -2,8 +2,12 @@ package haven.mobile.feature.watch
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,13 +33,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,6 +53,7 @@ import haven.mobile.core.design.component.MediaKindGlyph
 import haven.mobile.core.design.component.label
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -70,6 +78,21 @@ fun MiniPlayerBar(
     val isPlaying = rememberIsPlaying(controller)
     val progress = rememberPlaybackProgress(controller)
 
+    // Swipe-up expands, tap expands: the bar rides the finger upward and settles on
+    // release — past the threshold (or on a fast upward fling) it opens the viewer,
+    // otherwise it springs back. The threshold is shorter than the viewer's: this is a
+    // 64dp strip, not a full screen, and a full thumb-length here feels broken.
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val expandThresholdPx = remember(density) { with(density) { EXPAND_SWIPE_DISTANCE.toPx() } }
+    val expandOffset = remember { Animatable(0f) }
+    val expandDrag = rememberDraggableState { delta ->
+        val current = expandOffset.value
+        if (delta < 0f || current < 0f) {
+            scope.launch { expandOffset.snapTo((current + delta).coerceAtMost(0f)) }
+        }
+    }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -80,6 +103,21 @@ fun MiniPlayerBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(MINI_PLAYER_HEIGHT)
+                    .graphicsLayer { translationY = expandOffset.value }
+                    .draggable(
+                        state = expandDrag,
+                        orientation = Orientation.Vertical,
+                        onDragStopped = { velocity ->
+                            scope.launch {
+                                if (shouldExpandOnRelease(expandOffset.value, expandThresholdPx, velocity)) {
+                                    expandOffset.snapTo(0f)
+                                    onExpand()
+                                } else {
+                                    expandOffset.animateTo(0f)
+                                }
+                            }
+                        },
+                    )
                     .clickable(
                         role = Role.Button,
                         onClickLabel = "Expand player",
@@ -263,3 +301,5 @@ private const val ARTWORK_TARGET_PX = 144
 private val MINI_PLAYER_HEIGHT = 64.dp
 private val PLAY_BUTTON_SIZE = 48.dp
 private val PROGRESS_EDGE_HEIGHT = 3.dp
+/** Short pull: the bar is a 64dp strip, and a full thumb-length here feels broken. */
+private val EXPAND_SWIPE_DISTANCE = 48.dp
