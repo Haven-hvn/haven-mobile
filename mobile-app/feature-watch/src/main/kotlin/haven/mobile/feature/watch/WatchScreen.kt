@@ -170,6 +170,7 @@ fun WatchScreen(
                                     staged = null,
                                     viewModel = viewModel,
                                     walletAddress = walletAddress,
+                                    diagnostics = diagnostics,
                                 )
                             } else {
                                 ProgressBlock(label = "Preparing\u2026")
@@ -194,28 +195,33 @@ fun WatchScreen(
                                 file = content.file,
                                 aspect = 16f / 9f,
                                 walletAddress = walletAddress,
+                                diagnostics = diagnostics,
                             )
                             MediaKind.AUDIO -> PlayerViewer(
                                 media = media,
                                 file = content.file,
                                 aspect = null,
                                 walletAddress = walletAddress,
+                                diagnostics = diagnostics,
                             )
                             MediaKind.IMAGE -> ImageViewer(
                                 media = media,
                                 file = content.file,
                                 walletAddress = walletAddress,
+                                diagnostics = diagnostics,
                             )
                             MediaKind.DOCUMENT -> DocumentViewer(
                                 media = media,
                                 file = content.file,
                                 walletAddress = walletAddress,
+                                diagnostics = diagnostics,
                             )
                             MediaKind.FILE -> FileViewer(
                                 media = media,
                                 staged = content.file,
                                 viewModel = viewModel,
                                 walletAddress = walletAddress,
+                                diagnostics = diagnostics,
                             )
                         }
                     }
@@ -245,6 +251,7 @@ private fun PlayerViewer(
     file: File,
     aspect: Float?,
     walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
 ) {
     val controller by rememberPlaybackController(file)
 
@@ -291,7 +298,7 @@ private fun PlayerViewer(
                 )
             }
         }
-        MediaMeta(media = media, walletAddress = walletAddress)
+        MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
     }
 }
 
@@ -305,7 +312,12 @@ private fun PlayerViewer(
  * still sharper than the display can show.
  */
 @Composable
-private fun ImageViewer(media: MediaItem, file: File, walletAddress: String? = null) {
+private fun ImageViewer(
+    media: MediaItem,
+    file: File,
+    walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
+) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val targetWidthPx = remember(configuration.screenWidthDp) {
@@ -347,7 +359,7 @@ private fun ImageViewer(media: MediaItem, file: File, walletAddress: String? = n
                 )
             }
         }
-        MediaMeta(media = media, walletAddress = walletAddress)
+        MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
     }
 }
 
@@ -384,7 +396,12 @@ private fun decodeDownsampled(file: File, targetWidthPx: Int): Bitmap? {
  * in memory instead of linear in page count.
  */
 @Composable
-private fun DocumentViewer(media: MediaItem, file: File, walletAddress: String? = null) {
+private fun DocumentViewer(
+    media: MediaItem,
+    file: File,
+    walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
+) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val pageWidthPx = remember(configuration.screenWidthDp) {
@@ -418,7 +435,14 @@ private fun DocumentViewer(media: MediaItem, file: File, walletAddress: String? 
         ),
         verticalArrangement = Arrangement.spacedBy(HavenSpacing.md),
     ) {
-        item { MediaMeta(media = media, inset = false, walletAddress = walletAddress) }
+        item {
+                MediaMeta(
+                    media = media,
+                    inset = false,
+                    walletAddress = walletAddress,
+                    diagnostics = diagnostics,
+                )
+            }
 
         items(count = opened.pageCount, key = { index -> "page-$index" }) { index ->
             PdfPage(
@@ -481,6 +505,7 @@ private fun FileViewer(
     staged: File?,
     viewModel: WatchViewModel,
     walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
 ) {
     val context = LocalContext.current
     var showWarning by rememberSaveable { mutableStateOf(false) }
@@ -608,7 +633,12 @@ private fun FileViewer(
         }
 
         Spacer(Modifier.height(HavenSpacing.lg))
-        MediaMeta(media = media, inset = false, walletAddress = walletAddress)
+        MediaMeta(
+            media = media,
+            inset = false,
+            walletAddress = walletAddress,
+            diagnostics = diagnostics,
+        )
     }
 
     if (showWarning) {
@@ -641,7 +671,12 @@ private fun FileViewer(
  * one tap for the rare moment somebody needs it.
  */
 @Composable
-private fun MediaMeta(media: MediaItem, inset: Boolean = true, walletAddress: String? = null) {
+private fun MediaMeta(
+    media: MediaItem,
+    inset: Boolean = true,
+    walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -695,6 +730,18 @@ private fun MediaMeta(media: MediaItem, inset: Boolean = true, walletAddress: St
                     "is what identifies it across every provider holding a copy.\n\n$cid",
                 copyText = cid,
                 copyLabel = "Copy CID",
+            )
+        }
+        // The pipeline trail is not failure-only: on a playing track this is the only
+        // place that says what staging actually did (artwork extracted or not, byte
+        // counts), and the copy button lets a report paste it without adb.
+        if (diagnostics.isNotEmpty()) {
+            Spacer(Modifier.height(HavenSpacing.md))
+            Explain(
+                question = "Diagnostics",
+                body = diagnostics.joinToString("\n"),
+                copyText = diagnostics.joinToString("\n"),
+                copyLabel = "Copy trail",
             )
         }
         Spacer(Modifier.height(HavenSpacing.lg))
