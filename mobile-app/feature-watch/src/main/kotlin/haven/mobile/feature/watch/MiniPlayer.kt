@@ -24,16 +24,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.component.MediaKindGlyph
 import haven.mobile.core.design.component.label
@@ -81,7 +88,7 @@ fun MiniPlayerBar(
                     .padding(start = HavenSpacing.sm, end = HavenSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MiniPlayerArtwork(track = track)
+                MiniPlayerArtwork(track = track, player = controller)
                 Spacer(Modifier.width(HavenSpacing.md))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -141,15 +148,23 @@ fun MiniPlayerBar(
  * The cover slot: the track's embedded picture when staging found one, the kind glyph
  * otherwise. Decoded off-main and downsampled to the slot — a 3000px embedded JPEG must
  * never become a 36MB bitmap for a 48dp thumbnail.
+ *
+ * Two sources, in order: the file staging extracted, then the live player's own
+ * `artworkData`. The second is a same-parser repair — the player surface demonstrably
+ * renders art from this exact file, so when staging drew blank the bar takes ExoPlayer's
+ * bytes and files them for next time instead of trusting a second parser.
  */
 @Composable
-private fun MiniPlayerArtwork(track: NowPlayingTrack) {
-    val path = track.artworkPath
-    val bitmap by produceState<Bitmap?>(initialValue = null, path) {
-        value = if (path == null) {
-            null
-        } else {
-            withContext(Dispatchers.IO) { decodeArtwork(File(path), ARTWORK_TARGET_PX) }
+private fun MiniPlayerArtwork(track: NowPlayingTrack, player: Player?) {
+    val context = LocalContext.current
+    val playerArt = rememberPlayerArtwork(player)
+    val bitmap by produceState<Bitmap?>(initialValue = null, track.artworkPath, playerArt) {
+        value = withContext(Dispatchers.IO) {
+            decodeCachedArtwork(track.artworkPath)
+                ?: playerArt?.let { bytes ->
+                    persistPlayerArtwork(context.cacheDir, track.itemId, bytes)
+                    decodeArtworkBytes(bytes, ARTWORK_TARGET_PX)
+                }
         }
     }
 
@@ -168,19 +183,79 @@ private fun MiniPlayerArtwork(track: NowPlayingTrack) {
     }
 }
 
+/**
+ * Artwork off the live player, as Compose state. The player surface already renders this
+ * file's cover, so these bytes are ground truth — whatever the staging-time parser made
+ * of the same file is irrelevant here.
+ */
+@Composable
+private fun rememberPlayerArtwork(player: Player?): ByteArray? {
+    var art by remember(player) { mutableStateOf(player?.mediaMetadata?.artworkData) }
+
+    DisposableEffect(player) {
+        if (player == null) {
+            return@DisposableEffect onDispose {}
+        }
+        val listener = object : Player.Listener {
+            override fun onMediaMetadataChanged(metadata: MediaMetadata) {
+                art = metadata.artworkData
+            }
+        }
+        player.addListener(listener)
+        art = player.mediaMetadata.artworkData
+        onDispose { player.removeListener(listener) }
+    }
+
+    return art
+}
+
+/** Files one item's player-supplied cover for the next open. Null-safe no-op on failure. */
+private fun persistPlayerArtwork(cacheDir: File, itemId: String, bytes: ByteArray): File? =
+    runCatching {
+        val target = artworkFileFor(cacheDir, itemId)
+        if (!target.exists()) {
+            target.parentFile?.mkdirs()
+            target.writeBytes(bytes)
+        }
+        target
+    }.getOrNull()
+
 /** Two-pass decode: measure, pick a power-of-two sample size, then decode at that size. */
 private fun decodeArtwork(file: File, targetPx: Int): Bitmap? {
     if (!file.exists()) return null
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.absolutePath, bounds)
     if (bounds.outWidth <= 0) return null
-
-    var sampleSize = 1
-    while (bounds.outWidth / (sampleSize * 2) >= targetPx) {
-        sampleSize *= 2
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSizeFor(bounds.outWidth, targetPx)
     }
-    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
     return runCatching { BitmapFactory.decodeFile(file.absolutePath, options) }.getOrNull()
+}
+
+private fun decodeCachedArtwork(path: String?): Bitmap? =
+    if (path == null) null else decodeArtwork(File(path), ARTWORK_TARGET_PX)
+
+private fun decodeArtworkBytes(bytes: ByteArray, targetPx: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0) return null
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSizeFor(bounds.outWidth, targetPx)
+    }
+    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
+}
+
+/**
+ * Largest power-of-two downsample keeping the width at or above [targetPx].
+ * Pure so the memory math stays unit-tested without a device.
+ */
+fun sampleSizeFor(sourceWidthPx: Int, targetPx: Int): Int {
+    if (sourceWidthPx <= 0 || targetPx <= 0) return 1
+    var sample = 1
+    while (sourceWidthPx / (sample * 2) >= targetPx) {
+        sample *= 2
+    }
+    return sample
 }
 
 private const val ARTWORK_TARGET_PX = 144
