@@ -191,17 +191,17 @@ class SealedGateTest {
     }
 
     @org.junit.Test
-    fun `sealed v3 fails closed before signing`() {
+    fun `unsupported seal version fails closed before signing`() {
         runBlocking {
             var signingAsked = false
             val session = signingSession { _, _ -> signingAsked = true }
             val impl = CannedHavenAol(session, recordingUnwrap(), cannedOkReply())
 
-            val result = impl.decrypt(sealedItem(version = 3), session)
+            val result = impl.decrypt(sealedItem(version = 2), session)
 
             val error = result.exceptionOrNull()
             assertTrue("expected UnsupportedGateMetadata, got $error", error is HavenError.UnsupportedGateMetadata)
-            assertTrue(error!!.message.orEmpty().contains("v3"))
+            assertTrue(error!!.message.orEmpty().contains("v2"))
             assertFalse("wallet must not be asked to sign", signingAsked)
             assertNull("canister must not be called", impl.lastArg)
         }

@@ -21,6 +21,27 @@ class GateMetadataCodecTest {
     }
 
     @Test
+    fun `sealed v3 round-trips its epoch`() {
+        val v3 = GateMetadata.Sealed(
+            version = 3, encryptedAesKey = "K", cid = "c", chain = "EthSepolia",
+            tokenAddress = "0xtoken", threshold = "1", epoch = 680,
+        )
+        val free = v3.copy(threshold = "0", epoch = 0)
+        val drip = v3.copy(version = 4, marketCapTarget = 12, oracleAddress = "0xbond", attributeGateType = 4)
+        val zeroTarget = drip.copy(marketCapTarget = 0)
+
+        assertEquals(v3, parseGateMetadata(jsonFromGateMetadata(v3)))
+        assertEquals(free, parseGateMetadata(jsonFromGateMetadata(free)))
+        assertEquals(drip, parseGateMetadata(jsonFromGateMetadata(drip)))
+        assertEquals(zeroTarget, parseGateMetadata(jsonFromGateMetadata(zeroTarget)))
+        // Rows written before epochs were stored read back with no epoch (fail closed at unlock).
+        assertEquals(
+            null,
+            (parseGateMetadata("""{"type":"Sealed","version":3,"encryptedAesKey":"K"}""") as GateMetadata.Sealed).epoch,
+        )
+    }
+
+    @Test
     fun `legacy variants round-trip`() {
         // Field-wise: ByteArray has no value equality, so data-class equals would fail on
         // identical bytes. The codec round-trips; only the comparison must be content-based.

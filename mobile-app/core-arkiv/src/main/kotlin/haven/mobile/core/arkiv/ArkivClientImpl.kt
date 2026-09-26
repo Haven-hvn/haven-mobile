@@ -1048,7 +1048,20 @@ class ArkivClientImpl @Inject constructor(
      * The Arkiv-level marker is `gate_type` (1|3|4 = per-file/per-epoch/per-marketcap).
      * Numeric only — no `gate_version` fallback.
      */
+    /**
+     * Non-negative integer field, or null when absent or malformed. Unlike [firstLong], 0 is a
+     * value: v3/v4 threshold-zero gates pin epoch 0, and a v4 stage may target 0.
+     */
+    private fun JSONObject.optNat(key: String): Long? = when (val v = opt(key)) {
+        is Number -> v.toLong().takeIf { it >= 0 && v.toDouble() == it.toDouble() }
+        is String -> v.trim().toLongOrNull()?.takeIf { it >= 0 }
+        else -> null
+    }
+
     private fun JSONObject.parseGateMetadata(vararg keys: String): GateMetadata? {
+        // Read here rather than threaded through: the attribute lives on the same merged
+        // entity object as the gate blob.
+        val gateTypeAttribute = firstLong("gate_type")
         val obj = keys.asSequence().mapNotNull { key ->
             // The gateway may pass the gate blob through as a JSON string
             // (how writers store it) or as a decoded object (reshaped).
@@ -1078,6 +1091,15 @@ class ArkivClientImpl @Inject constructor(
                     is String -> t.trim()
                     else -> ""
                 },
+                // v3 seals key on (gate, epoch). Parsed explicitly, not via firstLong: epoch 0
+                // is valid (threshold-zero gates) and must not read as "absent".
+                epoch = obj.optNat("epoch"),
+                // v4 drip seals (haven-aol build_gate_metadata_v4): reserve-unit target and
+                // the Bond oracle, both bound by the v4 request and derivation.
+                marketCapTarget = obj.optNat("marketCapTarget"),
+                oracleAddress = obj.optString("oracleAddress", null)?.takeIf { it.isNotEmpty() } ?: "",
+                // Entity attribute, merged alongside the payload: the version must agree.
+                attributeGateType = gateTypeAttribute,
             )
         }
 

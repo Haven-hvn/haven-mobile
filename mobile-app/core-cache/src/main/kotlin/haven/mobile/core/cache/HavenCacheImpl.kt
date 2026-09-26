@@ -1,7 +1,9 @@
 package haven.mobile.core.cache
 
 import android.content.Context
+import cloud.filecoin.foc.cache.AutoQuota
 import cloud.filecoin.foc.cache.Config
+import cloud.filecoin.foc.cache.PieceTransform
 import cloud.filecoin.foc.cache.FocCache
 import cloud.filecoin.foc.cache.PieceRef
 import cloud.filecoin.foc.cache.SpaceInfo
@@ -49,6 +51,7 @@ class HavenCacheImpl @Inject constructor(
         val walletAddress: String,
         val quotaBytes: Long,
         val ttlDays: Int,
+        val keepUnlocked: Boolean,
     )
 
     private val lock = Mutex()
@@ -70,19 +73,26 @@ class HavenCacheImpl @Inject constructor(
             walletAddress = walletAddress,
             quotaBytes = settings.quotaBytes.first(),
             ttlDays = settings.ttlDays.first(),
+            keepUnlocked = settings.keepUnlocked.first(),
         )
 
         lock.withLock {
             val existing = focCache
             if (existing != null && key == desired) return existing
 
-            val cacheDir = File(context.cacheDir, "foc/$walletAddress")
+            // One directory per storage mode, so ciphertext and decrypted copies of a piece can never
+            // share a name. Switching mode deletes the other directory: gated content re-downloads
+            // on next open, and turning "keep unlocked" off leaves no decrypted file behind.
+            val cacheDir = dirFor(walletAddress, desired.keepUnlocked)
+            dirFor(walletAddress, !desired.keepUnlocked).deleteRecursively()
             cacheDir.mkdirs()
+            val automatic = desired.quotaBytes == AUTOMATIC_QUOTA
             val created = FocCache(
                 context,
                 Config(
                     cacheDir = cacheDir,
-                    quotaBytes = desired.quotaBytes,
+                    quotaBytes = if (automatic) FALLBACK_QUOTA_BYTES else desired.quotaBytes,
+                    autoQuota = if (automatic) AutoQuota() else null,
                     blockTtl = Duration.ofDays(desired.ttlDays.toLong()),
                     chunkSize = defaults.chunkSize,
                     maxParallelFetches = defaults.maxParallelFetches,
@@ -103,6 +113,14 @@ class HavenCacheImpl @Inject constructor(
     override fun stream(ref: PieceRef): Flow<ByteArray> = flow {
         requireFocCache().stream(ref).collect { chunk -> emit(chunk) }
     }.flowOn(Dispatchers.IO)
+
+    override suspend fun file(ref: PieceRef, transform: PieceTransform?): Result<File> =
+        withContext(Dispatchers.IO) {
+            runCatching { requireFocCache().file(ref, transform) }
+                .recoverToHavenError("Fetch failed for ${ref.pieceCid}")
+        }
+
+    override suspend fun storesUnlocked(): Boolean = settings.keepUnlocked.first()
 
     override suspend fun exists(pieceCid: String): Boolean = withContext(Dispatchers.IO) {
         runCatching { requireFocCache().exists(pieceCid) }.getOrDefault(false)
@@ -141,7 +159,8 @@ class HavenCacheImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             lock.withLock {
                 runCatching {
-                    File(context.cacheDir, "foc/$walletAddress").deleteRecursively()
+                    dirFor(walletAddress, keepUnlocked = false).deleteRecursively()
+                    dirFor(walletAddress, keepUnlocked = true).deleteRecursively()
                     if (key?.walletAddress == walletAddress) {
                         focCache = null
                         key = null
@@ -150,7 +169,32 @@ class HavenCacheImpl @Inject constructor(
             }
         }
     }
+
+    override suspend fun clearUnlockedFor(walletAddress: String) {
+        withContext(Dispatchers.IO) {
+            lock.withLock {
+                runCatching {
+                    dirFor(walletAddress, keepUnlocked = true).deleteRecursively()
+                    if (key?.walletAddress == walletAddress && key?.keepUnlocked == true) {
+                        focCache = null
+                        key = null
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Ciphertext stays in `cacheDir` (the OS may reclaim it; nothing is lost). Decrypted content is
+     * something the user chose to keep, so it lives in `filesDir`, which the OS doesn't purge.
+     * Neither is backed up or transferred (`data_extraction_rules.xml`, `allowBackup=false`).
+     */
+    private fun dirFor(walletAddress: String, keepUnlocked: Boolean): File =
+        if (keepUnlocked) File(context.filesDir, "foc-unlocked/$walletAddress")
+        else File(context.cacheDir, "foc/$walletAddress")
 }
+
+private const val FALLBACK_QUOTA_BYTES = 2L * 1024 * 1024 * 1024
 
 /** Keep [HavenError]s as themselves; wrap anything else so callers only handle one taxonomy. */
 private fun <T> Result<T>.recoverToHavenError(fallbackMessage: String): Result<T> =

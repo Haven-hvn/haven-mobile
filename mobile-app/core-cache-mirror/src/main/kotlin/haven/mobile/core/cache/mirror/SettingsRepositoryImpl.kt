@@ -22,8 +22,10 @@ class SettingsRepositoryImpl @Inject constructor(
         private val TTL_DAYS_KEY = stringPreferencesKey("cache.ttl_days")
         private val CLEAR_ON_DISCONNECT_KEY = stringPreferencesKey("cache.clear_on_disconnect")
         private val ENABLED_CHAINS_KEY = stringPreferencesKey("access.enabled_chains")
+        private val KEEP_UNLOCKED_KEY = stringPreferencesKey("cache.keep_unlocked")
         private const val SEPARATOR = ","
-        private val DEFAULT_QUOTA_BYTES = 2L * 1024 * 1024 * 1024
+        /** Automatic (`AUTOMATIC_QUOTA`): foc sizes the cache from free space. */
+        private val DEFAULT_QUOTA_BYTES = 0L
         private val DEFAULT_TTL_DAYS = 30
         private val DEFAULT_CLEAR_ON_DISCONNECT = true
     }
@@ -38,6 +40,10 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val clearOnDisconnect: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
         prefs[CLEAR_ON_DISCONNECT_KEY]?.toBoolean() ?: DEFAULT_CLEAR_ON_DISCONNECT
+    }
+
+    override val keepUnlocked: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
+        prefs[KEEP_UNLOCKED_KEY]?.toBoolean() ?: false
     }
 
     override val enabledChains: Flow<Set<HavenChain>> = context.settingsDataStore.data.map { prefs ->
@@ -65,6 +71,12 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setCacheTtlDays(days: Int) {
         context.settingsDataStore.edit { prefs ->
             prefs[TTL_DAYS_KEY] = days.toString()
+        }
+    }
+
+    override suspend fun setKeepUnlocked(enabled: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[KEEP_UNLOCKED_KEY] = enabled.toString()
         }
     }
 

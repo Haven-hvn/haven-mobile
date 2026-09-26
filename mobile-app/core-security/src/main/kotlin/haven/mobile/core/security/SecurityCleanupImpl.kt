@@ -61,6 +61,8 @@ class SecurityCleanupImpl @Inject constructor(
         // leaving decrypted files behind for a wallet that is no longer connected is not something a
         // user is asking for when they tick that box.
         steps += runStep("plaintext_spool") { plaintextSpool.clearFor(walletAddress) }
+        // Same reasoning for content kept unlocked on the device: it goes with the wallet, always.
+        steps += runStep("unlocked_content") { havenCache.clearUnlockedFor(walletAddress) }
 
         if (clearOnDisconnect) {
             steps += runStep("content_cache") { havenCache.clearFor(walletAddress) }

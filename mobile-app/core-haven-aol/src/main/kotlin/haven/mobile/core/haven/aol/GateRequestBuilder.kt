@@ -116,53 +116,96 @@ class GateRequestBuilder {
         const val EIP712_VERIFYING_CONTRACT = "0x0000000000000000000000000000000000000000"
     }
 
+    /**
+     * Canonical v3 `GateRequestV3` typed data for `requestDecryptionKeyV3` — byte-equivalent to
+     * haven-aol `buildGateRequestV3TypedData` and verified by the canister against
+     * `GateRequestV3(address evmAddress,bytes transportPublicKey,uint256 epoch,uint256 nonce)`
+     * (typehash `bf3ae938…d7af`, `src/backend/main.mo`). Same three-field `HavenAOL` domain as
+     * v1 — no `version`. There is no item or CID in it: one signature opens a whole
+     * (gate, epoch) bucket. `epoch` and `nonce` are quoted decimals for the same precision
+     * reason as v1.
+     */
     fun buildV3Request(
-        item: MediaItem,
-        nonce: String,
-        walletAddress: String,
-        chainId: Long
+        evmAddress: String,
+        transportPublicKeyHex: String,
+        epochDecimal: String,
+        nonceDecimal: String,
+        domainChainId: Long = EIP712_CHAIN_ID,
     ): String {
-        val gate = item.gate!!
-        val threshold = gate.threshold.toLong().toString()
         return """
             {
                 "types": {
                     "EIP712Domain": [
                         {"name": "name", "type": "string"},
-                        {"name": "version", "type": "string"},
                         {"name": "chainId", "type": "uint256"},
                         {"name": "verifyingContract", "type": "address"}
                     ],
                     "GateRequestV3": [
-                        {"name": "itemId", "type": "string"},
-                        {"name": "gate", "type": "Gate"},
-                        {"name": "nonce", "type": "uint256"},
-                        {"name": "epoch", "type": "uint256"}
-                    ],
-                    "Gate": [
-                        {"name": "chain", "type": "string"},
-                        {"name": "tokenAddress", "type": "address"},
-                        {"name": "threshold", "type": "uint256"},
-                        {"name": "tokenStandard", "type": "string"}
+                        {"name": "evmAddress", "type": "address"},
+                        {"name": "transportPublicKey", "type": "bytes"},
+                        {"name": "epoch", "type": "uint256"},
+                        {"name": "nonce", "type": "uint256"}
                     ]
                 },
                 "primaryType": "GateRequestV3",
                 "domain": {
-                    "name": "Haven-AOL",
-                    "version": "3",
-                    "chainId": $chainId,
-                    "verifyingContract": "0x0000000000000000000000000000000000000001"
+                    "name": "HavenAOL",
+                    "chainId": $domainChainId,
+                    "verifyingContract": "$EIP712_VERIFYING_CONTRACT"
                 },
                 "message": {
-                    "itemId": "${item.id}",
-                    "gate": {
-                        "chain": "${gate.chain}",
-                        "tokenAddress": "${gate.tokenAddress}",
-                        "threshold": $threshold,
-                        "tokenStandard": "${gate.tokenStandard.name}"
-                    },
-                    "nonce": $nonce,
-                    "epoch": ${item.createdAtBlock ?: 0}
+                    "evmAddress": "$evmAddress",
+                    "transportPublicKey": "$transportPublicKeyHex",
+                    "epoch": "$epochDecimal",
+                    "nonce": "$nonceDecimal"
+                }
+            }
+        """.trimIndent()
+    }
+
+    /**
+     * Canonical v4 `GateRequestV4` typed data for `requestDecryptionKeyV4` — verified by the
+     * canister against `GateRequestV4(address evmAddress,bytes transportPublicKey,uint256 epoch,
+     * uint256 marketCapTarget,uint256 nonce)` (typehash `b9d5f143…0afd`, `src/backend/main.mo`).
+     * The signature commits to the drip stage's target, so one signature cannot be replayed
+     * for a later, higher stage. Same `HavenAOL` domain as v1/v3.
+     */
+    fun buildV4Request(
+        evmAddress: String,
+        transportPublicKeyHex: String,
+        epochDecimal: String,
+        marketCapTargetDecimal: String,
+        nonceDecimal: String,
+        domainChainId: Long = EIP712_CHAIN_ID,
+    ): String {
+        return """
+            {
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "GateRequestV4": [
+                        {"name": "evmAddress", "type": "address"},
+                        {"name": "transportPublicKey", "type": "bytes"},
+                        {"name": "epoch", "type": "uint256"},
+                        {"name": "marketCapTarget", "type": "uint256"},
+                        {"name": "nonce", "type": "uint256"}
+                    ]
+                },
+                "primaryType": "GateRequestV4",
+                "domain": {
+                    "name": "HavenAOL",
+                    "chainId": $domainChainId,
+                    "verifyingContract": "$EIP712_VERIFYING_CONTRACT"
+                },
+                "message": {
+                    "evmAddress": "$evmAddress",
+                    "transportPublicKey": "$transportPublicKeyHex",
+                    "epoch": "$epochDecimal",
+                    "marketCapTarget": "$marketCapTargetDecimal",
+                    "nonce": "$nonceDecimal"
                 }
             }
         """.trimIndent()

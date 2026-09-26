@@ -13,6 +13,7 @@ import haven.mobile.core.cache.PlaintextSpool
 import haven.mobile.core.cache.mirror.MediaRepository
 import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.crypto.HavenCipher
+import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.crypto.stripCarContainer
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.MediaItem
@@ -66,6 +67,16 @@ sealed interface ContentState {
     data class Ready(val file: File) : ContentState
 
     data class Failed(val code: String, val message: String) : ContentState
+
+    /**
+     * gate_type 4 drip stage whose market-cap target isn't reached yet (whole reserve units).
+     * Not a failure the reader can fix with a wallet: the screen shows the pump sheet, and
+     * "check again" re-runs [WatchViewModel.retry].
+     */
+    data class LockedDrip(
+        val required: java.math.BigInteger,
+        val actual: java.math.BigInteger,
+    ) : ContentState
 }
 
 sealed interface WatchUiState {
@@ -158,6 +169,11 @@ class WatchViewModel @Inject constructor(
         }
         viewModelScope.launch {
             if (media.isEncrypted && !hasUnlockKey(media)) {
+                // A locked drip stage would only ever refuse the signature — say why first.
+                (havenAol.precheck(media) as? HavenError.MarketCapNotReached)?.let { locked ->
+                    content.value = ContentState.LockedDrip(locked.required, locked.actual)
+                    return@launch
+                }
                 content.value = ContentState.NeedsSignature
             } else {
                 stage(media)
@@ -175,6 +191,7 @@ class WatchViewModel @Inject constructor(
     private suspend fun hasUnlockKey(media: MediaItem): Boolean {
         val cid = media.pieceRef?.pieceCid ?: return false
         if (plaintextSpool.find(cid) != null) return true
+        if (havenCache.storesUnlocked() && havenCache.exists(cid)) return true
         if (aesKeyCache.getSuspend(cid) != null) return true
         return havenAol.hasCachedKey(media)
     }
@@ -203,6 +220,10 @@ class WatchViewModel @Inject constructor(
             return markReady(media, staged)
         }
 
+        // "Keep unlocked content on this device": foc stores the decrypted file and serves it from
+        // then on. No spool, and no key or canister call unless the piece isn't on the device yet.
+        if (havenCache.storesUnlocked()) return stageUnlocked(media, piece)
+
         // 1. Key, if the item is gated. Cached per piece CID for the session (FR-ACL-2), so a repeat
         //    open never re-signs or re-hits the canister.
         //
@@ -210,35 +231,7 @@ class WatchViewModel @Inject constructor(
         //    this runs on `viewModelScope` (main dispatcher), where that would block the UI thread.
         var key: ByteArray? = null
         if (media.isEncrypted) {
-            content.value = ContentState.Working(UnlockStage.UNLOCKING)
-            key = aesKeyCache.getSuspend(piece.pieceCid)
-            logStage("key id=${media.id} cached=${key != null}")
-            if (key == null) {
-                val unlocked = havenAol.decrypt(media, walletSession)
-                unlocked.exceptionOrNull()?.let { throwable ->
-                    if (throwable.isOutOfCycles()) {
-                        // The community's key service is dry — not a wallet problem.
-                        // Say who can fix it (anyone holding ICP) and where it goes.
-                        val canister = havenAol.canisterId.ifBlank { "the key-service canister" }
-                        val failure = ContentState.Failed(
-                            code = "CANISTER_OUT_OF_CYCLES",
-                            message = "This community's key service is out of cycles, so it " +
-                                "can't unlock anything right now. Topping up $canister keeps " +
-                                "this archive readable for everyone.",
-                        )
-                        logStage("unlock failed id=${media.id} code=${failure.code} (canister dry)")
-                        content.value = failure
-                        return Result.failure(throwable)
-                    }
-                    val failure = throwable.toFailure("Could not unlock this item.")
-                    logStage("unlock failed id=${media.id} code=${failure.code} msg=${failure.message}")
-                    content.value = failure
-                    return Result.failure(throwable)
-                }
-                key = unlocked.getOrNull()
-                    ?: return fail("NO_KEY_AVAILABLE", "The gate returned no key material.")
-                aesKeyCache.putSuspend(piece.pieceCid, key)
-            }
+            key = acquireKey(media, piece).getOrElse { return Result.failure(it) }
         }
 
         // 2. Stream: ciphertext chunks from foc (which owns provider selection, the hedged race and
@@ -313,6 +306,88 @@ class WatchViewModel @Inject constructor(
         // recomputes live instead of going stale until the next refresh.
         runCatching { mediaRepository.noteAccessed(media.id) }
         return Result.success(file)
+    }
+
+    /**
+     * Unlocked mode. Gated pieces always go through [decryptOnStore], even when they're probably on
+     * the device already: the transform only runs on a miss, so a hit costs nothing, and a piece
+     * evicted in between is never stored as ciphertext under the unlocked store's name.
+     */
+    private suspend fun stageUnlocked(media: MediaItem, piece: cloud.filecoin.foc.cache.PieceRef): Result<File> {
+        val expectedBytes = media.sizeBytes ?: piece.size.takeIf { it > 0 }
+        var keyFailure: Throwable? = null
+        content.value = ContentState.Working(
+            if (media.isEncrypted) UnlockStage.UNLOCKING else UnlockStage.LOADING,
+            progress = if (media.isEncrypted) null else 0f,
+        )
+        val transform = if (!media.isEncrypted) null else havenCipher.decryptOnStore(
+            key = {
+                acquireKey(media, piece).getOrElse { keyFailure = it; throw it }
+                    .also { content.value = ContentState.Working(UnlockStage.STREAMING, progress = 0f) }
+            },
+            onBytesWritten = { written ->
+                val fraction = expectedBytes?.takeIf { it > 0 }
+                    ?.let { (written.toFloat() / it.toFloat()).coerceIn(0f, 1f) }
+                content.value = ContentState.Working(UnlockStage.STREAMING, fraction)
+            },
+        )
+        val file = havenCache.file(piece, transform).getOrElse { throwable ->
+            // acquireKey has already published the specific failure (dry canister, drip, …).
+            if (keyFailure != null) return Result.failure(keyFailure!!)
+            val failure = throwable.toFailure("This item could not be decrypted.")
+            logStage("unlocked fetch failed id=${media.id} code=${failure.code} msg=${failure.message}")
+            content.value = failure
+            return Result.failure(throwable)
+        }
+        logStage("ready (kept unlocked) id=${media.id} bytes=${file.length()}")
+        markReady(media, file)
+        runCatching { mediaRepository.noteAccessed(media.id) }
+        return Result.success(file)
+    }
+
+    /**
+     * The content key for a gated item: session cache first, else the canister (one silent or
+     * disclosed signature). Publishes UNLOCKING, and on failure the specific failure state (dry
+     * canister, drip below target, anything else), so callers only need to propagate the error.
+     */
+    private suspend fun acquireKey(media: MediaItem, piece: cloud.filecoin.foc.cache.PieceRef): Result<ByteArray> {
+        var key: ByteArray?
+        content.value = ContentState.Working(UnlockStage.UNLOCKING)
+        key = aesKeyCache.getSuspend(piece.pieceCid)
+        logStage("key id=${media.id} cached=${key != null}")
+        if (key == null) {
+            val unlocked = havenAol.decrypt(media, walletSession)
+            unlocked.exceptionOrNull()?.let { throwable ->
+                if (throwable.isOutOfCycles()) {
+                    // The community's key service is dry — not a wallet problem.
+                    // Say who can fix it (anyone holding ICP) and where it goes.
+                    val canister = havenAol.canisterId.ifBlank { "the key-service canister" }
+                    val failure = ContentState.Failed(
+                        code = "CANISTER_OUT_OF_CYCLES",
+                        message = "This community's key service is out of cycles, so it " +
+                            "can't unlock anything right now. Topping up $canister keeps " +
+                            "this archive readable for everyone.",
+                    )
+                    logStage("unlock failed id=${media.id} code=${failure.code} (canister dry)")
+                    content.value = failure
+                    return Result.failure(throwable)
+                }
+                if (throwable is HavenError.MarketCapNotReached) {
+                    // The cap moved back under the target between pre-check and unlock,
+                    // or the pre-check couldn't reach the canister.
+                    content.value = ContentState.LockedDrip(throwable.required, throwable.actual)
+                    return Result.failure(throwable)
+                }
+                val failure = throwable.toFailure("Could not unlock this item.")
+                logStage("unlock failed id=${media.id} code=${failure.code} msg=${failure.message}")
+                content.value = failure
+                return Result.failure(throwable)
+            }
+            key = unlocked.getOrNull()
+                ?: return fail("NO_KEY_AVAILABLE", "The gate returned no key material.").map { ByteArray(0) }
+            aesKeyCache.putSuspend(piece.pieceCid, key)
+        }
+        return Result.success(checkNotNull(key))
     }
 
     /**

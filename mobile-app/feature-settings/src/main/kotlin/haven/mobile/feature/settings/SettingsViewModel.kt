@@ -3,6 +3,7 @@ package haven.mobile.feature.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import haven.mobile.core.cache.AUTOMATIC_QUOTA
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.SettingsRepository
 import haven.mobile.core.domain.HavenChain
@@ -27,6 +28,8 @@ data class SettingsUiState(
     val quotaBytes: Long,
     val ttlDays: Int,
     val clearOnDisconnect: Boolean,
+    /** Gated content is stored decrypted on this device. */
+    val keepUnlocked: Boolean = false,
     /** Which of Haven-AOL's chains are checked for access. */
     val enabledChains: Set<HavenChain>,
     val usage: CacheUsage?,
@@ -66,8 +69,9 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.cacheTtlDays,
         settingsRepository.clearOnDisconnect,
         settingsRepository.enabledChains,
-    ) { quota, ttl, clearOnDisconnect, chains ->
-        Preferences(quota, ttl, clearOnDisconnect, chains)
+        settingsRepository.keepUnlocked,
+    ) { quota, ttl, clearOnDisconnect, chains, keepUnlocked ->
+        Preferences(quota, ttl, clearOnDisconnect, chains, keepUnlocked)
     }
 
     private val transient = combine(usage, working, message, events) { u, isWorking, msg, log ->
@@ -81,6 +85,7 @@ class SettingsViewModel @Inject constructor(
                 quotaBytes = prefs.quotaBytes,
                 ttlDays = prefs.ttlDays,
                 clearOnDisconnect = prefs.clearOnDisconnect,
+                keepUnlocked = prefs.keepUnlocked,
                 enabledChains = prefs.chains,
                 usage = t.usage,
                 recentEvents = t.events,
@@ -120,6 +125,32 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setCacheQuotaBytes(bytes)
             record("cache.quota_bytes = $bytes")
+            refreshUsage()
+        }
+    }
+
+    /** Automatic sizing on, or back to a fixed limit ([MANUAL_DEFAULT_BYTES] to start). */
+    fun setAutomaticQuota(enabled: Boolean) {
+        setQuotaBytes(if (enabled) AUTOMATIC_QUOTA else MANUAL_DEFAULT_BYTES)
+    }
+
+    /**
+     * Switching storage mode swaps the cache directory (see HavenCacheImpl): the old mode's content
+     * is deleted right away, so turning this off leaves no decrypted file behind, and gated items
+     * re-download on next open either way. `refreshUsage` forces that rebuild now rather than on the
+     * next open.
+     */
+    fun setKeepUnlocked(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setKeepUnlocked(enabled)
+            record("cache.keep_unlocked = $enabled")
+            if (!enabled) walletSession.address.value?.let { runCatching { havenCache.clearUnlockedFor(it) } }
+            refreshUsage()
+            message.value = if (enabled) {
+                "Unlocked content will be kept on this device"
+            } else {
+                "Unlocked content removed from this device"
+            }
         }
     }
 
@@ -162,6 +193,7 @@ class SettingsViewModel @Inject constructor(
         val ttlDays: Int,
         val clearOnDisconnect: Boolean,
         val chains: Set<HavenChain>,
+        val keepUnlocked: Boolean,
     )
 
     fun clearCache() {
@@ -229,7 +261,8 @@ class SettingsViewModel @Inject constructor(
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
         const val MAX_EVENTS = 100
-        const val DEFAULT_QUOTA_BYTES = 2L * 1024 * 1024 * 1024
+        const val DEFAULT_QUOTA_BYTES = AUTOMATIC_QUOTA
+        const val MANUAL_DEFAULT_BYTES = 2L * 1024 * 1024 * 1024
         const val DEFAULT_TTL_DAYS = 30
     }
 }

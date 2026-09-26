@@ -12,6 +12,13 @@ interface HavenAol {
      */
     suspend fun hasCachedKey(item: MediaItem): Boolean
     /**
+     * Anything known to block an unlock *before* asking for a signature, or null. Today:
+     * [haven.mobile.core.domain.error.HavenError.MarketCapNotReached] for a gate_type 4 drip
+     * stage whose target isn't reached yet (read from the canister, no signature). Null also
+     * means "couldn't tell" — the signed unlock remains the authority.
+     */
+    suspend fun precheck(item: MediaItem): haven.mobile.core.domain.error.HavenError? = null
+    /**
      * Unlocks every item, reporting completed count as groups finish (concurrent
      * completions may jump by more than one). Results stay in input order.
      */

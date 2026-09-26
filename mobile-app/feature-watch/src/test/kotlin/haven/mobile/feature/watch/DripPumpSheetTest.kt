@@ -9,8 +9,10 @@ import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.TokenGate
 import kotlinx.datetime.Instant
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -65,6 +67,38 @@ class DripPumpSheetTest {
         assertNotNull(pump)
         assertNull(pump!!.tokenAddress)
         assertNull(pump.chain)
+    }
+
+    @Test
+    fun `sealed v4 drips get an unlockable reserve-unit sheet`() {
+        val sealed = GateMetadata.Sealed(
+            version = 4, encryptedAesKey = "K", cid = "c", chain = "BaseMainnet",
+            tokenAddress = "0x1111111111111111111111111111111111111111", threshold = "5",
+            epoch = 670, marketCapTarget = 12, oracleAddress = "0xbond",
+        )
+        val pump = item(encryptionMetadata = sealed, gate = null).dripPump(current = java.math.BigInteger.valueOf(3))
+        assertNotNull(pump)
+        assertTrue(pump!!.unlockable)
+        assertEquals(DripTargetUnit.RESERVE_ETH, pump.unit)
+        assertEquals("12 ETH", pump.targetLabel)
+        assertEquals("3 ETH of 12 ETH", pump.progressLabel)
+        assertEquals(HavenChain.BASE_MAINNET, pump.chain)
+        assertEquals("0x1111111111111111111111111111111111111111", pump.tokenAddress)
+    }
+
+    @Test
+    fun `sealed v1 and v3 are not drips`() {
+        val v3 = GateMetadata.Sealed(version = 3, encryptedAesKey = "K", epoch = 670)
+        assertNull(item(encryptionMetadata = v3).dripPump())
+    }
+
+    @Test
+    fun `legacy V4 keeps USD labels and never unlocks in-app`() {
+        val v4 = GateMetadata.V4(epochId = 1, marketCapTargetUsd = 5_000_000, wrappedKey = byteArrayOf(1), gateReference = "")
+        val pump = item(encryptionMetadata = v4, gate = null).dripPump()!!
+        assertFalse(pump.unlockable)
+        assertEquals("$5M", pump.targetLabel)
+        assertNull(pump.progressLabel)
     }
 
     @Test

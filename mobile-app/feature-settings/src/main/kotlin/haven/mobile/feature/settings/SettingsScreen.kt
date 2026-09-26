@@ -1,5 +1,6 @@
 package haven.mobile.feature.settings
 
+import haven.mobile.core.cache.AUTOMATIC_QUOTA
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -171,16 +172,39 @@ fun SettingsScreen(
                     Spacer(Modifier.height(HavenSpacing.lg))
                 }
 
-                SettingSliderRow(
-                    title = "Cache limit",
-                    valueLabel = "${"%.1f".format(quotaGiB ?: state.quotaBytes.toGiB())} GiB",
-                    value = quotaGiB ?: state.quotaBytes.toGiB(),
-                    range = MIN_QUOTA_GIB..MAX_QUOTA_GIB,
-                    supporting = "Hard cap on cached content for this wallet.",
-                    onValueChange = { quotaGiB = it },
-                    onValueChangeFinished = {
-                        quotaGiB?.let { viewModel.setQuotaBytes(it.gibToBytes()) }
+                val automatic = state.quotaBytes == AUTOMATIC_QUOTA
+                SettingSwitchRow(
+                    title = "Size automatically",
+                    supporting = "Uses up to half of the free space, between 0.5 and 16 GB.",
+                    checked = automatic,
+                    onCheckedChange = { enabled ->
+                        quotaGiB = null
+                        viewModel.setAutomaticQuota(enabled)
                     },
+                )
+                if (!automatic) {
+                    Spacer(Modifier.height(HavenSpacing.md))
+                    SettingSliderRow(
+                        title = "Cache limit",
+                        valueLabel = "${"%.1f".format(quotaGiB ?: state.quotaBytes.toGiB())} GiB",
+                        value = quotaGiB ?: state.quotaBytes.toGiB(),
+                        range = MIN_QUOTA_GIB..MAX_QUOTA_GIB,
+                        supporting = "Hard cap on cached content for this wallet.",
+                        onValueChange = { quotaGiB = it },
+                        onValueChangeFinished = {
+                            quotaGiB?.let { viewModel.setQuotaBytes(it.gibToBytes()) }
+                        },
+                    )
+                }
+                Spacer(Modifier.height(HavenSpacing.md))
+                SettingSwitchRow(
+                    title = "Keep unlocked content on this device",
+                    supporting = "Gated items are saved decrypted the first time you open them, so " +
+                        "they open again without an unlock or a connection. Saved items stay " +
+                        "playable even if you later no longer meet the gate. Turning this off " +
+                        "deletes them.",
+                    checked = state.keepUnlocked,
+                    onCheckedChange = viewModel::setKeepUnlocked,
                 )
                 Spacer(Modifier.height(HavenSpacing.md))
                 SettingSliderRow(

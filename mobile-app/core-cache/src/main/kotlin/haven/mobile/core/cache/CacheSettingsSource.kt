@@ -14,6 +14,16 @@ import kotlinx.coroutines.flow.Flow
  * built from static defaults, so the two controls in Settings did nothing at all.
  */
 interface CacheSettingsSource {
+    /** Bytes, or [AUTOMATIC_QUOTA] to let foc size the cache from free space. */
     val quotaBytes: Flow<Long>
     val ttlDays: Flow<Int>
+
+    /**
+     * "Keep unlocked content on this device": gated pieces are stored decrypted (see
+     * `decryptOnStore`) instead of as ciphertext. Off by default.
+     */
+    val keepUnlocked: Flow<Boolean>
 }
+
+/** [CacheSettingsSource.quotaBytes] value meaning "size automatically" (foc `AutoQuota`). */
+const val AUTOMATIC_QUOTA: Long = 0L

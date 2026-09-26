@@ -43,6 +43,7 @@ class SettingsBackedCacheSettings @Inject constructor(
 ) : CacheSettingsSource {
     override val quotaBytes: Flow<Long> get() = settingsRepository.cacheQuotaBytes
     override val ttlDays: Flow<Int> get() = settingsRepository.cacheTtlDays
+    override val keepUnlocked: Flow<Boolean> get() = settingsRepository.keepUnlocked
 }
 
 @Module

@@ -144,6 +144,19 @@ sealed class HavenError(
         override val cause: Throwable? = null
     ) : HavenError("CONNECT_FAILED", message, cause)
 
+    /**
+     * gate_type 4: the gate token's market cap has not reached this drip stage's target yet.
+     * Both values in whole reserve units (whole ETH for native-reserve Bond tokens), as the
+     * canister reports them in `#MarketCapNotReached`. Not a wallet or access problem —
+     * the stage opens for every holder once the community pumps the token.
+     */
+    class MarketCapNotReached(
+        val required: java.math.BigInteger,
+        val actual: java.math.BigInteger,
+        override val message: String = "This premiere unlocks when the gate token's market cap reaches its target.",
+        override val cause: Throwable? = null
+    ) : HavenError("MARKET_CAP_NOT_REACHED", message, cause)
+
     // Mirrors internal error from cache-errors.ts
     class Internal(
         override val message: String,

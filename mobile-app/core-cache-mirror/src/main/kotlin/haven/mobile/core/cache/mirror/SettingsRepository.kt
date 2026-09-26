@@ -4,9 +4,13 @@ import haven.mobile.core.domain.HavenChain
 import kotlinx.coroutines.flow.Flow
 
 interface SettingsRepository {
+    /** Bytes, or `AUTOMATIC_QUOTA` (0) for "size automatically" — the default. */
     val cacheQuotaBytes: Flow<Long>
     val cacheTtlDays: Flow<Int>
     val clearOnDisconnect: Flow<Boolean>
+
+    /** Store gated content decrypted so it opens without a key or network. Off by default. */
+    val keepUnlocked: Flow<Boolean>
 
     /**
      * Which of Haven-AOL's chains to check for access.
@@ -23,5 +27,6 @@ interface SettingsRepository {
     suspend fun setCacheQuotaBytes(bytes: Long)
     suspend fun setCacheTtlDays(days: Int)
     suspend fun setClearOnDisconnect(enabled: Boolean)
+    suspend fun setKeepUnlocked(enabled: Boolean)
     suspend fun setEnabledChains(chains: Set<HavenChain>)
 }

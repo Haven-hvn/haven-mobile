@@ -563,10 +563,18 @@ internal fun jsonFromGateMetadata(metadata: GateMetadata): String {
             obj.put("chain", metadata.chain)
             obj.put("tokenAddress", metadata.tokenAddress)
             obj.put("threshold", metadata.threshold)
+            metadata.epoch?.let { obj.put("epoch", it) }
+            metadata.marketCapTarget?.let { obj.put("marketCapTarget", it) }
+            if (metadata.oracleAddress.isNotEmpty()) obj.put("oracleAddress", metadata.oracleAddress)
+            metadata.attributeGateType?.let { obj.put("attributeGateType", it) }
         }
     }
     return obj.toString()
 }
+
+/** Absent, null or negative -> null; 0 is a value (threshold-zero epochs, zero targets). */
+private fun JSONObject.optNatOrNull(key: String): Long? =
+    if (has(key) && !isNull(key)) optLong(key, -1).takeIf { it >= 0 } else null
 
 internal fun parseGateMetadata(json: String): GateMetadata {
     val obj = JSONObject(json)
@@ -594,6 +602,10 @@ internal fun parseGateMetadata(json: String): GateMetadata {
             chain = obj.optString("chain", ""),
             tokenAddress = obj.optString("tokenAddress", ""),
             threshold = obj.optString("threshold", ""),
+            epoch = obj.optNatOrNull("epoch"),
+            marketCapTarget = obj.optNatOrNull("marketCapTarget"),
+            oracleAddress = obj.optString("oracleAddress", ""),
+            attributeGateType = obj.optNatOrNull("attributeGateType"),
         )
     } else {
         GateMetadata.V1(

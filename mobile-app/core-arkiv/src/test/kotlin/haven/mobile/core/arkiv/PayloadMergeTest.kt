@@ -25,7 +25,7 @@ class PayloadMergeTest {
         JSONObject().put("name", name).put("type", type).put("value", value)
 
     /** The real `tiny` upload shape: gates in attributes, locators and sealed gates in payload. */
-    private fun tinyRow(payloadJson: String): JSONObject = JSONObject()
+    private fun tinyRow(payloadJson: String, gateType: Int = 1): JSONObject = JSONObject()
         .put("key", "0x" + "ab".repeat(32))
         .put("owner", "0xOwner")
         .put("creator", "0xOwner")
@@ -42,7 +42,7 @@ class PayloadMergeTest {
                 .put(attr("gate_chain", "i32", 11155111))
                 .put(attr("gate_token", "str", "0xtoken"))
                 .put(attr("gate_threshold", "i32", 1))
-                .put(attr("gate_type", "i32", 1))
+                .put(attr("gate_type", "i32", gateType))
                 .put(attr("grp", "str", "haven.video.full"))
                 .put(attr("sha256_ct", "str", "abc123")),
         )
@@ -63,8 +63,8 @@ class PayloadMergeTest {
         .put("cid_gate", sealedGate())
         .toString()
 
-    private fun normalizedOf(payloadJson: String) = with(client) {
-        normalizeRpcEntity(tinyRow(payloadJson))
+    private fun normalizedOf(payloadJson: String, gateType: Int = 1) = with(client) {
+        normalizeRpcEntity(tinyRow(payloadJson, gateType))
     }
 
     @Test
@@ -87,6 +87,72 @@ class PayloadMergeTest {
         assertEquals("1", gate.threshold)
         assertTrue(item.cidEncryptionMetadata is GateMetadata.Sealed, "cid layer sealed too")
         assertEquals("eip155:11155111", item.gate?.chain)
+    }
+
+    @Test
+    fun `v3 sealed gate keeps its epoch, including epoch zero`() {
+        // Byte shape of haven-aol `build_gate_metadata_v3` (field order pinned there).
+        fun v3Gate(threshold: String, epoch: Int) = JSONObject()
+            .put("version", 3)
+            .put("cid", "bafkpiece")
+            .put("chain", "EthSepolia")
+            .put("tokenAddress", "0xtoken")
+            .put("threshold", threshold)
+            .put("epoch", epoch)
+            .put("encryptedAesKey", "SEALEDKEY")
+            .toString()
+        fun gateOf(threshold: String, epoch: Int): GateMetadata.Sealed {
+            val payload = JSONObject().put("piece", "bafkpiece").put("gate", v3Gate(threshold, epoch)).toString()
+            val item = with(client) { normalizedOf(payload, gateType = 3).toMediaItem() }
+            return item.encryptionMetadata as? GateMetadata.Sealed
+                ?: throw AssertionError("expected Sealed, got ${item.encryptionMetadata}")
+        }
+
+        val gate = gateOf("1", 680)
+        assertEquals(3L, gate.version)
+        assertEquals(680L, gate.epoch)
+        assertEquals("1", gate.threshold)
+        assertEquals(0L, gateOf("0", 0).epoch, "epoch 0 is a value, not absence")
+        assertEquals(3L, gate.attributeGateType)
+        assertEquals(false, gate.gateTypeConflict)
+        assertEquals(null, with(client) { normalizedOf(tinyPayload()).toMediaItem() }
+            .let { (it.encryptionMetadata as GateMetadata.Sealed).epoch }, "v1 seals carry no epoch")
+    }
+
+    @Test
+    fun `v4 drip gate keeps its reserve target and oracle`() {
+        // Byte shape of haven-aol `build_gate_metadata_v4`.
+        val v4Gate = JSONObject()
+            .put("version", 4)
+            .put("cid", "bafkpiece")
+            .put("chain", "BaseMainnet")
+            .put("tokenAddress", "0xtoken")
+            .put("threshold", "5")
+            .put("epoch", 670)
+            .put("marketCapTarget", 12)
+            .put("oracleAddress", "0xbond")
+            .put("encryptedAesKey", "SEALEDKEY")
+            .toString()
+        val payload = JSONObject().put("piece", "bafkpiece").put("gate", v4Gate).toString()
+        val gate = with(client) { normalizedOf(payload, gateType = 4).toMediaItem() }.encryptionMetadata
+            as? GateMetadata.Sealed ?: throw AssertionError("v4 drips are sealed records")
+
+        assertEquals(4L, gate.version)
+        assertTrue(gate.isMarketCapDrip)
+        assertEquals(12L, gate.marketCapTarget)
+        assertEquals("0xbond", gate.oracleAddress)
+        assertEquals(670L, gate.epoch)
+        assertEquals(false, gate.gateTypeConflict)
+    }
+
+    @Test
+    fun `gate_type attribute that disagrees with the gate version is flagged`() {
+        // tinyPayload() carries v1 seals; the row claims gate_type 3.
+        val gate = with(client) { normalizedOf(tinyPayload(), gateType = 3).toMediaItem() }.encryptionMetadata
+            as GateMetadata.Sealed
+
+        assertEquals(3L, gate.attributeGateType)
+        assertTrue(gate.gateTypeConflict)
     }
 
     @Test

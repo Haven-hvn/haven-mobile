@@ -137,13 +137,16 @@ fun WatchScreen(
 
             is WatchUiState.Ready -> {
                 val media = state.item
-                val pump = media.dripPump()
+                val locked = state.content as? ContentState.LockedDrip
+                // Method 4 (gate_type 4): the chunk unlocks collectively when the gate token is
+                // pumped to its market-cap target. Sealed v4 stages go through the normal unlock
+                // (which checks the live cap before any signature) and show this sheet only while
+                // locked; legacy V4 shapes can never decrypt, so they always show it.
+                val pump = media.dripPump(current = locked?.actual)
+                    ?.takeIf { !it.unlockable || locked != null }
                 val walletAddress by viewModel.walletSession.address.collectAsState()
 
                 if (pump != null) {
-                    // Method 4 (gate_type 4): the chunk unlocks collectively when the gate
-                    // token is pumped to its market-cap target. Say so up front with the
-                    // buy link — never send viewers into a decrypt that cannot succeed.
                     DripPumpScreen(
                         media = media,
                         pump = pump,
@@ -179,6 +182,16 @@ fun WatchScreen(
                         is ContentState.Working -> ProgressBlock(
                             label = content.stage.label,
                             progress = content.progress,
+                        )
+
+                        // Only reachable when the item has no drip facts to show the sheet with.
+                        is ContentState.LockedDrip -> ErrorState(
+                            title = "Not unlocked yet",
+                            message = "This premiere opens when its gate token's market cap " +
+                                "reaches ${content.required} ETH (now ${content.actual} ETH).",
+                            code = "MARKET_CAP_NOT_REACHED",
+                            details = null,
+                            onRetry = { viewModel.retry(media) },
                         )
 
                         is ContentState.Failed -> ErrorState(

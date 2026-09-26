@@ -43,5 +43,32 @@ sealed interface GateMetadata {
         val tokenAddress: String = "",
         /** Gate record `threshold` verbatim; normalized to a positive integer at unwrap time. */
         val threshold: String = "",
-    ) : GateMetadata
+        /**
+         * Gate record `epoch` (v3 per-epoch seals, 30-day buckets). Null when the record has
+         * none — v1 seals never do. 0 is a real value (threshold-zero gates pin epoch 0).
+         */
+        val epoch: Long? = null,
+        /**
+         * v4 drip seals: unlock target in WHOLE RESERVE UNITS of the gate token's Bond curve
+         * (whole ETH for native-reserve tokens) — not USD. Part of the key derivation, so each
+         * drip stage is its own unlock. Null on v1/v3 seals.
+         */
+        val marketCapTarget: Long? = null,
+        /** v4 drip seals: the chain's Bond contract the canister prices the curve with. */
+        val oracleAddress: String = "",
+        /**
+         * The entity's `gate_type` attribute (1|3|4), when present. It must agree with
+         * [version]; a disagreement means a malformed or tampered record and unlocks fail
+         * closed. Null when the entity carries no attribute (older writers).
+         */
+        val attributeGateType: Long? = null,
+    ) : GateMetadata {
+        /** True when the entity's `gate_type` attribute contradicts the gate JSON version. */
+        val gateTypeConflict: Boolean
+            get() = attributeGateType != null && attributeGateType != version
+
+        /** A v4 drip stage: unlocks once the gate token's market cap reaches [marketCapTarget]. */
+        val isMarketCapDrip: Boolean
+            get() = version == 4L
+    }
 }

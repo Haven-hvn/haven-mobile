@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.MediaRepository
+import haven.mobile.core.crypto.HavenCipher
+import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.domain.ContentCacheStatus
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
@@ -97,6 +99,7 @@ class LibraryViewModel @Inject constructor(
     private val walletSession: WalletSession,
     private val havenAol: HavenAol,
     private val havenCache: HavenCache,
+    private val havenCipher: HavenCipher,
     private val hiddenItems: HiddenItemsStore,
 ) : ViewModel() {
 
@@ -379,6 +382,9 @@ class LibraryViewModel @Inject constructor(
      * Keys first (one `decryptAll`, one signature per gate — the session cache keeps
      * them), then each piece fetches into the device cache. An item whose key fails
      * is counted failed without spending bandwidth on ciphertext it could not open.
+     *
+     * With "Keep unlocked content on this device" on, gated pieces are stored decrypted
+     * with the key just fetched, so they later open with no unlock at all.
      */
     fun downloadSelected(visible: List<MediaItem>) {
         val targets = selectionTargets(visible, selectedIds.value).filter { it.pieceRef != null }
@@ -386,6 +392,8 @@ class LibraryViewModel @Inject constructor(
         if (walletSession.address.value == null) return
         viewModelScope.launch {
             val gated = targets.filter { it.isEncrypted }
+            val keepUnlocked = havenCache.storesUnlocked()
+            val keysById = mutableMapOf<String, ByteArray>()
             val keyOkById: Map<String, Boolean> = if (gated.isEmpty()) {
                 emptyMap()
             } else {
@@ -403,6 +411,9 @@ class LibraryViewModel @Inject constructor(
                 } catch (_: Exception) {
                     gated.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
                 }
+                gated.zip(keyResults).forEach { (item, result) ->
+                    result.getOrNull()?.let { keysById[item.id] = it }
+                }
                 gated.map { it.id }.zip(keyResults.map { it.isSuccess }).toMap()
             }
             var succeeded = 0
@@ -412,7 +423,14 @@ class LibraryViewModel @Inject constructor(
                 val ref = item.pieceRef
                 val fetched = if (ref != null && (keyOkById[item.id] ?: true)) {
                     try {
-                        havenCache.fetch(ref).isSuccess
+                        val key = keysById[item.id]
+                        if (keepUnlocked && item.isEncrypted) {
+                            // Every gated piece goes through the transform in this mode; without
+                            // a key it can't be stored decrypted, so it isn't stored at all.
+                            key != null && havenCache.file(ref, havenCipher.decryptOnStore(key = { key })).isSuccess
+                        } else {
+                            havenCache.fetch(ref).isSuccess
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
