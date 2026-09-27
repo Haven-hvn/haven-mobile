@@ -67,7 +67,7 @@ jobs:
         run: cargo test --locked
 
       - name: Build vetkeys native libraries
-        run: haven-mobile/mobile-app/tools/build-vetkeys-android.sh
+        run: bash haven-mobile/mobile-app/tools/build-vetkeys-android.sh
 
       - name: Run unit tests
         working-directory: haven-mobile/mobile-app
