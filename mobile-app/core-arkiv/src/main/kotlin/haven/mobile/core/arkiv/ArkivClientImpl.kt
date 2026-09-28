@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import timber.log.Timber
-
 import haven.mobile.core.domain.ArkivStatus
 import haven.mobile.core.domain.Attestation
 import haven.mobile.core.domain.Community
@@ -34,6 +33,17 @@ import haven.mobile.core.domain.selectLiveStages
 import haven.mobile.core.domain.TokenGate
 import haven.mobile.core.domain.TokenStandard
 import haven.mobile.core.domain.error.HavenError
+
+/**
+ * Haven groups that carry gate attributes (see dapp `arkiv-publish`). Audio has its
+ * own `haven.audio.full` generic-file group — an audio-only community's gate lives
+ * solely on those rows, so leaving them out hides the whole DAO from discovery.
+ * Flat `OR` chain exactly like the SDK renders `or(...)` — the language has no
+ * `||`, and parenthesised groups are untested against the node, so none are used.
+ * Internal so the discovery scan it drives pins without touching the network.
+ */
+internal const val HAVEN_GROUPS_QUERY =
+    "grp = str('haven.video.full') OR grp = str('haven.video.drip.series') OR grp = str('haven.video.drip.part') OR grp = str('haven.audio.full')"
 
 @Singleton
 class ArkivClientImpl @Inject constructor(
@@ -415,7 +425,7 @@ class ArkivClientImpl @Inject constructor(
                 var cursor: String? = null
                 var pages = 0
                 do {
-                    val (items, next, head) = queryPage(VIDEO_GROUPS_QUERY, SCAN_PAGE_SIZE, cursor)
+                    val (items, next, head) = queryPage(HAVEN_GROUPS_QUERY, SCAN_PAGE_SIZE, cursor)
                     for (item in items) {
                         val media = runCatching { item.toMediaItem() }.getOrNull() ?: continue
                         if (isExpired(media.expiresAtBlock, head)) continue
@@ -483,13 +493,8 @@ class ArkivClientImpl @Inject constructor(
         const val SERIES_LOOKUP_LIMIT = 5
         /** Sanity bound for `drip_idx`; anything past it is corrupt, not a late stage. */
         const val MAX_DRIP_INDEX = 100_000L
-        /**
-         * Haven video groups that carry gate attributes (see dapp `arkiv-publish`).
-         * Flat `OR` chain exactly like the SDK renders `or(...)` — the language has no
-         * `||`, and parenthesised groups are untested against the node, so none are used.
-         */
-        const val VIDEO_GROUPS_QUERY =
-            "grp = str('haven.video.full') OR grp = str('haven.video.drip.series') OR grp = str('haven.video.drip.part')"
+        // HAVEN_GROUPS_QUERY lives at file scope: internal so the discovery scan it
+        // drives pins without touching the network (see GateDiscoveryTest).
     }
 
     override suspend fun discoverUserCommunities(address: String): Result<List<Community>> {

@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -58,6 +59,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -106,6 +109,7 @@ fun WatchScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val chapters by viewModel.chapters.collectAsState()
 
     LaunchedEffect(itemId) { viewModel.open(itemId) }
 
@@ -216,6 +220,7 @@ fun WatchScreen(
                                 aspect = null,
                                 walletAddress = walletAddress,
                                 diagnostics = diagnostics,
+                                chapters = chapters,
                             )
                             MediaKind.IMAGE -> ImageViewer(
                                 media = media,
@@ -265,8 +270,13 @@ private fun PlayerViewer(
     aspect: Float?,
     walletAddress: String? = null,
     diagnostics: List<String> = emptyList(),
+    chapters: List<AudioChapter> = emptyList(),
 ) {
     val controller by rememberPlaybackController(file)
+    // The chapter highlight follows the same position snapshot as the mini bar's progress
+    // edge — one poll, two readers — so the list never disagrees with the bar.
+    val progress = rememberPlaybackProgress(controller)
+    val currentChapter = chapterIndexAt(chapters, progress.positionMs)
 
     // Video floats over whatever the user opens next; audio does not need a window, it just keeps
     // playing through the service.
@@ -312,6 +322,77 @@ private fun PlayerViewer(
             }
         }
         MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
+        if (media.kind == MediaKind.AUDIO && chapters.isNotEmpty()) {
+            ChapterList(
+                chapters = chapters,
+                currentIndex = currentChapter,
+                onSeek = { startMs -> controller?.seekTo(startMs) },
+            )
+        }
+    }
+}
+
+/**
+ * Track list for a merged single-file album, from the file's own ID3 chapters. A plain
+ * `Column`, not lazy: albums hold a handful of tracks, and this lives inside the viewer's
+ * scroll — a nested lazy list would fight it for gestures. Tapping a row seeks the
+ * service player, so the list steers the same playback the mini bar mirrors.
+ */
+@Composable
+private fun ChapterList(
+    chapters: List<AudioChapter>,
+    currentIndex: Int,
+    onSeek: (Long) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HavenSpacing.gutter),
+    ) {
+        Spacer(Modifier.height(HavenSpacing.md))
+        Text(
+            text = "Tracks",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(HavenSpacing.xs))
+        chapters.forEachIndexed { index, chapter ->
+            val current = index == currentIndex
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSeek(chapter.startMs) }
+                    .padding(vertical = HavenSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = formatPlaybackTime(chapter.startMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(HavenSpacing.md))
+                Text(
+                    text = chapter.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (current) FontWeight.Bold else null,
+                    color = if (current) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (index < chapters.lastIndex) {
+                HorizontalDivider(
+                    thickness = HavenSpacing.hairline,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+        }
+        Spacer(Modifier.height(HavenSpacing.md))
     }
 }
 

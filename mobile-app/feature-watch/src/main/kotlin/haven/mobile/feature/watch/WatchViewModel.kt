@@ -124,6 +124,15 @@ class WatchViewModel @Inject constructor(
     private val content = MutableStateFlow<ContentState>(ContentState.Idle)
 
     /**
+     * Cue points of the staged audio: one entry per track of a merged single-file album,
+     * parsed from the file's own ID3 chapters at staging. Empty for video (which has no
+     * chapter track in this sense) and for audio without embedded chapters — the viewer
+     * simply shows no track list. Published alongside [ContentState.Ready].
+     */
+    private val _chapters = MutableStateFlow<List<AudioChapter>>(emptyList())
+    val chapters: StateFlow<List<AudioChapter>> = _chapters
+
+    /**
      * In-app diagnostics trail: every pipeline transition, newest last, capped.
      * Rendered under the failure screen so a report needs no adb — logcat
      * gets the same lines via [logStage].
@@ -150,6 +159,7 @@ class WatchViewModel @Inject constructor(
         if (itemId.value == id) return
         itemId.value = id
         content.value = ContentState.Idle
+        _chapters.value = emptyList()
         viewModelScope.launch { mediaRepository.refreshItem(id) }
     }
 
@@ -396,6 +406,16 @@ class WatchViewModel @Inject constructor(
      * only after the viewer has drawn it.
      */
     private fun markReady(media: MediaItem, file: File): Result<File> {
+        // Cue points ride out of staging with the file, same moment as the cover art: the
+        // read is bounded to the ID3 tag region, so it costs one small sequential read even
+        // on a full-album file. Parsed once per item — a new open resets [chapters] first.
+        _chapters.value = if (media.kind == MediaKind.AUDIO) {
+            readId3Chapters(file).also { chapters ->
+                logStage("chapters id=${media.id} n=${chapters.size}")
+            }
+        } else {
+            emptyList()
+        }
         if (media.kind == MediaKind.VIDEO || media.kind == MediaKind.AUDIO) {
             // Cover art comes out of the media itself: an MP3 with an embedded picture
             // (ID3 APIC) publishes its cache path with the track, and the bar renders it.
