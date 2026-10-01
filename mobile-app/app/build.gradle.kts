@@ -48,9 +48,19 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // Required by io.github.haven-hvn:foc-cache:0.2.0 (declares core library
+    // desugaring in its AAR metadata). Source/target compat comes from the
+    // haven.android.application convention plugin; only the flag is set here.
+    compileOptions {
+        isCoreLibraryDesugaringEnabled = true
+    }
 }
 
 dependencies {
+    // Matches foc-cache's desugar_jdk_libs version for a single desugared core set.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
     // The app hosts the Hilt component, so it aggregates every @Module on the classpath and its
     // generated code references the bound types by name. Those types therefore have to be on this
     // module's compile classpath — including the ones the app never touches itself (the cache
