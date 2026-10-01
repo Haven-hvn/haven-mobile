@@ -21,17 +21,6 @@ jobs:
         with:
           path: haven-mobile
 
-      # Temporary: foc-cache 0.2.0 is not on Maven Central yet. Builds it from
-      # source at a pinned commit and publishes to Maven Local, which
-      # settings.gradle.kts resolves via mavenLocal(). Remove this checkout,
-      # the ephemeral GPG key, and the publish step once 0.2.0 is published.
-      - name: Checkout foc-local-first-android
-        uses: actions/checkout@v4
-        with:
-          repository: Haven-hvn/foc-local-first-android
-          ref: 2585ba1af419470113c19c4c5872a2590d549457
-          path: foc-local-first-android
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -43,7 +32,7 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Grant execute permission for gradlew
-        run: chmod +x haven-mobile/mobile-app/gradlew foc-local-first-android/gradlew
+        run: chmod +x haven-mobile/mobile-app/gradlew
 
       - name: Patch heap for CI (override 768m low-end host setting)
         run: echo "org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8" >> haven-mobile/mobile-app/gradle.properties && cat haven-mobile/mobile-app/gradle.properties
@@ -58,15 +47,6 @@ jobs:
           arkiv.endpointUrl=https://rpc.tiramisu.db-chain.testnet.arkiv.network
           EOF
           cat haven-mobile/mobile-app/local.properties
-
-      - name: Generate ephemeral GPG key (foc mavenLocal signing)
-        run: |
-          gpg --batch --passphrase '' --quick-generate-key "ci@localhost" default default 0
-          gpg --list-secret-keys | head -n 5
-
-      - name: Publish foc-cache to Maven Local
-        working-directory: foc-local-first-android
-        run: ./gradlew :foc-cache:publishToMavenLocal
 
       - name: Install Android NDK (vetkeys native library)
         run: |
