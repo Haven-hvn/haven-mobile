@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
@@ -63,6 +64,69 @@ fun rememberDecodedArtwork(file: File?, targetPx: Int): Bitmap? {
         value = withContext(Dispatchers.IO) { decodeArtworkFile(file, targetPx) }
     }
     return art
+}
+
+/** Cover art plus the color the glass around it should reflect. */
+data class ArtworkVisual(val bitmap: Bitmap, val dominant: Color?)
+
+/**
+ * [ArtworkVisual] for [file], or null when the slot is empty or undecodable. Decode and
+ * pixel sampling both run off-main; the bitmap is already downsampled, so the sampled
+ * pixels are thousands, not millions.
+ */
+@Composable
+fun rememberArtworkVisual(file: File?, targetPx: Int): ArtworkVisual? {
+    val visual by produceState<ArtworkVisual?>(initialValue = null, file, targetPx) {
+        value = withContext(Dispatchers.IO) {
+            val bitmap = decodeArtworkFile(file, targetPx) ?: return@withContext null
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            ArtworkVisual(bitmap, dominantColor(pixels))
+        }
+    }
+    return visual
+}
+
+/**
+ * Most frequent quantized color in [pixels] (packed ARGB), or null when there is nothing
+ * opaque to read. Buckets are 3 bits per channel: tight enough to track the cover's mood,
+ * coarse enough that JPEG noise votes together. Pure so the math stays unit-tested.
+ */
+fun dominantColor(pixels: IntArray): Color? {
+    val buckets = IntArray(512)
+    var counted = 0
+    for (pixel in pixels) {
+        if ((pixel ushr 24) < 128) continue
+        val bucket = (((pixel shr 16) and 0xFF) shr 5) shl 6 or
+            ((((pixel shr 8) and 0xFF) shr 5) shl 3) or
+            ((pixel and 0xFF) shr 5)
+        buckets[bucket]++
+        counted++
+    }
+    if (counted == 0) return null
+    var best = 0
+    for (i in 1 until buckets.size) {
+        if (buckets[i] > buckets[best]) best = i
+    }
+    // Bucket centers: bucket b spans [b*32, b*32+31], so b*32+16 stays in range.
+    val r = ((best shr 6) and 0x07) * 32 + 16
+    val g = ((best shr 3) and 0x07) * 32 + 16
+    val b = (best and 0x07) * 32 + 16
+    return Color(r, g, b)
+}
+
+/**
+ * Opaque base for the glass scrim behind card text: the cover's own color, darkened for
+ * contrast. Null (no art) falls back to neutral black so the same glass layout works
+ * over the glyph plate.
+ */
+fun scrimBase(dominant: Color?): Color {
+    val source = dominant ?: Color.Black
+    return Color(
+        red = (source.red * 0.42f).coerceIn(0f, 1f),
+        green = (source.green * 0.42f).coerceIn(0f, 1f),
+        blue = (source.blue * 0.42f).coerceIn(0f, 1f),
+    )
 }
 
 /** Two-pass file decode: measure, pick a power-of-two sample size, then decode at that size. */

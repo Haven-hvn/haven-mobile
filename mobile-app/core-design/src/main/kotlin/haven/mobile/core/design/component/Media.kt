@@ -3,6 +3,7 @@ package haven.mobile.core.design.component
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.semantics
@@ -41,10 +45,11 @@ import java.io.File
  * The two ways a `MediaItem` is presented. Library and Community render the same object, so they
  * render it the same way — a list row and a grid card, defined once here.
  *
- * Both carry what a reader can act on: what it is, how big, how recent, and whether it will open
- * without a connection. The optional `caption` line carries the library wording
- * (`My contribution · Members`, see `LibraryLabels`). **No piece CIDs, no owner addresses,
- * no chain names.** Those are storage
+ * The row carries what a reader can act on: what it is, how big, how recent, and whether it
+ * will open without a connection. The card is the visual layout — full-bleed art, glass
+ * title strip, status chips — with the facts left to the row. The optional `caption` line
+ * carries the library wording (`My contribution · Members`, see `LibraryLabels`).
+ * **No piece CIDs, no owner addresses, no chain names.** Those are storage
  * internals; an earlier revision printed a `bafkzcib…` hash under every title, which made a media
  * library read like a debugging console. Identifiers live behind a details affordance on the
  * viewer, for the rare moment somebody genuinely needs one.
@@ -137,10 +142,16 @@ fun MediaRow(
 }
 
 /**
- * Grid card. A plate for the kind, then title and the same summary line.
+ * Grid card. Full-bleed square art with a glass title strip over the bottom edge — the grid
+ * is the visual layout, so the face carries the title and status chips only, and the list
+ * row keeps the caption, summary line, and full facts.
  *
- * `selected` mirrors the row: a non-null value overlays a checkbox on the plate while
- * the card itself stays the single tap target.
+ * The glass reflects the cover: its scrim is a gradient of the artwork's own dominant
+ * color, darkened for contrast, so each card is tinted by its album. Items without art
+ * get the same layout over the kind plate with a neutral scrim.
+ *
+ * `selected` mirrors the row: a non-null value overlays a checkbox while the card itself
+ * stays the single tap target.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -150,13 +161,11 @@ fun MediaCard(
     modifier: Modifier = Modifier,
     attestation: AttestationState? = null,
     selected: Boolean? = null,
-    /** Library caption (`My contribution · Members`); null hides it. */
-    caption: String? = null,
     /** Long-press action (library: enters selection with the item checked); null disables. */
     onLongClick: (() -> Unit)? = null,
     /** True once the unlock key is held — shows the Unlocked chip. */
     keyReady: Boolean = false,
-    /** Extracted cover-art slot file; null (or an empty slot) falls back to the kind icon. */
+    /** Extracted cover-art slot file; null (or an empty slot) falls back to the kind plate. */
     artworkFile: File? = null,
 ) {
     val pressModifier = if (onLongClick != null) {
@@ -173,87 +182,86 @@ fun MediaCard(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(HavenSpacing.hairline, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+        ) {
+            val visual = rememberArtworkVisual(artworkFile, ARTWORK_CARD_TARGET_PX)
+            val art = visual?.bitmap
+            if (art == null) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = item.kind.icon(),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                }
+            } else {
+                Image(
+                    bitmap = art.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // Glass: transparent at the top so the art shows through, settling into the
+            // cover's own darkened color behind the title.
+            val scrim = scrimBase(visual?.dominant)
             Box(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            ) {
-                val cardArt = rememberDecodedArtwork(artworkFile, ARTWORK_CARD_TARGET_PX)
-                if (cardArt == null) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = item.kind.icon(),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(26.dp),
-                            )
-                        }
-                    }
-                } else {
-                    Image(
-                        bitmap = cardArt.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
+                    .fillMaxHeight(0.44f)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, scrim.copy(alpha = 0.92f)),
+                        ),
                     )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(HavenSpacing.sm),
-                    contentAlignment = Alignment.TopEnd,
-                ) {
-                    CacheStatusChip(status = item.contentCacheStatus, compact = true)
-                }
-                if (selected != null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(HavenSpacing.xs),
-                        contentAlignment = Alignment.TopStart,
-                    ) {
-                        Checkbox(checked = selected, onCheckedChange = null)
-                    }
-                }
-            }
-            Column(modifier = Modifier.padding(HavenSpacing.md)) {
+                    .padding(HavenSpacing.md),
+                contentAlignment = Alignment.BottomStart,
+            ) {
                 Text(
                     text = item.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (caption != null) {
-                    Spacer(Modifier.height(HavenSpacing.xs))
-                    Text(
-                        text = caption,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(HavenSpacing.sm),
+                contentAlignment = Alignment.TopEnd,
+            ) {
+                CacheStatusChip(status = item.contentCacheStatus, compact = true)
+            }
+            // Selection wins the corner while it lasts; otherwise the status chips live here.
+            if (selected != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(HavenSpacing.xs),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    Checkbox(checked = selected, onCheckedChange = null)
                 }
-                Spacer(Modifier.height(HavenSpacing.xs))
-                Text(
-                    text = item.summaryLine(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (keyReady || attestation != null) {
-                    Spacer(Modifier.height(HavenSpacing.sm))
+            } else if (keyReady || attestation != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(HavenSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(HavenSpacing.xs),
+                ) {
                     if (keyReady) {
                         KeyStatusChip(compact = true)
-                    }
-                    if (keyReady && attestation != null) {
-                        Spacer(Modifier.height(HavenSpacing.xs))
                     }
                     if (attestation != null) {
                         AttestationBadge(state = attestation, compact = true)

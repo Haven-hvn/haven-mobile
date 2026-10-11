@@ -277,7 +277,6 @@ fun LibraryScreen(
                                 },
                                 onLongClick = { viewModel.checkItem(item.id) },
                                 selected = if (state.selecting) item.id in state.selectedIds else null,
-                                caption = item.captionLine(walletAddress),
                                 keyReady = item.id in state.keyReadyIds,
                                 artworkFile = artworkFileFor(LocalContext.current.cacheDir, item.id),
                             )
