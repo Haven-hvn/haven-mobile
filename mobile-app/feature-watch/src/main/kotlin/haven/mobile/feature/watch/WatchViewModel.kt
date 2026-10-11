@@ -16,6 +16,7 @@ import haven.mobile.core.crypto.HavenCipher
 import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.crypto.stripCarContainer
 import haven.mobile.core.domain.ContentCacheStatus
+import haven.mobile.core.domain.artworkFileFor
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.error.HavenError
@@ -251,7 +252,10 @@ class WatchViewModel @Inject constructor(
         // Ungated items have no key and nothing to decrypt — label the fetch
         // honestly instead of borrowing the decrypting copy.
         val fetchStage = if (contentKey != null) UnlockStage.STREAMING else UnlockStage.LOADING
-        content.value = ContentState.Working(fetchStage, progress = 0f)
+        // foc emits nothing until the piece is on disk, so the whole download happens
+        // before the first spool callback. Claim LOADING with no fraction until bytes
+        // actually move — a determinate 0% here would sit frozen for the entire fetch.
+        content.value = fetchStartedState()
 
         // Byte counters survive failure: a GCM bad_decrypt on full-length bytes means
         // the key is wrong, on short bytes means the fetch truncated — the trail must
@@ -273,13 +277,8 @@ class WatchViewModel @Inject constructor(
 
         val staged = plaintextSpool.write(piece.pieceCid, plaintext) { written ->
             plainBytes = written
-            // Progress is against the *declared* size. Plaintext is slightly smaller than
-            // ciphertext (GCM tags), so this can reach 100% a beat early — better than a bar that
-            // stalls at 97% because it was measuring the wrong thing.
-            val fraction = expectedBytes
-                ?.takeIf { it > 0 }
-                ?.let { (written.toFloat() / it.toFloat()).coerceIn(0f, 1f) }
-            content.value = ContentState.Working(fetchStage, fraction)
+            // First bytes on disk: the silent fetch is over, decrypting runs from here.
+            content.value = streamingState(fetchStage, expectedBytes, written)
         }
 
         staged.exceptionOrNull()?.let { throwable ->
@@ -326,19 +325,17 @@ class WatchViewModel @Inject constructor(
     private suspend fun stageUnlocked(media: MediaItem, piece: cloud.filecoin.foc.cache.PieceRef): Result<File> {
         val expectedBytes = media.sizeBytes ?: piece.size.takeIf { it > 0 }
         var keyFailure: Throwable? = null
-        content.value = ContentState.Working(
-            if (media.isEncrypted) UnlockStage.UNLOCKING else UnlockStage.LOADING,
-            progress = if (media.isEncrypted) null else 0f,
-        )
+        // The transform — and the key fetch inside it — runs after foc lands the piece,
+        // so the download phase is indeterminate LOADING, same as the locked path.
+        // acquireKey still publishes UNLOCKING when it genuinely runs.
+        content.value = fetchStartedState()
         val transform = if (!media.isEncrypted) null else havenCipher.decryptOnStore(
             key = {
                 acquireKey(media, piece).getOrElse { keyFailure = it; throw it }
-                    .also { content.value = ContentState.Working(UnlockStage.STREAMING, progress = 0f) }
+                    .also { content.value = streamingState(UnlockStage.STREAMING, expectedBytes, 0) }
             },
             onBytesWritten = { written ->
-                val fraction = expectedBytes?.takeIf { it > 0 }
-                    ?.let { (written.toFloat() / it.toFloat()).coerceIn(0f, 1f) }
-                content.value = ContentState.Working(UnlockStage.STREAMING, fraction)
+                content.value = streamingState(UnlockStage.STREAMING, expectedBytes, written)
             },
         )
         val file = havenCache.file(piece, transform).getOrElse { throwable ->

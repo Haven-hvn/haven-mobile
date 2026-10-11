@@ -1,7 +1,6 @@
 package haven.mobile.feature.watch
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -49,8 +48,12 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import haven.mobile.core.design.HavenSpacing
+import haven.mobile.core.design.component.ARTWORK_THUMB_TARGET_PX
 import haven.mobile.core.design.component.MediaKindGlyph
+import haven.mobile.core.design.component.decodeArtworkBytes
+import haven.mobile.core.design.component.decodeArtworkFile
 import haven.mobile.core.design.component.label
+import haven.mobile.core.domain.artworkFileFor
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -198,10 +201,10 @@ private fun MiniPlayerArtwork(track: NowPlayingTrack, player: Player?) {
     val playerArt = rememberPlayerArtwork(player)
     val bitmap by produceState<Bitmap?>(initialValue = null, track.artworkPath, playerArt) {
         value = withContext(Dispatchers.IO) {
-            decodeCachedArtwork(track.artworkPath)
+            decodeArtworkFile(track.artworkPath?.let(::File), ARTWORK_THUMB_TARGET_PX)
                 ?: playerArt?.let { bytes ->
                     persistPlayerArtwork(context.cacheDir, track.itemId, bytes)
-                    decodeArtworkBytes(bytes, ARTWORK_TARGET_PX)
+                    decodeArtworkBytes(bytes, ARTWORK_THUMB_TARGET_PX)
                 }
         }
     }
@@ -257,46 +260,6 @@ private fun persistPlayerArtwork(cacheDir: File, itemId: String, bytes: ByteArra
         }
         target
     }.getOrNull()
-
-/** Two-pass decode: measure, pick a power-of-two sample size, then decode at that size. */
-private fun decodeArtwork(file: File, targetPx: Int): Bitmap? {
-    if (!file.exists()) return null
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(file.absolutePath, bounds)
-    if (bounds.outWidth <= 0) return null
-    val options = BitmapFactory.Options().apply {
-        inSampleSize = sampleSizeFor(bounds.outWidth, targetPx)
-    }
-    return runCatching { BitmapFactory.decodeFile(file.absolutePath, options) }.getOrNull()
-}
-
-private fun decodeCachedArtwork(path: String?): Bitmap? =
-    if (path == null) null else decodeArtwork(File(path), ARTWORK_TARGET_PX)
-
-private fun decodeArtworkBytes(bytes: ByteArray, targetPx: Int): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0) return null
-    val options = BitmapFactory.Options().apply {
-        inSampleSize = sampleSizeFor(bounds.outWidth, targetPx)
-    }
-    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
-}
-
-/**
- * Largest power-of-two downsample keeping the width at or above [targetPx].
- * Pure so the memory math stays unit-tested without a device.
- */
-fun sampleSizeFor(sourceWidthPx: Int, targetPx: Int): Int {
-    if (sourceWidthPx <= 0 || targetPx <= 0) return 1
-    var sample = 1
-    while (sourceWidthPx / (sample * 2) >= targetPx) {
-        sample *= 2
-    }
-    return sample
-}
-
-private const val ARTWORK_TARGET_PX = 144
 
 private val MINI_PLAYER_HEIGHT = 64.dp
 private val PLAY_BUTTON_SIZE = 48.dp

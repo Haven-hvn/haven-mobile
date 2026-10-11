@@ -2,6 +2,7 @@ package haven.mobile.core.design.component
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,6 +35,7 @@ import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import java.io.File
 
 /**
  * The two ways a `MediaItem` is presented. Library and Community render the same object, so they
@@ -66,6 +70,8 @@ fun MediaRow(
     onLongClick: (() -> Unit)? = null,
     /** True once the unlock key is held — shows the Unlocked chip. */
     keyReady: Boolean = false,
+    /** Extracted cover-art slot file; null (or an empty slot) falls back to the kind glyph. */
+    artworkFile: File? = null,
 ) {
     val pressModifier = if (onLongClick != null) {
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -85,7 +91,7 @@ fun MediaRow(
             Checkbox(checked = selected, onCheckedChange = null)
             Spacer(Modifier.width(HavenSpacing.sm))
         }
-        MediaKindGlyph(kind = item.kind)
+        ArtworkImage(file = artworkFile, kind = item.kind)
         Spacer(Modifier.width(HavenSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -150,6 +156,8 @@ fun MediaCard(
     onLongClick: (() -> Unit)? = null,
     /** True once the unlock key is held — shows the Unlocked chip. */
     keyReady: Boolean = false,
+    /** Extracted cover-art slot file; null (or an empty slot) falls back to the kind icon. */
+    artworkFile: File? = null,
 ) {
     val pressModifier = if (onLongClick != null) {
         Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -171,18 +179,28 @@ fun MediaCard(
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f),
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = item.kind.icon(),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(26.dp),
-                        )
+                val cardArt = rememberDecodedArtwork(artworkFile, ARTWORK_CARD_TARGET_PX)
+                if (cardArt == null) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = item.kind.icon(),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
                     }
+                } else {
+                    Image(
+                        bitmap = cardArt.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
                 Box(
                     modifier = Modifier

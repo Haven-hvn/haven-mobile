@@ -46,6 +46,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -58,6 +59,7 @@ import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaCard
 import haven.mobile.core.design.component.MediaRow
+import haven.mobile.core.domain.artworkFileFor
 import haven.mobile.core.domain.captionLine
 
 /**
@@ -277,6 +279,7 @@ fun LibraryScreen(
                                 selected = if (state.selecting) item.id in state.selectedIds else null,
                                 caption = item.captionLine(walletAddress),
                                 keyReady = item.id in state.keyReadyIds,
+                                artworkFile = artworkFileFor(LocalContext.current.cacheDir, item.id),
                             )
                         }
                     }
@@ -297,6 +300,7 @@ fun LibraryScreen(
                                 selected = if (state.selecting) item.id in state.selectedIds else null,
                                 caption = item.captionLine(walletAddress),
                                 keyReady = item.id in state.keyReadyIds,
+                                artworkFile = artworkFileFor(LocalContext.current.cacheDir, item.id),
                             )
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = HavenSpacing.gutter),

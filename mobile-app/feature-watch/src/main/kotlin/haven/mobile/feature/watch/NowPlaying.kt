@@ -26,16 +26,6 @@ data class NowPlayingTrack(
 )
 
 /**
- * Cache slot for one item's extracted cover art. The id is sanitised — entity ids have
- * produced path-hostile characters before — so the art can never escape [cacheDir]'s
- * artwork corner. Pure so the mapping stays unit-tested without a device.
- */
-fun artworkFileFor(cacheDir: java.io.File, itemId: String): java.io.File {
-    val safe = itemId.map { c -> if (c.isLetterOrDigit() || c == '-' || c == '_') c else '_' }.joinToString("")
-    return java.io.File(java.io.File(cacheDir, "haven-artwork"), "$safe.jpg")
-}
-
-/**
  * Session-wide "what is playing", shared between the full viewer and the shell's mini bar.
  *
  * Published when audio/video content stages ([WatchViewModel] owns that moment); read by the

@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -44,6 +45,7 @@ import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaRow
 import haven.mobile.core.design.component.MonoIdentifier
+import haven.mobile.core.domain.artworkFileFor
 
 /**
  * Community feed.
@@ -165,6 +167,7 @@ fun CommunityScreen(
                                     item = item,
                                     onClick = { navController.navigate("watch/${item.id}") },
                                     attestation = state.attestations[item.id],
+                                    artworkFile = artworkFileFor(LocalContext.current.cacheDir, item.id),
                                 )
                                 Row(
                                     modifier = Modifier.padding(

@@ -11,4 +11,6 @@ dependencies {
     // Domain types leak into component signatures on purpose (MediaKind badge,
     // cache-status chip), so they are `api` rather than `implementation`.
     api(project(":core-domain"))
+    // Artwork slots decode off the composition thread (produceState + Dispatchers.IO).
+    implementation(libs.kotlinx.coroutines)
 }
