@@ -11,10 +11,14 @@ import kotlinx.coroutines.flow.flow
  * [key] is resolved lazily, only when foc actually has to fetch the piece, so a piece already on the
  * device costs nothing. Throwing from [key] (a refused unlock, a drip below target) aborts the fetch
  * and nothing is stored. [onBytesWritten] reports cumulative plaintext bytes for a progress bar.
+ * [onCarProgress] reports cumulative `(carBytesReceived, payloadBytesEmitted)` from the container
+ * strip so the UI can tell a slow fetch (received climbing) from a wedged pipeline
+ * (received climbing, emitted flat).
  */
 fun HavenCipher.decryptOnStore(
     key: suspend () -> ByteArray,
     onBytesWritten: (Long) -> Unit = {},
+    onCarProgress: ((received: Long, emitted: Long) -> Unit)? = null,
 ): PieceTransform = PieceTransform { _, input, output ->
     val contentKey = key()
     val ciphertext = flow {
@@ -26,7 +30,7 @@ fun HavenCipher.decryptOnStore(
         }
     }
     var written = 0L
-    decryptStream(contentKey, ciphertext.stripCarContainer(), null).collect { chunk ->
+    decryptStream(contentKey, ciphertext.stripCarContainer(onProgress = onCarProgress), null).collect { chunk ->
         output.write(chunk)
         written += chunk.size
         onBytesWritten(written)

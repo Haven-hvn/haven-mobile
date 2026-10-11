@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -42,6 +43,24 @@ class DecryptOnStoreTest {
         assertArrayEquals(plain, out.toByteArray())
         assertEquals(1, keyCalls)
         assertEquals(plain.size.toLong(), reported)
+    }
+
+    @Test
+    fun `car progress reports container bytes separately from payload`() = runBlocking {
+        val sealed = ByteArray(600_000) { (it % 251).toByte() }
+        val reports = mutableListOf<Pair<Long, Long>>()
+        val out = ByteArrayOutputStream()
+
+        XorCipher.decryptOnStore(
+            key = { byteArrayOf(0x42) },
+            onCarProgress = { received, emitted -> reports += received to emitted },
+        ).transform(ref, ByteArrayInputStream(sealed), out)
+
+        // Raw (non-CAR) input passes through, so received tracks emitted.
+        assertTrue(reports.isNotEmpty())
+        val (lastReceived, lastEmitted) = reports.last()
+        assertEquals(sealed.size.toLong(), lastReceived)
+        assertEquals(sealed.size.toLong(), lastEmitted)
     }
 
     @Test
