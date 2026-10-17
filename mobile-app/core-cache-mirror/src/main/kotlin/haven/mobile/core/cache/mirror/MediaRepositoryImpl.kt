@@ -204,14 +204,21 @@ class MediaRepositoryImpl @Inject constructor(
                     unreachableCauseOrNull(openable.size, ownItems.size, failures)?.let {
                         return@withContext Result.failure(it)
                     }
+                    // A clean refresh that finds nothing accessible means access
+                    // was sold/revoked (or never held): prune the mirror so the
+                    // library does not keep listing content that will only fail
+                    // at decrypt time.
+                    if (failures.isEmpty()) getDatabase().mediaDao().deleteAll()
                     return@withContext Result.success(Unit)
                 }
 
                 var reached = 0
                 var lastFailure: Throwable? = null
+                val fetchedIds = mutableSetOf<String>()
 
                 if (ownItems.isNotEmpty()) {
                     persist(ownItems, walletAddress)
+                    fetchedIds += ownItems.map { it.id }
                     reached++
                 }
 
@@ -228,6 +235,7 @@ class MediaRepositoryImpl @Inject constructor(
                         }
 
                         persist(page.items, walletAddress)
+                        fetchedIds += page.items.map { it.id }
                         cursor = page.nextCursor
                     } while (cursor != null)
                     reached++
@@ -238,6 +246,14 @@ class MediaRepositoryImpl @Inject constructor(
                     Result.failure(lastFailure!!)
                 } else {
                     lastFailure?.let { Timber.w(it, "refreshAccessible: some community pages failed") }
+                    // Prune only on a fully clean refresh: any failure leaves the
+                    // old mirror intact rather than mistaking an outage for
+                    // revoked access.
+                    if (failures.isEmpty() && lastFailure == null) {
+                        val dao = getDatabase().mediaDao()
+                        val stale = staleMirrorIds(dao.getAllIds(), fetchedIds)
+                        if (stale.isNotEmpty()) dao.deleteByIds(stale)
+                    }
                     Result.success(Unit)
                 }
             } catch (e: HavenError) {
@@ -520,6 +536,18 @@ class MediaRepositoryImpl @Inject constructor(
  * renders a lie. The first cause is the one the screen shows ("couldn't reach …"); the rest
  * are in logcat. Pure so the rule pins without Room or a wallet.
  */
+/**
+ * Mirror rows to prune after a clean refresh: mirrored but no longer in the
+ * accessible set (token sold, gate expired). Pure so the rule pins without Room.
+ */
+internal fun staleMirrorIds(
+    currentIds: Collection<String>,
+    fetchedIds: Collection<String>,
+): List<String> {
+    val fetched = fetchedIds.toSet()
+    return currentIds.filterNot { it in fetched }
+}
+
 internal fun unreachableCauseOrNull(
     openCount: Int,
     ownCount: Int,

@@ -37,6 +37,13 @@ interface MediaDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<MediaMirrorEntity>)
 
+    @Query("SELECT id FROM media_items")
+    suspend fun getAllIds(): List<String>
+
+    /** Prune rows no longer in the accessible set (sold/revoked access, expired gates). */
+    @Query("DELETE FROM media_items WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: Collection<String>)
+
     @Query("DELETE FROM media_items WHERE owner = :owner")
     suspend fun deleteForOwner(owner: String)
 
