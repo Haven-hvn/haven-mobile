@@ -1,14 +1,30 @@
-# Library — vertical-first (file-player influenced)
+# Library
+
+Implemented in `feature-library/.../LibraryScreen.kt`. This brief matches the code;
+where they disagree, code wins and this file is the bug.
 
 ```
-┌ TopBar (56dp) Haven | Search Q View-toggle          fixed
-├─ CategoryGrid 2×2  (MediaKind: VIDEO/AUDIO/IMAGE/DOC + All)  16dp gutter, 1:1 cards
-├─ FolderList (LazyColumn)  MediaItem rows 72dp, grouped by folder/file semantics
-└─ BottomNav (80dp) Lib | Com | ▶Watch(center) | Set | Onb  fixed
+┌ TopBar: "Library" + "N items · M offline"        fixed
+├─ Search field                                     fixed
+├─ Chips: [Offline M] [All] [Video] [Audio] …       fixed, scrolls sideways
+├─ Grid (default) or list of media items            scrolls, pull-to-refresh
+└─ Selection action bar (only while selecting)      fixed
 ```
-- Grid: 2 columns, equal width, 12dp radius, count beneath label. Tapping filters LazyColumn (no nav). “All” selected by default.
-- Rows: leading MediaKind icon 40dp, title + subtitle (short CID + size), trailing ⋮ (48dp) + cache chip. Tap → Watch with that item.
-- Header: Search (TextField 48dp) + View-toggle stateful (grid↔list persists). Search filters both grid counts and rows.
-- States: Empty (“No items — check aol”) / Loading (top LinearProgress + shimmer 4 cards + 6 rows) / Error (retry) / Populated. Pull-to-refresh on list.
-- Motion: cache chip fade 150ms, grid→list crossfade 200ms.
-- File-player nods adapted: fixed header/footer scrollable middle, 2×2 categories above folder list, 5-icon bottom nav with central Play (Watch), video-preferred list density — but mapped to MediaKind/MediaItem, not nPlayer badges/folders/stats.
+
+- Grid is the default: a 16:9 cover plate says more at a glance than a row of text.
+  List is one tap away for density and full CIDs. The choice persists.
+- Subtitle carries residency — total items and how many work offline — because that is
+  the fact a reader wants at a glance. Cache/attestation state is badged per item.
+- Search and kind chips stay fixed above the scroll so they remain reachable in a
+  library of hundreds. Chips carry counts; an empty kind is visible before tapping it.
+  The Offline chip is first: residency is a different axis from kind.
+- Pull-to-refresh and the top-bar refresh button both call the same refresh; the
+  progress indicator and any refresh error appear above the list, never instead of it.
+- Selection: long-press or the checklist button enters selection; checked items can be
+  unlocked (keys only) or downloaded (keys + files) together, with the signature count
+  disclosed before the wallet pops. Hidden items leave the list but stay recoverable
+  via "Show N hidden".
+- States: skeleton while loading; "No wallet connected" when disconnected; error with
+  retry; empty library points at communities (joining one is how items arrive);
+  no-matches state names the active filters and offers to clear them.
+- Motion: chip and state changes follow `HavenMotion`; see [../motion.md](../motion.md).

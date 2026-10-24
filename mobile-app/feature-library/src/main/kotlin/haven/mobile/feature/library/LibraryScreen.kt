@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -41,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,6 +74,7 @@ import haven.mobile.core.domain.captionLine
  * Grid is the default: these are media items, and a 16:9 plate tells you more at a glance than a
  * row of text. List is one tap away for people who want density and full CIDs.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     navController: NavController,
@@ -222,6 +225,13 @@ fun LibraryScreen(
                     }
                 }
 
+                PullToRefreshBox(
+                    isRefreshing = state.isRefreshing,
+                    onRefresh = { viewModel.refresh() },
+                    // Weight, not fillMaxSize: the selection action bar below needs
+                    // room in this Column, otherwise it is pushed off-screen.
+                    modifier = Modifier.weight(1f),
+                ) {
                 when {
                     state.totalCount == 0 -> EmptyState(
                         icon = Icons.Default.LibraryAddCheck,
@@ -256,9 +266,7 @@ fun LibraryScreen(
 
                     state.layout == LibraryLayout.GRID -> LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 168.dp),
-                        // Weight, not fillMaxSize: the selection action bar below needs
-                        // room in this Column, otherwise it is pushed off-screen.
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = HavenSpacing.gutter,
                             end = HavenSpacing.gutter,
@@ -284,8 +292,7 @@ fun LibraryScreen(
                     }
 
                     else -> LazyColumn(
-                        // Weight, not fillMaxSize: see the grid above.
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = HavenSpacing.xxl),
                     ) {
                         items(items = state.items, key = { it.id }) { item ->
@@ -308,6 +315,7 @@ fun LibraryScreen(
                             )
                         }
                     }
+                }
                 }
                 if (state.selecting) {
                     SelectionActionBar(

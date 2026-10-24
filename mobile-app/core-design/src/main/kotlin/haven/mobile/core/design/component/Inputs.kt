@@ -84,8 +84,8 @@ fun HavenSearchField(
 }
 
 /**
- * Group heading. Uppercase mono eyebrow plus a hairline — the one print idiom that survives
- * the trip to mobile, because it separates groups without spending 32dp on a heading.
+ * Group heading. Sentence-case mono label plus a hairline — separates groups without
+ * spending 32dp on a heading, and reads as a label rather than a shout.
  */
 @Composable
 fun SectionHeader(
@@ -102,7 +102,7 @@ fun SectionHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = label.uppercase(),
+                text = label,
                 style = HavenTheme.text.overline,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
