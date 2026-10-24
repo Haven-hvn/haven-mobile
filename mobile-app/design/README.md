@@ -8,6 +8,7 @@ Haven is archival, not flashy. Dark surface by default (near-black #0B0E14, pape
 
 ## Map
 - Tokens: [tokens.md](tokens.md)
+- Taste: [taste.md](taste.md) — design-taste rules translated for Compose
 - Components: [components.md](components.md)
 - Screens: [screens/onboarding.md](screens/onboarding.md) · [screens/library.md](screens/library.md) · [screens/watch.md](screens/watch.md) · [screens/community.md](screens/community.md) · [screens/settings.md](screens/settings.md)
 - A11y: [a11y.md](a11y.md)

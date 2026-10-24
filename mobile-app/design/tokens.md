@@ -1,30 +1,55 @@
-# Design Tokens — Haven v1 (Material 3)
+# Design Tokens — Haven (Material 3, Jetpack Compose)
 
-Concrete values. Dark = default.
+Source of truth is code; this file mirrors it. Dark (Void) is the default, light is Paper.
+If this file and code disagree, code wins and this file is the bug.
 
-## Color (WCAG AA checked)
-- Background: dark #0B0E14 / light #F6F7F9
-- Surface: dark #141A26 / light #FFFFFF; Surface-variant dark #1E2636
-- Primary (amber): #C8932A (dark) / #8A6318 (light) — buttons, active nav, focus ring. Contrast 4.8:1 on surface.
-- Verified: #2E7D32 / Unverified: #616161 / Failed: #C62828
-- ContentCache chip: Cached #1B5E20, Fetching #1565C0, Expired #6D4C41, Missing #424242
-- Text primary dark #E6E8EC / light #0B0E14; secondary 70% opacity (not gray-400)
-- Outline: dark #2A3447
+- Shapes: [HavenTokens.kt](../core-design/src/main/kotlin/haven/mobile/core/design/HavenTokens.kt) (`HavenShapes`)
+- Spacing/elevation/motion: same file (`HavenSpacing`, `HavenElevation`, `HavenMotion`)
+- Type: [HavenTypography.kt](../core-design/src/main/kotlin/haven/mobile/core/design/HavenTypography.kt)
+- Color: [HavenPalette.kt](../core-design/src/main/kotlin/haven/mobile/core/design/color/HavenPalette.kt), authored in OKLCH
 
-## Typography (sp, weights)
-- Display: 32/400 (onboarding headline only)
-- Title: 22/600, 16/600 (card titles)
-- Body: 16/400, 14/400 (metadata)
-- Label: 14/500 (chips), 12/400 (timestamps)
-- Mono: 13/400 for `0x…` / CIDs / piece_ref
+## Color
+
+Authored in OKLCH so the Void and Paper ramps stay two ends of one ramp. No feature module
+hard-codes a hex; semantic roles live in `HavenAccents` (cache state, attestation state,
+protocol hues, seal, skeleton) and the Material scheme.
+
+- Grounds (dark): VoidSunk → VoidBase → VoidLow → VoidContainer → VoidHigh → VoidHighest → VoidBright
+- Grounds (light): PaperBase with PaperLow/Container/High/Highest steps, PaperRaised on top
+- Ink: InkOnVoid / InkOnPaper, with Muted and Faint steps. Running text is full ink, never grey.
+- Accent: Ember (amber/ochre, hue 44) — primary actions, active nav, focus. One accent only.
+- Meaning hues (never repainted by dynamic color): Arkiv, ICP, EVM, Filecoin; Alert for failure.
+- Attestation and cache states use `HavenAccents` roles, not raw colors, so a failed badge
+  cannot drift toward a verified one.
+
+## Typography (sp)
+
+Three voices: Institution (sans, UI), Ledger (mono — addresses, CIDs, byte counts, error
+codes only), Editorial (serif — the onboarding brand line only).
+
+- Display 44/48, 36/42, 30/36 · Headline 27/33, 23/29, 20/26 · Title 20/26, 16/22, 14/20
+- Body 16/24, 14/21, 12/18 · Label 14/18, 12/16, 11/15
+- Extra roles in `HavenTextStyles`: `mono` 13/18, `monoSmall` 11/15, `figure` 14/19 (tabular),
+  `editorial` 30/38, `overline` 11/14 (sentence case in content; see [taste.md](taste.md))
+- Display/headline tracking is tightened (-0.018 to -0.032em). Five sizes do the visible work
+  on any one screen.
 
 ## Spacing / Shape / Elevation
-- Scale: 4,8,12,16,24,32 dp. Touch target min 48dp (a11y).
-- Radius: cards 12dp, chips 8dp, sheets 16dp top — not single radius.
-- Elevation: card 1dp, app bar 0dp (flat), bottom nav 2dp.
+
+- Spacing scale (dp): 2, 4, 8, 12, 16, 24, 32, 48. Gutter 16. Touch target min 48.
+  Media row height 76, row glyph 40, hairline 1.
+- Radius: extraSmall 6, small 10, medium 14, large 20, extraLarge 28. One corner decision
+  per component family; no 9–16dp "soft" default drifting between screens.
+- Elevation: flat 0, raised 1, floating 3, overlay 6. Surfaces separate by tone step,
+  not shadow; shadow only on what truly floats (menus, dialogs, sheets).
 
 ## Motion
-Transitions ≤250ms, viewer chrome fade 150ms, respect `prefers-reduced-motion`.
+
+- Durations: instant 100ms, short 180ms, medium 280ms, long 420ms; skeleton loop 1150ms.
+- Easing: Material 3 standard / emphasized curves in `HavenMotion`. Transform and opacity
+  only; every animation keeps content visible under reduced motion.
 
 ## Iconography
-5 MediaKind vectors (VIDEO/AUDIO/IMAGE/DOCUMENT/FILE) + 3 attestation. Stroke 1.5dp, 20dp container.
+
+5 MediaKind vectors (VIDEO/AUDIO/IMAGE/DOCUMENT/FILE) + 3 attestation marks.
+Stroke 1.5dp, 20dp container. Icons never sit in tinted squares as decoration.

@@ -159,7 +159,7 @@ fun CollectionsScreen(
                             Spacer(Modifier.height(HavenSpacing.xs))
                             SectionHeader(label = "You're in")
                         }
-                        items(state.joined) { entry ->
+                        items(state.joined, key = { it.collection.id }) { entry ->
                             CollectionCard(entry = entry, onGetAccess = openMarket)
                         }
                     }
@@ -169,7 +169,7 @@ fun CollectionsScreen(
                             Spacer(Modifier.height(HavenSpacing.xs))
                             SectionHeader(label = category.label)
                         }
-                        items(entries) { entry ->
+                        items(entries, key = { it.collection.id }) { entry ->
                             CollectionCard(entry = entry, onGetAccess = openMarket)
                         }
                     }

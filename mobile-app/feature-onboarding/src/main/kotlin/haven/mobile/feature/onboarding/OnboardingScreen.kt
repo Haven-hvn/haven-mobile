@@ -97,7 +97,7 @@ fun OnboardingScreen(
         Spacer(Modifier.height(HavenSpacing.xl))
 
         Text(
-            text = "HAVEN",
+            text = "Haven",
             style = HavenTheme.text.overline,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -140,7 +140,7 @@ fun OnboardingScreen(
         // The web's "what you are never asked for" list, which is the most effective thing on that
         // page: every item is an absence a reader has learned to expect from an app like this.
         Text(
-            text = "WHAT HAVEN NEVER ASKS FOR",
+            text = "What Haven never asks for",
             style = HavenTheme.text.overline,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

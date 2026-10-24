@@ -5,11 +5,11 @@
         gradlePluginPortal()
     }
     plugins {
-        id("com.android.application") version "9.3.1"
-        id("com.android.library") version "9.3.1"
+        id("com.android.application") version "9.3.3"
+        id("com.android.library") version "9.3.3"
         id("org.jetbrains.kotlin.android") version "2.3.21"
         id("org.jetbrains.kotlin.jvm") version "2.3.21"
-        id("com.google.devtools.ksp") version "2.3.11"
+        id("com.google.devtools.ksp") version "2.3.12"
         id("com.google.dagger.hilt.android") version "2.60.1"
     }
 }

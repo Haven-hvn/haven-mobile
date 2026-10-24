@@ -219,7 +219,8 @@ fun DripPumpScreen(
             textAlign = TextAlign.Center,
         )
 
-        if (pump.tokenAddress != null) {
+        val tokenAddress = pump.tokenAddress
+        if (tokenAddress != null) {
             Spacer(Modifier.height(HavenSpacing.xl))
             if (wallet != null && walletAddress != null) {
                 MintClubTradePanel(
@@ -243,7 +244,7 @@ fun DripPumpScreen(
             }
             Spacer(Modifier.height(HavenSpacing.sm))
             OutlinedButton(
-                onClick = { copyAddress(context, pump.tokenAddress!!) },
+                onClick = { copyAddress(context, tokenAddress) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(HavenSpacing.touchTarget),
