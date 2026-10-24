@@ -126,8 +126,16 @@ jobs:
           heap-size: 512M
           disk-size: 4096M
           script: |
+            echo "=== wait for boot completion (sys.boot_completed=1) ==="
+            # Same gate as verify-release: with -accel off the runner can hand over adb
+            # before the package manager exists ("Can't find service: package"). The
+            # runner executes each script line as its own `sh -c`, so the poll and its
+            # check must share a line.
+            boot_ready=0; for i in $(seq 1 90); do if adb shell getprop sys.boot_completed 2>/dev/null | grep -q '1'; then echo "boot completed after $((i * 10))s"; boot_ready=1; break; fi; sleep 10; done; if [ "$boot_ready" != "1" ]; then echo "ERROR: boot did not complete after 900s"; adb shell getprop sys.boot_completed 2>&1 || true; exit 1; fi
+            echo "=== settling 15s for package manager ==="
+            sleep 15
             adb logcat -c
-            adb install -r /tmp/apk/app-debug.apk || adb install -r /tmp/apk/*.apk
+            for i in 1 2 3 4 5; do adb install -r /tmp/apk/app-debug.apk && break; echo "install attempt $i failed, retrying in 5s"; sleep 5; done
             adb logcat > /tmp/logcat.txt &
             LOGPID=$!
             echo "Starting MainActivity..."
