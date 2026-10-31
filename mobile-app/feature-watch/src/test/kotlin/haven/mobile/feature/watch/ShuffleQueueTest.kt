@@ -28,7 +28,7 @@ class ShuffleQueueTest {
     @Test fun globalShuffleCoversEveryTrackOnce() {
         val queue = buildGlobalQueue(listOf(album("a", 2), album("b", 3)), random = Random(3), durationsMs = mapOf("a" to 2_000L, "b" to 3_000L))
         assertEquals(5, queue.size)
-        assertEquals(5, queue.map { it.albumId to it.chapterIndex }.toSet().size())
+        assertEquals(5, queue.map { it.albumId to it.chapterIndex }.toSet().size)
     }
 
     @Test fun chapterlessAlbumIsSingleWholeFileTrack() {
