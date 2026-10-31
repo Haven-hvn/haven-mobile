@@ -1,9 +1,9 @@
 package haven.mobile.feature.watch
 
 import kotlin.random.Random
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
 
 class ShuffleQueueTest {
     private fun album(id: String, tracks: Int) = AlbumTracks(
