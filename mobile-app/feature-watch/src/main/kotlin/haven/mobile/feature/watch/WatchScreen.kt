@@ -110,6 +110,8 @@ fun WatchScreen(
     val uiState by viewModel.uiState.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
+    val shuffleMode by viewModel.shuffleMode.collectAsState()
+    val playQueue by viewModel.playQueue.collectAsState()
 
     LaunchedEffect(itemId) { viewModel.open(itemId) }
 
@@ -221,6 +223,10 @@ fun WatchScreen(
                                 walletAddress = walletAddress,
                                 diagnostics = diagnostics,
                                 chapters = chapters,
+                                playQueue = playQueue,
+                                shuffleMode = shuffleMode,
+                                onToggleAlbumShuffle = { viewModel.toggleAlbumShuffle() },
+                                onGlobalShuffle = { viewModel.startGlobalShuffle() },
                             )
                             MediaKind.IMAGE -> ImageViewer(
                                 media = media,
@@ -271,12 +277,30 @@ private fun PlayerViewer(
     walletAddress: String? = null,
     diagnostics: List<String> = emptyList(),
     chapters: List<AudioChapter> = emptyList(),
+    playQueue: List<QueueTrack> = emptyList(),
+    shuffleMode: WatchViewModel.ShuffleMode = WatchViewModel.ShuffleMode.OFF,
+    onToggleAlbumShuffle: () -> Unit = {},
+    onGlobalShuffle: () -> Unit = {},
 ) {
+    val useQueue = media.kind == MediaKind.AUDIO && playQueue.isNotEmpty()
     val controller by rememberPlaybackController(file)
+    // Queue replaces the single item once the controller is up; keyed on the queue so a
+    // shuffle toggle rebuilds the playlist instead of restarting the current file load.
+    var appliedQueue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<QueueTrack>?>(null) }
+    LaunchedEffect(controller, useQueue, playQueue) {
+        val c = controller ?: return@LaunchedEffect
+        if (!useQueue || appliedQueue == playQueue) return@LaunchedEffect
+        appliedQueue = playQueue
+        c.setMediaItems(queueMediaItems(playQueue))
+        c.prepare()
+        c.playWhenReady = true
+    }
     // The chapter highlight follows the same position snapshot as the mini bar's progress
     // edge — one poll, two readers — so the list never disagrees with the bar.
     val progress = rememberPlaybackProgress(controller)
-    val currentChapter = chapterIndexAt(chapters, progress.positionMs)
+    val currentChapter = controller?.let { c ->
+        playQueue.getOrNull(c.currentMediaItemIndex)?.chapterIndex?.takeIf { it >= 0 }
+    } ?: chapterIndexAt(chapters, progress.positionMs)
 
     // Video floats over whatever the user opens next; audio does not need a window, it just keeps
     // playing through the service.
@@ -322,11 +346,36 @@ private fun PlayerViewer(
             }
         }
         MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
+        if (media.kind == MediaKind.AUDIO) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = HavenSpacing.gutter)) {
+                OutlinedButton(onClick = onToggleAlbumShuffle) {
+                    Text(if (shuffleMode == WatchViewModel.ShuffleMode.ALBUM) "Album shuffle: on" else "Shuffle album")
+                }
+                Spacer(Modifier.width(HavenSpacing.sm))
+                OutlinedButton(onClick = onGlobalShuffle) {
+                    Text(if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) "Global shuffle: on" else "Shuffle all")
+                }
+                if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) {
+                    Spacer(Modifier.width(HavenSpacing.sm))
+                    Text(
+                        text = "${playQueue.size} tracks",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         if (media.kind == MediaKind.AUDIO && chapters.isNotEmpty()) {
             ChapterList(
                 chapters = chapters,
                 currentIndex = currentChapter,
-                onSeek = { startMs -> controller?.seekTo(startMs) },
+                onSeek = { startMs ->
+                    val queueIndex = playQueue.indexOfFirst {
+                        it.albumId == media.id && it.startMs == startMs
+                    }
+                    if (useQueue && queueIndex >= 0) controller?.seekTo(queueIndex, 0L)
+                    else controller?.seekTo(startMs)
+                },
             )
         }
     }

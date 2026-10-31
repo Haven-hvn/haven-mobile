@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
@@ -133,6 +134,17 @@ class WatchViewModel @Inject constructor(
     private val _chapters = MutableStateFlow<List<AudioChapter>>(emptyList())
     val chapters: StateFlow<List<AudioChapter>> = _chapters
 
+    enum class ShuffleMode { OFF, ALBUM, GLOBAL }
+
+    private val _shuffleMode = MutableStateFlow(ShuffleMode.OFF)
+    val shuffleMode: StateFlow<ShuffleMode> = _shuffleMode
+
+    private val _playQueue = MutableStateFlow<List<QueueTrack>>(emptyList())
+    val playQueue: StateFlow<List<QueueTrack>> = _playQueue
+
+    @Volatile private var currentMedia: MediaItem? = null
+    @Volatile private var currentFile: File? = null
+
     /**
      * In-app diagnostics trail: every pipeline transition, newest last, capped.
      * Rendered under the failure screen so a report needs no adb — logcat
@@ -161,6 +173,10 @@ class WatchViewModel @Inject constructor(
         itemId.value = id
         content.value = ContentState.Idle
         _chapters.value = emptyList()
+        _shuffleMode.value = ShuffleMode.OFF
+        _playQueue.value = emptyList()
+        currentMedia = null
+        currentFile = null
         viewModelScope.launch { mediaRepository.refreshItem(id) }
     }
 
@@ -402,16 +418,66 @@ class WatchViewModel @Inject constructor(
      * also publishes here, so the mini bar appears the moment something is playable rather than
      * only after the viewer has drawn it.
      */
-    private fun markReady(media: MediaItem, file: File): Result<File> {
+    /** Cached chapters if the piece fingerprint still matches, else parse and write through. */
+    private suspend fun resolveChapters(media: MediaItem, file: File): List<AudioChapter> {
+        mediaRepository.cachedChapters(media, file.length())?.let { cached ->
+            return cached.map { AudioChapter(it.startMs, it.title) }
+        }
+        val parsed = withContext(Dispatchers.IO) { readId3Chapters(file) }
+        mediaRepository.cacheChapters(
+            media, file.length(),
+            parsed.map { haven.mobile.core.cache.mirror.CachedChapter(it.startMs, it.title) },
+        )
+        return parsed
+    }
+
+    fun toggleAlbumShuffle() {
+        val media = currentMedia ?: return
+        val file = currentFile ?: return
+        if (_shuffleMode.value == ShuffleMode.ALBUM) {
+            _shuffleMode.value = ShuffleMode.OFF
+            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false)
+        } else {
+            _shuffleMode.value = ShuffleMode.ALBUM
+            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = true)
+        }
+    }
+
+    /** Global shuffle over albums already staged on this device (their tags can be read locally). */
+    fun startGlobalShuffle() {
+        viewModelScope.launch {
+            val albums = mutableListOf<AlbumTracks>()
+            for (item in mediaRepository.observeAccessible().first()) {
+                if (item.kind != MediaKind.AUDIO) continue
+                val cid = item.pieceRef?.pieceCid ?: continue
+                val file = plaintextSpool.find(cid) ?: continue
+                albums += albumTracks(item, file, resolveChapters(item, file))
+            }
+            if (albums.isEmpty()) return@launch
+            _shuffleMode.value = ShuffleMode.GLOBAL
+            _playQueue.value = buildGlobalQueue(albums)
+            logStage("global shuffle albums=${albums.size} tracks=${_playQueue.value.size}")
+        }
+    }
+
+    private fun albumTracks(media: MediaItem, file: File, chapters: List<AudioChapter>) =
+        AlbumTracks(media.id, media.title, file.absolutePath, chapters)
+
+    private suspend fun markReady(media: MediaItem, file: File): Result<File> {
+        currentMedia = media
+        currentFile = file
         // Cue points ride out of staging with the file, same moment as the cover art: the
         // read is bounded to the ID3 tag region, so it costs one small sequential read even
         // on a full-album file. Parsed once per item — a new open resets [chapters] first.
         _chapters.value = if (media.kind == MediaKind.AUDIO) {
-            readId3Chapters(file).also { chapters ->
+            resolveChapters(media, file).also { chapters ->
                 logStage("chapters id=${media.id} n=${chapters.size}")
             }
         } else {
             emptyList()
+        }
+        if (media.kind == MediaKind.AUDIO && _shuffleMode.value == ShuffleMode.OFF) {
+            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false)
         }
         if (media.kind == MediaKind.VIDEO || media.kind == MediaKind.AUDIO) {
             // Cover art comes out of the media itself: an MP3 with an embedded picture

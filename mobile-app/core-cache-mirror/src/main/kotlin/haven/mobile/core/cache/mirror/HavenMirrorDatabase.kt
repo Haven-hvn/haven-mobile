@@ -17,9 +17,10 @@ import androidx.room.RoomDatabase
  * a rebuild would have just worked. Anything that genuinely must survive lives in DataStore or in
  * the content cache, not here.
  */
-@Database(entities = [MediaMirrorEntity::class], version = 3, exportSchema = false)
+@Database(entities = [MediaMirrorEntity::class, CachedChapterEntity::class], version = 4, exportSchema = false)
 abstract class HavenMirrorDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
+    abstract fun chapterDao(): ChapterDao
 
     companion object {
         fun databaseName(walletAddress: String): String = "haven-mirror-$walletAddress.db"

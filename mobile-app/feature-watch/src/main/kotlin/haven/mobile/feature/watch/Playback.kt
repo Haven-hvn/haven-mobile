@@ -78,6 +78,19 @@ internal fun rememberPlaybackController(file: File): State<MediaController?> {
     }
 }
 
+/** Clipped media items for a chapter queue: Media3 handles track ends and next/previous. */
+internal fun queueMediaItems(queue: List<QueueTrack>): List<ExoMediaItem> = queue.map { track ->
+    ExoMediaItem.Builder()
+        .setUri(android.net.Uri.fromFile(File(track.filePath)))
+        .setClippingConfiguration(
+            androidx.media3.common.MediaItem.ClippingConfiguration.Builder()
+                .setStartPositionMs(track.startMs)
+                .apply { track.endMs?.let { setEndPositionMs(it) } }
+                .build(),
+        )
+        .build()
+}
+
 /**
  * `ListenableFuture` -> suspend, without pulling in kotlinx-coroutines-guava for one call.
  *

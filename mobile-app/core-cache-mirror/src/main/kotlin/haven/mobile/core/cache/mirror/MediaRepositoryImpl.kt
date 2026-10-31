@@ -252,7 +252,10 @@ class MediaRepositoryImpl @Inject constructor(
                     if (failures.isEmpty() && lastFailure == null) {
                         val dao = getDatabase().mediaDao()
                         val stale = staleMirrorIds(dao.getAllIds(), fetchedIds)
-                        if (stale.isNotEmpty()) dao.deleteByIds(stale)
+                        if (stale.isNotEmpty()) {
+                            dao.deleteByIds(stale)
+                            getDatabase().chapterDao().deleteForAlbums(stale)
+                        }
                     }
                     Result.success(Unit)
                 }
@@ -315,12 +318,45 @@ class MediaRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun cachedChapters(item: MediaItem, fileSizeBytes: Long): List<CachedChapter>? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val pieceCid = item.pieceRef?.pieceCid ?: return@runCatching null
+                val rows = getDatabase().chapterDao().getForAlbum(item.id)
+                if (rows.isEmpty()) return@runCatching null
+                // Fingerprint mismatch: the piece changed under this id, so the parse is stale.
+                if (rows.any { it.pieceCid != pieceCid || it.fileSizeBytes != fileSizeBytes }) {
+                    getDatabase().chapterDao().deleteForAlbum(item.id)
+                    return@runCatching null
+                }
+                if (rows.any { it.chapterIndex == -1 }) emptyList()
+                else rows.map { CachedChapter(it.startMs, it.title) }
+            }.getOrNull()
+        }
+
+    override suspend fun cacheChapters(item: MediaItem, fileSizeBytes: Long, chapters: List<CachedChapter>) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val pieceCid = item.pieceRef?.pieceCid ?: return@runCatching
+                val rows = if (chapters.isEmpty()) {
+                    listOf(CachedChapterEntity(item.id, -1, 0L, "", pieceCid, fileSizeBytes))
+                } else {
+                    chapters.mapIndexed { index, chapter ->
+                        CachedChapterEntity(item.id, index, chapter.startMs, chapter.title, pieceCid, fileSizeBytes)
+                    }
+                }
+                getDatabase().chapterDao().replaceForAlbum(item.id, rows)
+            }
+        }
+    }
+
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
             try {
                 // deleteAll, not deleteForOwner: the mirror now also holds items published by other
                 // wallets (the feed), and owner-scoped deletion would leave those behind.
                 getDatabase().mediaDao().deleteAll()
+                runCatching { getDatabase().chapterDao().deleteAll() }
                 if (currentWalletAddress == walletAddress) {
                     database?.close()
                     database = null

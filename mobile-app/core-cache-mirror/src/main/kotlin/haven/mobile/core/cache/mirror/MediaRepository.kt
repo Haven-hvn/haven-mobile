@@ -59,4 +59,13 @@ interface MediaRepository {
     suspend fun noteAccessed(id: String)
 
     suspend fun clearFor(walletAddress: String)
+
+    /**
+     * Cached ID3 chapters for [item], or null on a cache miss / fingerprint mismatch.
+     * An empty list is a hit: the album was parsed and has no chapters.
+     */
+    suspend fun cachedChapters(item: MediaItem, fileSizeBytes: Long): List<CachedChapter>?
+
+    /** Persist parsed chapters (possibly empty) against the item's current piece fingerprint. */
+    suspend fun cacheChapters(item: MediaItem, fileSizeBytes: Long, chapters: List<CachedChapter>)
 }
