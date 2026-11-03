@@ -2,6 +2,7 @@ package haven.mobile.core.collections
 
 import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.domain.TokenGate
+import haven.mobile.core.domain.TokenStandard
 import haven.mobile.core.domain.havenChain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -52,6 +53,26 @@ fun gateKey(chain: HavenChain, tokenAddress: String): String =
     "${chain.aolVariant}:${tokenAddress.lowercase()}"
 
 fun TokenGate.gateKeyOrNull(): String? = havenChain()?.let { gateKey(it, tokenAddress) }
+
+/**
+ * Threshold in base units.
+ *
+ * A collection (ERC-721/1155) reports no decimals, so a threshold of 1 means one item and an
+ * absent decimals read is read as a count. A token (ERC-20) quotes its threshold in whole tokens
+ * while `balanceOf` answers in base units, so an absent decimals read must not be read the same
+ * way: without it a gate requiring 25,000 tokens would be cleared by dust. For ERC-20 the
+ * requirement is therefore scaled up out of reach (18 places, as in the dapp's `requiredUnits`)
+ * rather than down, until a later check can read decimals.
+ */
+internal fun requiredUnits(threshold: Double, decimals: Int?, standard: TokenStandard): BigInteger {
+    val whole = BigInteger.valueOf(threshold.toLong().coerceAtLeast(0))
+    return when {
+        standard != TokenStandard.ERC20 -> whole
+        decimals == null -> whole.multiply(BigInteger.TEN.pow(18))
+        decimals == 0 -> whole
+        else -> whole.multiply(BigInteger.TEN.pow(decimals))
+    }
+}
 
 @Singleton
 internal class EvmGateAccessChecker @Inject constructor(
@@ -160,27 +181,10 @@ internal class EvmGateAccessChecker @Inject constructor(
         byContract.forEach { (contract, gate) ->
             val balance = balances[contract] ?: return@forEach
             val places = decimals[contract]
-            val required = requiredUnits(gate.threshold, places)
+            val required = requiredUnits(gate.threshold, places, gate.tokenStandard)
             if (balance >= required) satisfied += gateKey(chain, contract)
         }
         return satisfied
-    }
-
-    /**
-     * Threshold in base units.
-     *
-     * A collection reports no decimals, so a threshold of 1 means one item. A token quotes its
-     * threshold in whole tokens while `balanceOf` answers in base units, so without decimals a gate
-     * requiring 25,000 tokens is cleared by dust — a false positive on the only question this protocol
-     * asks. When decimals cannot be read the requirement is scaled up out of reach rather than down.
-     */
-    private fun requiredUnits(threshold: Double, decimals: Int?): BigInteger {
-        val whole = BigInteger.valueOf(threshold.toLong().coerceAtLeast(0))
-        return when {
-            decimals == null -> whole
-            decimals == 0 -> whole
-            else -> whole.multiply(BigInteger.TEN.pow(decimals))
-        }
     }
 
     /** JSON-RPC batches may come back out of order, so results are keyed by request id. */
