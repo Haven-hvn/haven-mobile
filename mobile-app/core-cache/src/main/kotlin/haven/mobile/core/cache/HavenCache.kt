@@ -18,6 +18,12 @@ interface HavenCache {
 
     /** True when the cache keeps gated pieces decrypted ("Keep unlocked content on this device"). */
     suspend fun storesUnlocked(): Boolean
+    /**
+     * Point-in-time: could a fetch of [ref] be served now (local hit or a provider
+     * answering the headers-only probe)? Gate paid key acquisition on this — a
+     * `false` must never be followed by a Haven-AOL canister call for the piece.
+     */
+    suspend fun isAvailable(ref: PieceRef): Boolean
     suspend fun exists(pieceCid: String): Boolean
     suspend fun fetch(ref: PieceRef): Result<Unit>
     suspend fun remove(pieceCid: String)

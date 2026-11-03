@@ -157,6 +157,12 @@ sealed class HavenError(
         override val cause: Throwable? = null
     ) : HavenError("MARKET_CAP_NOT_REACHED", message, cause)
 
+    /** No provider can serve this piece right now (e.g. unpinned) — checked before any paid key call. */
+    class PieceUnavailable(
+        override val message: String,
+        override val cause: Throwable? = null
+    ) : HavenError("PIECE_UNAVAILABLE", message, cause)
+
     // Mirrors internal error from cache-errors.ts
     class Internal(
         override val message: String,

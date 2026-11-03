@@ -122,6 +122,11 @@ class HavenCacheImpl @Inject constructor(
 
     override suspend fun storesUnlocked(): Boolean = settings.keepUnlocked.first()
 
+    override suspend fun isAvailable(ref: PieceRef): Boolean = withContext(Dispatchers.IO) {
+        // Probe failure also means "don't pay for a key": treat it as unavailable.
+        runCatching { requireFocCache().isAvailable(ref) }.getOrDefault(false)
+    }
+
     override suspend fun exists(pieceCid: String): Boolean = withContext(Dispatchers.IO) {
         runCatching { requireFocCache().exists(pieceCid) }.getOrDefault(false)
     }

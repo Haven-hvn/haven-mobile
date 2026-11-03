@@ -258,6 +258,17 @@ class WatchViewModel @Inject constructor(
         //    this runs on `viewModelScope` (main dispatcher), where that would block the UI thread.
         var key: ByteArray? = null
         if (media.isEncrypted) {
+            // Gate before acquireKey: its Haven-AOL canister call burns ICP cycles
+            // (and may prompt a signature) even for a piece no provider can serve
+            // anymore. A cached session key costs no cycles, so skip the probe then.
+            // Point-in-time only — the fetch below can still fail, and surfaces it.
+            val keyCached = aesKeyCache.getSuspend(piece.pieceCid) != null || havenAol.hasCachedKey(media)
+            if (!keyCached && !havenCache.isAvailable(piece)) {
+                return fail(
+                    "PIECE_UNAVAILABLE",
+                    "This item's content is no longer available from any provider, so it can't be unlocked right now.",
+                )
+            }
             key = acquireKey(media, piece).getOrElse { return Result.failure(it) }
         }
 
