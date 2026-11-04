@@ -14,6 +14,7 @@ import haven.mobile.core.domain.gateKeyAcquisition
 import haven.mobile.core.haven.aol.hasSessionKey
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
+import haven.mobile.core.domain.WatchUnavailableNotice
 import haven.mobile.core.domain.error.HavenError
 import haven.mobile.core.haven.aol.HavenAol
 import haven.mobile.core.wallet.WalletSession
@@ -117,6 +118,7 @@ class LibraryViewModel @Inject constructor(
     private val fatalError = MutableStateFlow<String?>(null)
     private val selecting = MutableStateFlow(false)
     private val selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _unavailableNotice = MutableStateFlow<WatchUnavailableNotice?>(null)
     private val batch = MutableStateFlow<SelectionBatch?>(null)
     private val showHidden = MutableStateFlow(false)
 
@@ -136,6 +138,9 @@ class LibraryViewModel @Inject constructor(
      * See `LibraryLabels`: "mine" is an on-chain comparison, not a text handle.
      */
     val walletAddress: StateFlow<String?> = walletSession.address
+
+    /** Transient notice for a row automatically suppressed after a failed open. */
+    val unavailableNotice: StateFlow<WatchUnavailableNotice?> = _unavailableNotice
 
     /**
      * Everything this wallet can read.
@@ -268,6 +273,11 @@ class LibraryViewModel @Inject constructor(
         layout.value = if (layout.value == LibraryLayout.GRID) LibraryLayout.LIST else LibraryLayout.GRID
     }
 
+    /** Hide an item the viewer confirmed is unavailable. Uses the same persisted hidden set. */
+    fun hideUnavailableItem(id: String) {
+        hideItem(id)
+    }
+
     /** Hide from the list (top-bar action on the checked set). Persisted; refresh never resurrects it. */
     fun hideItem(id: String) {
         if (batch.value is SelectionBatch.Working) return
@@ -282,6 +292,21 @@ class LibraryViewModel @Inject constructor(
 
     fun toggleShowHidden() {
         showHidden.value = !showHidden.value
+    }
+
+    /** Reveal hidden rows, including an automatically suppressed unavailable item. */
+    fun showHiddenItems() {
+        showHidden.value = true
+    }
+
+    /** Stage the transient notice for an automatically suppressed row. */
+    fun showUnavailableNotice(notice: WatchUnavailableNotice) {
+        _unavailableNotice.value = notice
+    }
+
+    /** Clear the transient notice, whether it timed out or was dismissed. */
+    fun dismissUnavailableNotice() {
+        _unavailableNotice.value = null
     }
 
     fun dismissRefreshError() {

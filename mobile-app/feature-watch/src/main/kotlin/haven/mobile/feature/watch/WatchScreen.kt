@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Button
@@ -80,6 +81,7 @@ import haven.mobile.core.design.component.label
 import haven.mobile.core.design.component.summaryLine
 import haven.mobile.core.design.component.truncateMiddle
 import haven.mobile.core.domain.CREATOR_UNVERIFIABLE
+import haven.mobile.core.domain.WatchUnavailableNotice
 import haven.mobile.core.domain.SIGN_DISCLOSURE_GUARANTEES
 import haven.mobile.core.domain.SIGN_DISCLOSURE_SESSION_NOTE
 import haven.mobile.core.domain.SIGN_DISCLOSURE_WHY_BODY
@@ -90,7 +92,11 @@ import haven.mobile.core.domain.gateRequirementLine
 import haven.mobile.core.domain.isCreatorVerifiable
 import haven.mobile.core.domain.signDisclosureGateLine
 import haven.mobile.core.domain.signDisclosureHeadline
+import haven.mobile.core.domain.UNAVAILABLE_AUTO_RETURN_MILLIS
+import haven.mobile.core.domain.unavailableReturnNotice
+import haven.mobile.core.domain.WATCH_UNAVAILABLE_NOTICE_KEY
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -211,13 +217,32 @@ fun WatchScreen(
                             onRetry = { viewModel.retry(media) },
                         )
 
-                        is ContentState.Failed -> ErrorState(
-                            title = "Couldn't open this",
-                            message = content.message,
-                            code = content.code,
-                            details = diagnostics.joinToString("\n").takeIf { it.isNotEmpty() },
-                            onRetry = { viewModel.retry(media) },
-                        )
+                        is ContentState.Failed ->
+                            if (shouldAutoReturnUnavailable(content)) {
+                                val returnNotice = remember(media.id) {
+                                    unavailableReturnNotice(media.id, media.title)
+                                }
+                                LaunchedEffect(media.id, content) {
+                                    delay(UNAVAILABLE_AUTO_RETURN_MILLIS)
+                                    returnUnavailableToLibrary(navController, returnNotice)
+                                }
+                                UnavailableAutoReturn(
+                                    message = content.message,
+                                    code = content.code,
+                                    onRetry = { viewModel.retry(media) },
+                                    onReturnNow = {
+                                        returnUnavailableToLibrary(navController, returnNotice)
+                                    },
+                                )
+                            } else {
+                                ErrorState(
+                                    title = "Couldn't open this",
+                                    message = content.message,
+                                    code = content.code,
+                                    details = diagnostics.joinToString("\n").takeIf { it.isNotEmpty() },
+                                    onRetry = { viewModel.retry(media) },
+                                )
+                            }
 
                         is ContentState.Ready -> when (media.kind) {
                             MediaKind.VIDEO -> PlayerViewer(
@@ -930,6 +955,100 @@ private fun ProgressBlock(label: String, progress: Float? = null) {
             style = HavenTheme.text.mono,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Return an unavailable item to the library, identifying the row for the
+ * library to suppress. The library owns the hide decision; this only delivers
+ * the evidence for it, then prefers the existing library destination.
+ */
+private fun returnUnavailableToLibrary(
+    navController: NavController,
+    notice: WatchUnavailableNotice,
+) {
+    // Deliver the evidence to the library destination itself, even when the
+    // viewer was opened from another tab. Otherwise a community-launched open
+    // would leave the notice on a popped entry and the library would never act.
+    val recipient = runCatching { navController.getBackStackEntry("library") }.getOrNull()
+        ?: navController.previousBackStackEntry
+    recipient?.savedStateHandle?.set(
+        WATCH_UNAVAILABLE_NOTICE_KEY,
+        notice,
+    )
+    if (navController.popBackStack("library", inclusive = false)) return
+    navController.popBackStack()
+}
+
+/**
+ * A transient unavailable notice rather than a dead-end modal. It explains the
+ * failure once, gives the reader immediate manual controls, and returns
+ * automatically when the timer lapses.
+ */
+@Composable
+private fun UnavailableAutoReturn(
+    message: String,
+    code: String,
+    onRetry: () -> Unit,
+    onReturnNow: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = HavenSpacing.xl, vertical = HavenSpacing.xxl),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = Icons.Default.CloudOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(32.dp),
+        )
+        Spacer(Modifier.height(HavenSpacing.md))
+        Text(
+            text = "Not available right now",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(HavenSpacing.sm))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(HavenSpacing.sm))
+        Text(
+            text = "Returning to your library and hiding this item.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(HavenSpacing.md))
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(HavenSpacing.md))
+        Text(
+            text = code,
+            style = HavenTheme.text.monoSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(HavenSpacing.xl))
+        Button(
+            onClick = onReturnNow,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HavenSpacing.touchTarget),
+        ) {
+            Text("Back to library now")
+        }
+        Spacer(Modifier.height(HavenSpacing.sm))
+        OutlinedButton(
+            onClick = onRetry,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HavenSpacing.touchTarget),
+        ) {
+            Text("Try again")
+        }
     }
 }
 

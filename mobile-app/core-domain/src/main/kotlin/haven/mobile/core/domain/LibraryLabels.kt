@@ -1,5 +1,53 @@
 ﻿package haven.mobile.core.domain
 
+import java.io.Serializable
+
+/** Saved-state key for an unavailable item returned from the viewer. */
+const val WATCH_UNAVAILABLE_NOTICE_KEY = "watch_unavailable_notice"
+
+/**
+ * How long the viewer shows an unavailable item before returning. Long enough
+ * to read the notice once, short enough that the dead end does not feel like
+ * another modal the reader has to dismiss.
+ */
+const val UNAVAILABLE_AUTO_RETURN_MILLIS = 4_000L
+
+/**
+ * How long the library keeps an automatic suppression notice visible. Long
+ * enough to read the outcome and choose “Show hidden,” then it clears itself.
+ */
+const val UNAVAILABLE_NOTICE_MILLIS = 8_000L
+
+/**
+ * Cross-screen notice for a confirmed unavailable piece.
+ *
+ * Serializable because navigation saved-state is the delivery mechanism.
+ * It identifies the library row only; the viewer does not decide whether the
+ * item is hidden. The library does, after this notice arrives.
+ */
+data class WatchUnavailableNotice(
+    val itemId: String,
+    val title: String,
+) : Serializable {
+    private companion object {
+        private const val serialVersionUID = 1L
+    }
+}
+
+/** Notice payload for the viewer-to-library handoff. Blank titles fall back to the item id. */
+fun unavailableReturnNotice(itemId: String, title: String): WatchUnavailableNotice =
+    WatchUnavailableNotice(
+        itemId = itemId,
+        title = title.ifBlank { itemId },
+    )
+
+/**
+ * Transient library message for an automatically suppressed row. It says what
+ * happened and where the row went; it never claims the removal is permanent.
+ */
+fun unavailableReturnMessage(title: String): String =
+    "“$title” isn’t available right now, so it was hidden. Show hidden items to restore it."
+
 /**
  * Library labeling language — the single source of truth for the wording decided in
  * `planning/library-labels.md`. Wording only: no layout, no badges, no sections.

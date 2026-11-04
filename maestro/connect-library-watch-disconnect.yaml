@@ -77,7 +77,7 @@ tags: ["v1", "e2e"]
     index: 0
     optional: true
 - assertVisible:
-    text: "Checking your access…|Decrypting…|This isn't in your library|Couldn't open this|Save to device"
+    text: "Checking your access…|Decrypting…|This isn't in your library|Couldn't open this|Not available right now|Save to device"
     optional: true
 - back
 

@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cloud.filecoin.foc.cache.PieceUnavailableException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import haven.mobile.core.cache.HavenCache
@@ -387,7 +388,7 @@ class WatchViewModel @Inject constructor(
         }
 
         staged.exceptionOrNull()?.let { throwable ->
-            val failure = throwable.toFailure("This item could not be decrypted.")
+            val failure = throwable.toStageFailure("This item could not be decrypted.")
             // TEMP-DIAG (mp3 bad_decrypt): a silent-wrong unwrapped key reads identical to a
             // fetch problem without the key/derivation facts. CLI-side repro unwraps key
             // sha256 27baa5f2… under derivation 6ab58693… — compare on the next bad_decrypt.
@@ -446,7 +447,7 @@ class WatchViewModel @Inject constructor(
         val file = havenCache.file(piece, transform).getOrElse { throwable ->
             // acquireKey has already published the specific failure (dry canister, drip, …).
             if (keyFailure != null) return Result.failure(keyFailure!!)
-            val failure = throwable.toFailure("This item could not be decrypted.")
+            val failure = throwable.toStageFailure("This item could not be decrypted.")
             logStage("unlocked fetch failed id=${media.id} code=${failure.code} msg=${failure.message}")
             content.value = failure
             return Result.failure(throwable)
@@ -718,6 +719,24 @@ internal fun Throwable.toFailure(fallbackMessage: String): ContentState.Failed =
 }
 
 /**
+ * Map a staging/fetch throwable, preserving a provider-side unavailable cause
+ * through cache and spool wrappers. Point-in-time fetch failures and pre-stage
+ * availability probes therefore reach the same automatic-return branch.
+ */
+internal fun Throwable.toStageFailure(fallbackMessage: String): ContentState.Failed {
+    val unavailable = generateSequence(this) { it.cause }
+        .any { it is PieceUnavailableException }
+    return if (unavailable) {
+        ContentState.Failed(
+            code = "PIECE_UNAVAILABLE",
+            message = "This item's content is no longer available from any provider, so it can't be opened right now.",
+        )
+    } else {
+        toFailure(fallbackMessage)
+    }
+}
+
+/**
  * FR-FILE-4. `EXPIRED` is the mirror's marker for a piece whose freshness or integrity check did not
  * hold, so it is not exportable. A function rather than an inline expression because the ViewModel
  * re-checks it after the button has already been enabled.
@@ -727,3 +746,11 @@ internal fun MediaItem.isExportable(): Boolean =
 
 /** Only `FILE` needs the save/open-with path; every other kind renders inline. */
 internal fun MediaKind.rendersInline(): Boolean = this != MediaKind.FILE
+
+/**
+ * Only a confirmed unavailable piece may leave the viewer automatically.
+ * Every other failure keeps the explicit error screen, retry control, and
+ * reader-owned navigation.
+ */
+internal fun shouldAutoReturnUnavailable(content: ContentState): Boolean =
+    content is ContentState.Failed && content.code == "PIECE_UNAVAILABLE"

@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
 import haven.mobile.core.design.component.ConfirmDialog
@@ -65,9 +67,14 @@ import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaCard
 import haven.mobile.core.design.component.MediaRow
+import haven.mobile.core.domain.WATCH_UNAVAILABLE_NOTICE_KEY
+import haven.mobile.core.domain.WatchUnavailableNotice
 import haven.mobile.core.domain.artworkFileFor
 import haven.mobile.core.domain.captionLine
 import haven.mobile.core.domain.signDisclosureBatchBody
+import haven.mobile.core.domain.UNAVAILABLE_NOTICE_MILLIS
+import haven.mobile.core.domain.unavailableReturnMessage
+import kotlinx.coroutines.delay
 
 /**
  * The library.
@@ -87,6 +94,23 @@ fun LibraryScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val walletAddress by viewModel.walletAddress.collectAsState()
+    val unavailableNotice by viewModel.unavailableNotice.collectAsState()
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val savedStateHandle = currentEntry?.savedStateHandle
+    val unavailableReturn by remember(savedStateHandle) {
+        savedStateHandle?.getStateFlow<WatchUnavailableNotice?>(
+            WATCH_UNAVAILABLE_NOTICE_KEY,
+            null,
+        )
+    }?.collectAsState() ?: remember { mutableStateOf<WatchUnavailableNotice?>(null) }
+    val batchState = (uiState as? LibraryUiState.Ready)?.batch
+    LaunchedEffect(unavailableReturn, batchState) {
+        val notice = unavailableReturn ?: return@LaunchedEffect
+        if (batchState is SelectionBatch.Working) return@LaunchedEffect
+        viewModel.hideUnavailableItem(notice.itemId)
+        savedStateHandle?.remove<WatchUnavailableNotice>(WATCH_UNAVAILABLE_NOTICE_KEY)
+        viewModel.showUnavailableNotice(notice)
+    }
 
     val selecting = (uiState as? LibraryUiState.Ready)?.selecting == true
     val selectedCount = (uiState as? LibraryUiState.Ready)?.selectedIds?.size ?: 0
@@ -177,6 +201,17 @@ fun LibraryScreen(
                 }
             },
         )
+
+        unavailableNotice?.let { notice ->
+            UnavailableNotice(
+                message = unavailableReturnMessage(notice.title),
+                onShowHidden = {
+                    viewModel.showHiddenItems()
+                    viewModel.dismissUnavailableNotice()
+                },
+                onDismiss = { viewModel.dismissUnavailableNotice() },
+            )
+        }
 
         when (val state = uiState) {
             LibraryUiState.Loading -> LibrarySkeleton()
@@ -418,6 +453,51 @@ private fun LibraryHeader(
             }
         }
         Spacer(Modifier.height(HavenSpacing.md))
+    }
+}
+
+/**
+ * A transient automatically-dismissing notice for a suppressed row. It keeps
+ * the reader oriented after the viewer returns, names the recovery path, and
+ * then clears itself without another tap.
+ */
+@Composable
+private fun UnavailableNotice(
+    message: String,
+    onShowHidden: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    LaunchedEffect(message) {
+        delay(UNAVAILABLE_NOTICE_MILLIS)
+        onDismiss()
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.sm),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = HavenSpacing.md, end = HavenSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(HavenSpacing.sm))
+            TextButton(onClick = onShowHidden) { Text("Show hidden") }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(HavenSpacing.touchTarget)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
