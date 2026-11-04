@@ -61,6 +61,54 @@ class LibraryLabelsTest {
         assertEquals("Requires the gate token", item(encrypted = true).gateRequirementLine())
     }
 
+    // ── Pre-signature disclosure: the trust contract of an unknown app ──────
+    // These pin the promises the disclosure makes, so a copy edit cannot
+    // quietly drop one.
+
+    @Test
+    fun `disclosure headline leads with intent, not the wallet mechanism`() {
+        assertFalse(signDisclosureHeadline(firstTime = true).contains("wallet", ignoreCase = true))
+        assertFalse(signDisclosureHeadline(firstTime = false).contains("wallet", ignoreCase = true))
+        assertEquals("Open this item", signDisclosureHeadline(firstTime = false))
+    }
+
+    @Test
+    fun `disclosure guarantees promise no transaction, no gas, no seed phrase`() {
+        val joined = SIGN_DISCLOSURE_GUARANTEES.joinToString(" ")
+        assertTrue(SIGN_DISCLOSURE_GUARANTEES.first().contains("hold", ignoreCase = true))
+        assertTrue(joined.contains("No transaction"), joined)
+        assertTrue(joined.contains("no gas", ignoreCase = true), joined)
+        assertTrue(joined.contains("seed phrase", ignoreCase = true), joined)
+    }
+
+    @Test
+    fun `disclosure session note promises reopening will not ask again`() {
+        assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("session", ignoreCase = true))
+        assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("won't ask", ignoreCase = true))
+    }
+
+    @Test
+    fun `disclosure why body tells the reader when to reject a wallet prompt`() {
+        assertTrue(SIGN_DISCLOSURE_WHY_BODY.contains("reject", ignoreCase = true))
+        assertTrue(SIGN_DISCLOSURE_WHY_BODY.contains("cannot move", ignoreCase = true))
+    }
+
+    @Test
+    fun `batch disclosure states the count and carries the same guarantees`() {
+        val body = signDisclosureBatchBody(itemCount = 7)
+        assertTrue(body.contains("7"), body)
+        assertTrue(body.contains("once per gate", ignoreCase = true), body)
+        assertTrue(body.contains("seed phrase", ignoreCase = true), body)
+        assertTrue(body.contains("No transaction"), body)
+    }
+
+    @Test
+    fun `a read-only held check is stated, an unknown one is not claimed`() {
+        assertTrue(signDisclosureGateLine(gateHeld = true)?.contains("no signature") == true)
+        assertEquals(null, signDisclosureGateLine(gateHeld = false))
+        assertEquals(null, signDisclosureGateLine(gateHeld = null))
+    }
+
     private fun item(
         creator: String? = "0xother",
         owner: String = "0xother",

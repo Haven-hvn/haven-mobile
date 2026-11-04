@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":core-crypto"))
     implementation(project(":core-cache"))
     implementation(project(":core-cache-mirror"))
+    implementation(project(":core-collections"))
     implementation(project(":core-wallet"))
     // Pipeline transitions go to the log and the diagnostics trail.
     implementation("com.jakewharton.timber:timber:5.0.1")

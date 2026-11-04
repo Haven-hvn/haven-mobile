@@ -28,6 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +41,7 @@ import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
 import haven.mobile.core.design.component.AttestationBadge
 import haven.mobile.core.design.component.AttestationState
+import haven.mobile.core.design.component.ConfirmDialog
 import haven.mobile.core.design.component.EmptyState
 import haven.mobile.core.design.component.ErrorState
 import haven.mobile.core.design.component.HavenSearchField
@@ -46,6 +50,7 @@ import haven.mobile.core.design.component.LibrarySkeleton
 import haven.mobile.core.design.component.MediaRow
 import haven.mobile.core.design.component.MonoIdentifier
 import haven.mobile.core.domain.artworkFileFor
+import haven.mobile.core.domain.signDisclosureBatchBody
 
 /**
  * Community feed.
@@ -221,6 +226,10 @@ private fun UnlockAllHeader(
     onUnlockAll: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // Nothing signs from here without the guarantees in front of the reader
+    // first — the same rule as the viewer's disclosure, because a batch tap
+    // popping the wallet cold teaches the same blind-signing habit.
+    var showSignDisclosure by remember { mutableStateOf(false) }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -231,7 +240,7 @@ private fun UnlockAllHeader(
         Column(modifier = Modifier.padding(HavenSpacing.md)) {
             when (batch) {
                 null -> {
-                    Button(onClick = onUnlockAll) {
+                    Button(onClick = { showSignDisclosure = true }) {
                         Text("Unlock all ($gatedCount)")
                     }
                     Spacer(Modifier.height(HavenSpacing.xs))
@@ -278,6 +287,20 @@ private fun UnlockAllHeader(
                 }
             }
         }
+    }
+
+    if (showSignDisclosure) {
+        ConfirmDialog(
+            title = "Unlock all ($gatedCount)?",
+            body = signDisclosureBatchBody(gatedCount),
+            confirmLabel = "Sign to unlock",
+            destructive = false,
+            onConfirm = {
+                showSignDisclosure = false
+                onUnlockAll()
+            },
+            onDismiss = { showSignDisclosure = false },
+        )
     }
 }
 

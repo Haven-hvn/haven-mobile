@@ -74,6 +74,28 @@ fun KeyStatusChip(
     )
 }
 
+/**
+ * Whether a cache chip earns its place in a list row or grid card.
+ *
+ * The default state gets no badge: a chip on every row announcing that
+ * nothing is stored there reads as a broken, empty library, and it teaches
+ * the reader an engineering word ("cached") before they can act on anything.
+ * Only states a reader can act on — or be glad about — are marked in lists,
+ * the same rule [KeyStatusChip] already follows (locked is the default and
+ * gets no badge). The detail sheet still names every state via
+ * [CacheStatusChip] itself.
+ */
+fun cacheChipVisibleInList(status: ContentCacheStatus): Boolean =
+    status != ContentCacheStatus.UNCACHED
+
+/** The reader's situation, never the cache's vocabulary. */
+fun cacheChipLabel(status: ContentCacheStatus): String = when (status) {
+    ContentCacheStatus.CACHED -> "Offline"
+    ContentCacheStatus.PARTIAL -> "Partial"
+    ContentCacheStatus.EXPIRED -> "Expired"
+    ContentCacheStatus.UNCACHED -> "Not on this device"
+}
+
 @Composable
 fun CacheStatusChip(
     status: ContentCacheStatus,
@@ -81,11 +103,12 @@ fun CacheStatusChip(
     compact: Boolean = false,
 ) {
     val accents = HavenTheme.accents
-    val (tint, icon, label) = when (status) {
-        ContentCacheStatus.CACHED -> Triple(accents.cacheCached, Icons.Default.CloudDone, "Offline")
-        ContentCacheStatus.PARTIAL -> Triple(accents.cacheFetching, Icons.Default.Downloading, "Partial")
-        ContentCacheStatus.EXPIRED -> Triple(accents.cacheExpired, Icons.Default.Schedule, "Expired")
-        ContentCacheStatus.UNCACHED -> Triple(accents.cacheMissing, Icons.Default.CloudOff, "Not cached")
+    val label = cacheChipLabel(status)
+    val (tint, icon) = when (status) {
+        ContentCacheStatus.CACHED -> accents.cacheCached to Icons.Default.CloudDone
+        ContentCacheStatus.PARTIAL -> accents.cacheFetching to Icons.Default.Downloading
+        ContentCacheStatus.EXPIRED -> accents.cacheExpired to Icons.Default.Schedule
+        ContentCacheStatus.UNCACHED -> accents.cacheMissing to Icons.Default.CloudOff
     }
     HavenStatusChip(
         tint = tint,

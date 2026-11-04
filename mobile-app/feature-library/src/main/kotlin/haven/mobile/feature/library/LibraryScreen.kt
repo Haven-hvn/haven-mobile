@@ -46,6 +46,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +57,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
+import haven.mobile.core.design.component.ConfirmDialog
 import haven.mobile.core.design.component.EmptyState
 import haven.mobile.core.design.component.ErrorState
 import haven.mobile.core.design.component.HavenSearchField
@@ -63,6 +67,7 @@ import haven.mobile.core.design.component.MediaCard
 import haven.mobile.core.design.component.MediaRow
 import haven.mobile.core.domain.artworkFileFor
 import haven.mobile.core.domain.captionLine
+import haven.mobile.core.domain.signDisclosureBatchBody
 
 /**
  * The library.
@@ -438,6 +443,10 @@ private fun SelectionActionBar(
     val downloadableCount = checked.count { it.pieceRef != null }
     val working = state.batch as? SelectionBatch.Working
     val done = state.batch as? SelectionBatch.Done
+    // Nothing signs from this bar without the guarantees in front of the
+    // reader first: a batch tap used to pop the wallet cold, which is the
+    // exact blind-signing habit the viewer's disclosure exists to prevent.
+    var pendingBatch by remember { mutableStateOf<BatchOp?>(null) }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -497,14 +506,18 @@ private fun SelectionActionBar(
                         horizontalArrangement = Arrangement.spacedBy(HavenSpacing.sm),
                     ) {
                         Button(
-                            onClick = onUnlock,
+                            onClick = { pendingBatch = BatchOp.UNLOCK },
                             enabled = gatedCount > 0,
                             modifier = Modifier.weight(1f),
                         ) {
                             Text(if (gatedCount > 0) "Unlock $gatedCount" else "Unlock")
                         }
                         FilledTonalButton(
-                            onClick = onDownload,
+                            onClick = {
+                                // Ungated downloads sign nothing, so they
+                                // need no disclosure and keep their one tap.
+                                if (gatedCount > 0) pendingBatch = BatchOp.DOWNLOAD else onDownload()
+                            },
                             enabled = downloadableCount > 0,
                             modifier = Modifier.weight(1f),
                         ) {
@@ -525,6 +538,30 @@ private fun SelectionActionBar(
                 }
             }
         }
+    }
+
+    pendingBatch?.let { op ->
+        ConfirmDialog(
+            title = when (op) {
+                BatchOp.UNLOCK -> "Unlock $gatedCount?"
+                BatchOp.DOWNLOAD -> "Download $downloadableCount?"
+            },
+            body = signDisclosureBatchBody(gatedCount) +
+                (if (op == BatchOp.DOWNLOAD) "\n\nDownloads additionally save the files on this device." else ""),
+            confirmLabel = when (op) {
+                BatchOp.UNLOCK -> "Sign to unlock"
+                BatchOp.DOWNLOAD -> "Sign and download"
+            },
+            destructive = false,
+            onConfirm = {
+                pendingBatch = null
+                when (op) {
+                    BatchOp.UNLOCK -> onUnlock()
+                    BatchOp.DOWNLOAD -> onDownload()
+                }
+            },
+            onDismiss = { pendingBatch = null },
+        )
     }
 }
 

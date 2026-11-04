@@ -46,7 +46,7 @@ tags: ["v1", "e2e"]
     optional: true
 # Either there is content, or the empty state points at the thing that fixes it — never a blank screen.
 - assertVisible:
-    text: "Nothing to read yet|No wallet connected|Offline|Not cached|No matches"
+    text: "Nothing to read yet|No wallet connected|Offline|No matches"
     optional: true
 
 # ── 4. Communities — the way in ───────────────────────────────────────────────────────────────

@@ -21,11 +21,23 @@ tags: ["v1", "file"]
     index: 0
     optional: true
 
+# ── A gated fixture stops at the signature disclosure first ─────────────────────────────────
+# Same disclosure as every other kind: the item, the guarantees, "Sign to open". Signing itself
+# needs the wallet app, which Maestro cannot drive — asserted here, never tapped. Optional: an
+# ungated (or already-unlocked) fixture goes straight to the viewer below.
+- assertVisible:
+    text: "Prove it's you to open this|Open this item"
+    optional: true
+
 # ── The FILE viewer explains itself before offering the action ────────────────────────────────
+# Optional since the disclosure above: with a gated fixture this screen only appears after a
+# real wallet signature, which this flow cannot perform.
 - assertVisible:
     text: "Haven can't display this type inline.*"
+    optional: true
 - assertVisible:
     text: "Save to device|Unlock and save"
+    optional: true
 
 # "Open with…" is disabled until something has actually been saved — offering it earlier would
 # hand the chooser a URI that does not exist.

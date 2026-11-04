@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Button
@@ -77,13 +78,18 @@ import haven.mobile.core.design.component.MediaKindGlyph
 import haven.mobile.core.design.component.byteLabel
 import haven.mobile.core.design.component.label
 import haven.mobile.core.design.component.summaryLine
+import haven.mobile.core.design.component.truncateMiddle
 import haven.mobile.core.domain.CREATOR_UNVERIFIABLE
-import haven.mobile.core.domain.SIGN_DISCLOSURE_HEADLINE
+import haven.mobile.core.domain.SIGN_DISCLOSURE_GUARANTEES
+import haven.mobile.core.domain.SIGN_DISCLOSURE_SESSION_NOTE
+import haven.mobile.core.domain.SIGN_DISCLOSURE_WHY_BODY
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.captionLine
 import haven.mobile.core.domain.gateRequirementLine
 import haven.mobile.core.domain.isCreatorVerifiable
+import haven.mobile.core.domain.signDisclosureGateLine
+import haven.mobile.core.domain.signDisclosureHeadline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,7 +105,8 @@ import java.io.File
  *
  * Inline kinds start as soon as the item resolves — a user who tapped an item has already expressed
  * intent. `FILE` is the exception: it does not render, it exports, and export is gated behind an
- * explicit action plus a one-time warning (FR-FILE-3).
+ * explicit action plus a one-time warning (FR-FILE-3). A gated file additionally passes the same
+ * signature disclosure as every other kind before anything signs for it.
  */
 @Composable
 fun WatchScreen(
@@ -161,15 +168,19 @@ fun WatchScreen(
                         walletAddress = walletAddress,
                     )
                 } else {
-                    if (media.kind.rendersInline()) {
-                        LaunchedEffect(media.id) { viewModel.prepare(media) }
-                    }
+                    // Every kind prepares: inline kinds stage, gated files stop
+                    // at the signature disclosure, ungated files stay Idle for
+                    // their explicit save action (see WatchViewModel.prepare).
+                    LaunchedEffect(media.id) { viewModel.prepare(media) }
 
                     when (val content = state.content) {
-                        ContentState.NeedsSignature ->
+                        is ContentState.NeedsSignature ->
                             SignatureDisclosure(
                                 media = media,
+                                gateHeld = content.gateHeld,
+                                walletAddress = walletAddress,
                                 onUnlock = { viewModel.unlock(media) },
+                                onCancel = { navController.popBackStack() },
                             )
 
                         ContentState.Idle ->
@@ -925,41 +936,203 @@ private fun ProgressBlock(label: String, progress: Float? = null) {
 /**
  * Pre-disclosure before the first wallet signature for an item.
  *
- * The signature prompt is the scariest moment in the app — a cold MetaMask popup
- * with no context teaches blind-signing. This states what the signature does
- * (prove holdings, nothing more) and waits for an explicit tap; nothing here
- * signs on entry. Cached keys and ungated items never reach this screen.
+ * The signature prompt is the scariest moment in the app — a cold wallet popup
+ * with no context teaches blind-signing. So this keeps the item the reader
+ * tapped in view (title, who may open it, what it is), states the guarantees
+ * as promises that can be checked in the wallet prompt itself, and waits for
+ * an explicit tap; nothing here signs on entry. Cached keys and ungated items
+ * never reach this screen, and [WatchViewModel.prepare] has already probed
+ * that the piece can be served and — read-only, no signature — whether this
+ * wallet already holds the gate token.
+ *
+ * The full explanation is shown once. After the reader has accepted it, this
+ * is a one-line confirmation with the long answer behind "Why am I signing?":
+ * repeating the whole lecture on every item trains tap-through, which is the
+ * blind-signing habit this screen exists to prevent.
  */
 @Composable
-private fun SignatureDisclosure(media: MediaItem, onUnlock: () -> Unit) {
+private fun SignatureDisclosure(
+    media: MediaItem,
+    gateHeld: Boolean?,
+    walletAddress: String?,
+    onUnlock: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val context = LocalContext.current
+    var firstTime by remember {
+        mutableStateOf(
+            !context.getSharedPreferences(SIGN_PREFS, android.content.Context.MODE_PRIVATE)
+                .getBoolean(KEY_SIGN_DISCLOSURE_SEEN, false),
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(HavenSpacing.xl),
-        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // The item stays in view: "you tapped this, by them" is context the
+        // reader can verify, and it is what makes the ask below legible.
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Row(
+                modifier = Modifier.padding(HavenSpacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MediaKindGlyph(kind = media.kind)
+                Spacer(Modifier.width(HavenSpacing.md))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = media.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = media.captionLine(walletAddress),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = media.summaryLine(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        media.description?.takeIf { it.isNotBlank() }?.let { description ->
+            Spacer(Modifier.height(HavenSpacing.md))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(HavenSpacing.lg))
         Text(
-            text = SIGN_DISCLOSURE_HEADLINE,
-            style = MaterialTheme.typography.titleMedium,
+            text = signDisclosureHeadline(firstTime),
+            style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(HavenSpacing.sm))
         Text(
-            text = media.gateRequirementLine() + ". Tapping below asks " +
-                "your wallet to sign a message proving you hold it. That is all the " +
-                "signature does — no transaction, no gas fee, nothing leaves your wallet.",
+            text = media.gateRequirementLine() + ".",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        signDisclosureGateLine(gateHeld)?.let { heldLine ->
+            Spacer(Modifier.height(HavenSpacing.sm))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(HavenSpacing.sm))
+                Text(
+                    text = heldLine,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        Spacer(Modifier.height(HavenSpacing.md))
+        if (firstTime) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(HavenSpacing.sm),
+            ) {
+                SIGN_DISCLOSURE_GUARANTEES.forEach { guarantee ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(HavenSpacing.sm))
+                        Text(
+                            text = guarantee,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(HavenSpacing.md))
+            Text(
+                text = SIGN_DISCLOSURE_SESSION_NOTE,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            Text(
+                text = "Same signature as before — no transaction, no gas fee, nothing leaves your wallet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        walletAddress?.takeIf { it.isNotBlank() }?.let { address ->
+            Spacer(Modifier.height(HavenSpacing.md))
+            Text(
+                text = "Signing as ${truncateMiddle(address)}",
+                style = HavenTheme.text.monoSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(HavenSpacing.md))
+        Explain(
+            question = "Why am I signing?",
+            body = SIGN_DISCLOSURE_WHY_BODY,
         )
         Spacer(Modifier.height(HavenSpacing.lg))
         Button(
-            onClick = onUnlock,
+            onClick = {
+                if (firstTime) {
+                    context.getSharedPreferences(SIGN_PREFS, android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(KEY_SIGN_DISCLOSURE_SEEN, true)
+                        .apply()
+                    firstTime = false
+                }
+                onUnlock()
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(HavenSpacing.touchTarget),
         ) {
             Text("Sign to open")
+        }
+        Spacer(Modifier.height(HavenSpacing.sm))
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HavenSpacing.touchTarget),
+        ) {
+            Text("Not now")
         }
     }
 }
@@ -1030,6 +1203,8 @@ private val COLLAPSE_SWIPE_DISTANCE = 96.dp
 
 private const val FILE_PREFS = "haven_file_export"
 private const val KEY_WARNING_SEEN = "file_warning_seen"
+private const val SIGN_PREFS = "haven_sign_disclosure"
+private const val KEY_SIGN_DISCLOSURE_SEEN = "sign_disclosure_seen"
 private const val FALLBACK_MIME = "application/octet-stream"
 private const val MIN_PAGE_WIDTH_PX = 320
 private const val PAGE_PLACEHOLDER_ASPECT = 1f / 1.414f

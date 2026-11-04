@@ -11,11 +11,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.PlaintextSpool
 import haven.mobile.core.cache.mirror.MediaRepository
+import haven.mobile.core.collections.GateAccessChecker
+import haven.mobile.core.collections.gateKeyOrNull
 import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.crypto.HavenCipher
 import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.crypto.stripCarContainer
 import haven.mobile.core.domain.ContentCacheStatus
+import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.domain.KeyGateVerdict
 import haven.mobile.core.domain.gateKeyAcquisition
 import haven.mobile.core.haven.aol.hasSessionKey
@@ -59,8 +62,14 @@ sealed interface ContentState {
      * The item is gated and no session key exists, so opening it needs a wallet
      * signature. Shown *before* any signing prompt: a cold wallet popup with no
      * explanation is how readers learn to blind-sign. Explicit [unlock] proceeds.
+     *
+     * [gateHeld] is the read-only balance verdict gathered before this state
+     * was published: `true` only when the check proved the connected wallet
+     * holds the gate token, null when it could not tell. It is never `false`
+     * here — an unreadable gate is not a failed gate, and the signed unlock
+     * remains the authority.
      */
-    data object NeedsSignature : ContentState
+    data class NeedsSignature(val gateHeld: Boolean? = null) : ContentState
 
     /** [progress] is 0f..1f when the size is known, null when it is not. */
     data class Working(val stage: UnlockStage, val progress: Float? = null) : ContentState
@@ -119,6 +128,7 @@ class WatchViewModel @Inject constructor(
     private val plaintextSpool: PlaintextSpool,
     private val aesKeyCache: AesKeyCache,
     private val mediaRepository: MediaRepository,
+    private val gateAccessChecker: GateAccessChecker,
     private val nowPlaying: NowPlayingRepository,
     /** Exposed so the drip sheet can offer in-app trading when a wallet is connected. */
     val walletSession: WalletSession,
@@ -199,16 +209,73 @@ class WatchViewModel @Inject constructor(
         }
         viewModelScope.launch {
             if (media.isEncrypted && !hasUnlockKey(media)) {
+                // No wallet, no signature to ask for: say so now instead of
+                // letting the reader tap "Sign to open" into a failure.
+                if (walletSession.address.value == null) {
+                    content.value = ContentState.Failed(
+                        code = "WALLET_NOT_CONNECTED",
+                        message = "Connect a wallet to open this item.",
+                    )
+                    logStage("failed code=WALLET_NOT_CONNECTED id=${media.id}")
+                    return@launch
+                }
                 // A locked drip stage would only ever refuse the signature — say why first.
                 (havenAol.precheck(media) as? HavenError.MarketCapNotReached)?.let { locked ->
                     content.value = ContentState.LockedDrip(locked.required, locked.actual)
                     return@launch
                 }
-                content.value = ContentState.NeedsSignature
+                // Value before signature, part one: never ask for a signature
+                // for content no provider can serve. The same probe staging
+                // runs after the tap — running it now means the disclosure
+                // only appears when signing can actually open something.
+                val verdict = gateKeyAcquisition(
+                    items = listOf(media),
+                    isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                    isAvailable = havenCache::isAvailable,
+                ).single().second
+                logStage("pre-disclosure gate id=${media.id} verdict=$verdict")
+                if (verdict == KeyGateVerdict.UNAVAILABLE) {
+                    val failure = HavenError.PieceUnavailable(
+                        "This item's content is no longer available from any provider, so it can't be unlocked right now.",
+                    )
+                    logStage("failed code=${failure.code} msg=${failure.message}")
+                    content.value = failure.toFailure("")
+                    return@launch
+                }
+                // Value before signature, part two: a read-only balance check
+                // (no signature, nothing stored) that can tell the reader
+                // "this wallet already qualifies" before they are asked for
+                // anything. Only a proven hold is claimed; see NeedsSignature.
+                content.value = ContentState.NeedsSignature(gateHeld = readGateHeld(media))
+            } else if (media.kind == MediaKind.FILE) {
+                // The file viewer owns its explicit save action; staging here
+                // would decrypt a file nobody asked to export yet. Stay Idle —
+                // but note the encrypted branch above still ran, so a gated
+                // file reaches its save button only via the disclosure.
             } else {
                 stage(media)
             }
         }
+    }
+
+    /**
+     * Read-only gate verdict for the disclosure: true only when the balance
+     * check proved the connected wallet holds this item's gate token.
+     *
+     * The checker reports unsatisfiable and unreadable gates the same way
+     * (absent), and a wrong "you don't hold it" before the authoritative
+     * signed check would strand readers on testnets and flaky RPCs alike —
+     * so everything that is not a proof collapses to null (not claimed).
+     */
+    private suspend fun readGateHeld(media: MediaItem): Boolean? {
+        val gate = media.gate ?: return null
+        val address = walletSession.address.value ?: return null
+        val key = gate.gateKeyOrNull() ?: return null
+        val satisfied = runCatching {
+            gateAccessChecker.satisfied(address, listOf(gate), HavenChain.entries.toSet())
+        }.getOrDefault(emptySet())
+        logStage("pre-disclosure balance id=${media.id} held=${key in satisfied}")
+        return if (key in satisfied) true else null
     }
 
     /** Explicit consent from the disclosure — the only path that may pop the wallet. */

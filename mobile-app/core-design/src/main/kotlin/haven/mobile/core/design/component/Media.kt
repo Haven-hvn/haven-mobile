@@ -130,7 +130,9 @@ fun MediaRow(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(HavenSpacing.xs),
         ) {
-            CacheStatusChip(status = item.contentCacheStatus, compact = true)
+            if (cacheChipVisibleInList(item.contentCacheStatus)) {
+                CacheStatusChip(status = item.contentCacheStatus, compact = true)
+            }
             if (keyReady) {
                 KeyStatusChip(compact = true)
             }
@@ -241,7 +243,9 @@ fun MediaCard(
                     .padding(HavenSpacing.sm),
                 contentAlignment = Alignment.TopEnd,
             ) {
-                CacheStatusChip(status = item.contentCacheStatus, compact = true)
+                if (cacheChipVisibleInList(item.contentCacheStatus)) {
+                    CacheStatusChip(status = item.contentCacheStatus, compact = true)
+                }
             }
             // Selection wins the corner while it lasts; otherwise the status chips live here.
             if (selected != null) {
