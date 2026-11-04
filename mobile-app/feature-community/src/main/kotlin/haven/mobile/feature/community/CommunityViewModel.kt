@@ -4,10 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import haven.mobile.core.attestation.AttestationVerifier
+import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.MediaRepository
+import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.design.component.AttestationState
+import haven.mobile.core.domain.KeyGateVerdict
 import haven.mobile.core.domain.MediaItem
+import haven.mobile.core.domain.error.HavenError
+import haven.mobile.core.domain.gateKeyAcquisition
 import haven.mobile.core.haven.aol.HavenAol
+import haven.mobile.core.haven.aol.hasSessionKey
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +74,8 @@ class CommunityViewModel @Inject constructor(
     private val attestationVerifier: AttestationVerifier,
     private val walletSession: WalletSession,
     private val havenAol: HavenAol,
+    private val havenCache: HavenCache,
+    private val aesKeyCache: AesKeyCache,
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
@@ -175,8 +183,34 @@ class CommunityViewModel @Inject constructor(
         if (walletSession.address.value == null) return
         viewModelScope.launch {
             unlockBatch.value = UnlockBatch.Working(done = 0, total = targets.size)
-            val results = havenAol.decryptAll(targets, walletSession) { done, total ->
-                unlockBatch.value = UnlockBatch.Working(done = done, total = total)
+            // Gate before decryptAll: its signatures and canister calls burn spend
+            // even for pieces no provider can serve anymore. Unavailable targets
+            // fail now; the batch only spends on pieces that can open.
+            val open = gateKeyAcquisition(
+                items = targets,
+                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                isAvailable = havenCache::isAvailable,
+            ).map { it.second != KeyGateVerdict.UNAVAILABLE }
+            val skipped = open.count { !it }
+            val servable = targets.filterIndexed { index, _ -> open[index] }
+            val gated: List<Result<ByteArray>> = if (servable.isEmpty()) {
+                emptyList()
+            } else {
+                havenAol.decryptAll(servable, walletSession) { done, _ ->
+                    unlockBatch.value = UnlockBatch.Working(done = done + skipped, total = targets.size)
+                }
+            }
+            val keyed = gated.iterator()
+            val results = targets.mapIndexed { index, _ ->
+                if (open[index]) {
+                    keyed.next()
+                } else {
+                    Result.failure<ByteArray>(
+                        HavenError.PieceUnavailable(
+                            "This item's content is no longer available from any provider.",
+                        ),
+                    )
+                }
             }
             unlockBatch.value = UnlockBatch.Done(
                 succeeded = results.count { it.isSuccess },

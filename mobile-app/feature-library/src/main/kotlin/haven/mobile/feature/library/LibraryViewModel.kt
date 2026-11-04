@@ -5,9 +5,13 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.MediaRepository
+import haven.mobile.core.crypto.AesKeyCache
 import haven.mobile.core.crypto.HavenCipher
 import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.domain.ContentCacheStatus
+import haven.mobile.core.domain.KeyGateVerdict
+import haven.mobile.core.domain.gateKeyAcquisition
+import haven.mobile.core.haven.aol.hasSessionKey
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
 import haven.mobile.core.domain.error.HavenError
@@ -100,6 +104,7 @@ class LibraryViewModel @Inject constructor(
     private val havenAol: HavenAol,
     private val havenCache: HavenCache,
     private val havenCipher: HavenCipher,
+    private val aesKeyCache: AesKeyCache,
     private val hiddenItems: HiddenItemsStore,
 ) : ViewModel() {
 
@@ -351,17 +356,31 @@ class LibraryViewModel @Inject constructor(
         if (targets.isEmpty() || batch.value is SelectionBatch.Working) return
         if (walletSession.address.value == null) return
         viewModelScope.launch {
-            batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = 0, total = targets.size)
-            val results = try {
-                havenAol.decryptAll(targets, walletSession) { done, total ->
-                    batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = done, total = total)
+            batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Checking availability", done = 0, total = targets.size)
+            // Gate before decryptAll: its signatures and canister calls burn spend
+            // even for pieces no provider can serve anymore. Unavailable targets
+            // fail now; the batch only spends on pieces that can open.
+            val open = probeTargets(targets)
+            val skipped = open.count { !it }
+            val servable = targets.filterIndexed { index, _ -> open[index] }
+            val gated: List<Result<ByteArray>> = if (servable.isEmpty()) {
+                emptyList()
+            } else {
+                try {
+                    havenAol.decryptAll(servable, walletSession) { done, _ ->
+                        batch.value = SelectionBatch.Working(BatchOp.UNLOCK, phase = "Unlocking", done = done + skipped, total = targets.size)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // decryptAll promises per-item Results, but a batch tap must never
+                    // take the app down: degrade to per-item failures with a screen.
+                    servable.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // decryptAll promises per-item Results, but a batch tap must never
-                // take the app down: degrade to per-item failures with a screen.
-                targets.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
+            }
+            val keyed = gated.iterator()
+            val results = targets.mapIndexed { index, _ ->
+                if (open[index]) keyed.next() else unavailableKey()
             }
             batch.value = SelectionBatch.Done(
                 op = BatchOp.UNLOCK,
@@ -398,18 +417,34 @@ class LibraryViewModel @Inject constructor(
                 emptyMap()
             } else {
                 batch.value = SelectionBatch.Working(
-                    BatchOp.DOWNLOAD, phase = "Unlocking keys", done = 0, total = gated.size,
+                    BatchOp.DOWNLOAD, phase = "Checking availability", done = 0, total = gated.size,
                 )
-                val keyResults = try {
-                    havenAol.decryptAll(gated, walletSession) { done, total ->
-                        batch.value = SelectionBatch.Working(
-                            BatchOp.DOWNLOAD, phase = "Unlocking keys", done = done, total = total,
-                        )
+                // Same gate as unlock: no signature or canister call for pieces
+                // that cannot open. Unavailable rows fail the download below.
+                val open = probeTargets(gated)
+                val skipped = open.count { !it }
+                val keyTargets = gated.filterIndexed { index, _ -> open[index] }
+                val keyed: List<Result<ByteArray>> = if (keyTargets.isEmpty()) {
+                    emptyList()
+                } else {
+                    batch.value = SelectionBatch.Working(
+                        BatchOp.DOWNLOAD, phase = "Unlocking keys", done = skipped, total = gated.size,
+                    )
+                    try {
+                        havenAol.decryptAll(keyTargets, walletSession) { done, _ ->
+                            batch.value = SelectionBatch.Working(
+                                BatchOp.DOWNLOAD, phase = "Unlocking keys", done = done + skipped, total = gated.size,
+                            )
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        keyTargets.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    gated.map { Result.failure<ByteArray>(HavenError.Internal("Batch unlock hit an unexpected error.")) }
+                }
+                val keyedResults = keyed.iterator()
+                val keyResults = gated.mapIndexed { index, _ ->
+                    if (open[index]) keyedResults.next() else unavailableKey()
                 }
                 gated.zip(keyResults).forEach { (item, result) ->
                     result.getOrNull()?.let { keysById[item.id] = it }
@@ -459,6 +494,23 @@ class LibraryViewModel @Inject constructor(
             keyReadyIds.value = keyReadyIds.value + keyOkById.filterValues { it }.keys
         }
     }
+
+    /**
+     * Per-target key gate: true where a paid key acquisition may proceed.
+     * Unavailable pieces fail the batch without a signature or canister call.
+     */
+    private suspend fun probeTargets(targets: List<MediaItem>): List<Boolean> =
+        gateKeyAcquisition(
+            items = targets,
+            isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+            isAvailable = havenCache::isAvailable,
+        ).map { it.second != KeyGateVerdict.UNAVAILABLE }
+
+    private fun unavailableKey(): Result<ByteArray> = Result.failure(
+        HavenError.PieceUnavailable(
+            "This item's content is no longer available from any provider.",
+        ),
+    )
 
     private companion object {
         /** Keeps the Room subscription alive across a configuration change. */

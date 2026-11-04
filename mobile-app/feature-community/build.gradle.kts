@@ -15,6 +15,8 @@ dependencies {
     implementation(project(":core-design"))
     implementation(project(":core-wallet"))
     implementation(project(":core-cache-mirror"))
+    implementation(project(":core-cache"))
+    implementation(project(":core-crypto"))
     implementation(project(":core-arkiv"))
     implementation(project(":core-attestation"))
     implementation(project(":core-haven-aol"))

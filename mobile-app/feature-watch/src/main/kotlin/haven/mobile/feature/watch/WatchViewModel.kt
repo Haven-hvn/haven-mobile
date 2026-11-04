@@ -16,6 +16,9 @@ import haven.mobile.core.crypto.HavenCipher
 import haven.mobile.core.crypto.decryptOnStore
 import haven.mobile.core.crypto.stripCarContainer
 import haven.mobile.core.domain.ContentCacheStatus
+import haven.mobile.core.domain.KeyGateVerdict
+import haven.mobile.core.domain.gateKeyAcquisition
+import haven.mobile.core.haven.aol.hasSessionKey
 import haven.mobile.core.domain.artworkFileFor
 import haven.mobile.core.domain.MediaItem
 import haven.mobile.core.domain.MediaKind
@@ -261,13 +264,21 @@ class WatchViewModel @Inject constructor(
             // Gate before acquireKey: its Haven-AOL canister call burns ICP cycles
             // (and may prompt a signature) even for a piece no provider can serve
             // anymore. A cached session key costs no cycles, so skip the probe then.
+            val verdict = gateKeyAcquisition(
+                items = listOf(media),
+                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                isAvailable = havenCache::isAvailable,
+            ).single().second
             // Point-in-time only — the fetch below can still fail, and surfaces it.
-            val keyCached = aesKeyCache.getSuspend(piece.pieceCid) != null || havenAol.hasCachedKey(media)
-            if (!keyCached && !havenCache.isAvailable(piece)) {
-                return fail(
-                    "PIECE_UNAVAILABLE",
+            // Logged so the diagnostics trail shows why a key call did or did not happen.
+            logStage("gate id=${media.id} verdict=$verdict")
+            if (verdict == KeyGateVerdict.UNAVAILABLE) {
+                val failure = HavenError.PieceUnavailable(
                     "This item's content is no longer available from any provider, so it can't be unlocked right now.",
                 )
+                logStage("failed code=${failure.code} msg=${failure.message}")
+                content.value = failure.toFailure("")
+                return Result.failure(failure)
             }
             key = acquireKey(media, piece).getOrElse { return Result.failure(it) }
         }
