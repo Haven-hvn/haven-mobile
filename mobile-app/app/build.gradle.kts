@@ -49,7 +49,7 @@ android {
         }
     }
 
-    // Required by io.github.haven-hvn:foc-cache:0.3.0 (declares core library
+    // Required by io.github.haven-hvn:foc-cache:0.3.1 (declares core library
     // desugaring in its AAR metadata). Source/target compat comes from the
     // haven.android.application convention plugin; only the flag is set here.
     compileOptions {

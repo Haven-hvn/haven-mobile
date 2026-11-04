@@ -63,7 +63,7 @@ class PieceRefScopingTest {
         assertEquals(FocChain.CALIBRATION, ref.chain)
         assertTrue(ref.cdnEnabled)
         assertEquals("0x5c32469325d4093ab142dddc1305f91d76e45141", ref.walletAddress)
-        assertEquals("https://0x5c32469325d4093ab142dddc1305f91d76e45141.calibration.filbeam.io/bafkzcibscoped", ref.filBeamUrl)
+        assertEquals("https://0x5C32469325d4093aB142DDdC1305F91d76e45141.calibration.filbeam.io/bafkzcibscoped", ref.filBeamUrl)
     }
 
     @Test
@@ -71,7 +71,7 @@ class PieceRefScopingTest {
         val ref = refOf("0x5C32469325d4093AB142dDDC1305F91d76e45141", 1)
         assertEquals(FocChain.MAINNET, ref.chain)
         assertTrue(ref.cdnEnabled)
-        assertEquals("https://0x5c32469325d4093ab142dddc1305f91d76e45141.filbeam.io/bafkzcibscoped", ref.filBeamUrl)
+        assertEquals("https://0x5C32469325d4093aB142DDdC1305F91d76e45141.filbeam.io/bafkzcibscoped", ref.filBeamUrl)
     }
 
     @Test
