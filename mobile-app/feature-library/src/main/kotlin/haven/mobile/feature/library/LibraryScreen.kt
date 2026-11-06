@@ -127,7 +127,9 @@ fun LibraryScreen(
                     selecting -> "Tick rows, then unlock or download them together."
                     state.totalCount == 0 -> null
                     // Residency is the fact worth surfacing at a glance; the dapp badges it per row,
-                    // and a phone benefits from the total too.
+                    // and a phone benefits from the total too. A background sync is
+                    // named here — inside the fixed top bar, so nothing below moves.
+                    state.isSyncing -> "${state.totalCount} items \u00b7 ${state.offlineCount} offline \u00b7 Checking for new items"
                     else -> "${state.totalCount} items \u00b7 ${state.offlineCount} offline"
                 }
             },
@@ -191,7 +193,7 @@ fun LibraryScreen(
                     }
                 }
                 IconButton(
-                    onClick = { viewModel.refresh() },
+                    onClick = { viewModel.refresh(userInitiated = true) },
                     enabled = uiState !is LibraryUiState.Loading,
                 ) {
                     Icon(
@@ -229,15 +231,10 @@ fun LibraryScreen(
             )
 
             is LibraryUiState.Ready -> {
-                if (state.isRefreshing) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    )
-                }
+                // No in-flow progress bar: inserting/removing one pushed the
+                // header and grid down and back on every refresh. Background
+                // sync is named in the top-bar subtitle; a user-pulled refresh
+                // is answered by the pull indicator below.
                 state.refreshError?.let { message ->
                     RefreshErrorBanner(message = message, onDismiss = { viewModel.dismissRefreshError() })
                 }
@@ -266,8 +263,10 @@ fun LibraryScreen(
                 }
 
                 PullToRefreshBox(
+                    // isRefreshing is user-initiated only, so this rotating
+                    // indicator never appears for a background sync.
                     isRefreshing = state.isRefreshing,
-                    onRefresh = { viewModel.refresh() },
+                    onRefresh = { viewModel.refresh(userInitiated = true) },
                     // Weight, not fillMaxSize: the selection action bar below needs
                     // room in this Column, otherwise it is pushed off-screen.
                     modifier = Modifier.weight(1f),

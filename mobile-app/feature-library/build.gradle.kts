@@ -22,4 +22,5 @@ dependencies {
     implementation(libs.androidx.compose.navigation)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.hilt.navigation)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

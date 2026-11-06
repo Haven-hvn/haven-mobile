@@ -68,7 +68,10 @@ sealed interface LibraryUiState {
         val category: LibraryCategory,
         val layout: LibraryLayout,
         val offlineOnly: Boolean,
+        /** True only for a refresh the user asked for (pull / refresh button). */
         val isRefreshing: Boolean,
+        /** True while a silent background sync checks Arkiv. Never drives a spinner. */
+        val isSyncing: Boolean = false,
         /** Non-fatal: the mirror still has content, but the last refresh failed. */
         val refreshError: String? = null,
         /** Selection mode is on while true; ids are the checked rows. */
@@ -114,6 +117,7 @@ class LibraryViewModel @Inject constructor(
     private val layout = MutableStateFlow(LibraryLayout.GRID)
     private val offlineOnly = MutableStateFlow(false)
     private val refreshing = MutableStateFlow(false)
+    private val syncing = MutableStateFlow(false)
     private val refreshError = MutableStateFlow<String?>(null)
     private val fatalError = MutableStateFlow<String?>(null)
     private val selecting = MutableStateFlow(false)
@@ -190,6 +194,7 @@ class LibraryViewModel @Inject constructor(
             mirror,
             filters,
             refreshing,
+            syncing,
             refreshError,
             fatalError,
             selecting,
@@ -201,12 +206,13 @@ class LibraryViewModel @Inject constructor(
             val items = args[0] as List<MediaItem>?
             val f = args[1] as Filters
             val isRefreshing = args[2] as Boolean
-            val softError = args[3] as String?
-            val hardError = args[4] as String?
-            val isSelecting = args[5] as Boolean
-            val checked = args[6] as Set<String>
-            val batchState = args[7] as SelectionBatch?
-            val keyReady = args[8] as Set<String>
+            val isSyncing = args[3] as Boolean
+            val softError = args[4] as String?
+            val hardError = args[5] as String?
+            val isSelecting = args[6] as Boolean
+            val checked = args[7] as Set<String>
+            val batchState = args[8] as SelectionBatch?
+            val keyReady = args[9] as Set<String>
             when {
                 hardError != null -> LibraryUiState.Error(hardError)
                 items == null -> LibraryUiState.Disconnected
@@ -220,6 +226,7 @@ class LibraryViewModel @Inject constructor(
                     layout = f.layout,
                     offlineOnly = f.offlineOnly,
                     isRefreshing = isRefreshing,
+                    isSyncing = isSyncing,
                     refreshError = softError,
                     selecting = isSelecting,
                     selectedIds = checked,
@@ -233,8 +240,8 @@ class LibraryViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState.Loading)
 
     init {
-        // Land on fresh data without making the user pull: the mirror renders instantly from
-        // Room, then the Arkiv page walk updates it in place.
+        // Stale-while-revalidate: the mirror renders instantly from Room, then the
+        // Arkiv page walk updates it in place. Silent — see refresh(userInitiated).
         viewModelScope.launch {
             walletSession.address.collect { address ->
                 if (address != null) refresh()
@@ -242,13 +249,27 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
+    /**
+     * Revalidate the Room mirror against Arkiv.
+     *
+     * Automatic calls (app load, returning to this tab) are silent: the already
+     * mirrored list — remote and local items alike — stays on screen untouched,
+     * new/removed items land in place via observeAccessible, and no spinner or
+     * progress bar announces the check. Only [userInitiated] refreshes (pull,
+     * refresh button, retry) set [LibraryUiState.Ready.isRefreshing], which is
+     * what the pull indicator keys off — the user asked, so feedback is due.
+     * A sync already in flight absorbs repeat calls instead of re-walking Arkiv.
+     */
+    fun refresh(userInitiated: Boolean = false) {
         if (walletSession.address.value == null) return
+        if (syncing.value) return
+        syncing.value = true
+        if (userInitiated) refreshing.value = true
         viewModelScope.launch {
-            refreshing.value = true
             refreshError.value = null
             // Resolves the wallet's communities and pages each archive into the mirror.
             val result = mediaRepository.refreshAccessible()
+            syncing.value = false
             refreshing.value = false
             result.exceptionOrNull()?.let { throwable ->
                 // Soft failure: whatever is already mirrored stays on screen.
@@ -315,7 +336,7 @@ class LibraryViewModel @Inject constructor(
 
     fun retry() {
         fatalError.value = null
-        refresh()
+        refresh(userInitiated = true)
     }
 
     /** Enter/exit multi-select. Exiting drops the checked set and any finished summary. */
