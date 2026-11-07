@@ -107,12 +107,13 @@ val SIGN_DISCLOSURE_GUARANTEES: List<String> = listOf(
 )
 
 /**
- * The honest scope of "sign once": this item's key is kept for the session.
+ * The honest scope of "sign once": this item's key is kept on this device
+ * (encrypted at rest) across restarts, until the wallet is disconnected.
  * Items sharing a gate epoch may open without signing again, but that is the
- * key cache's doing, not a promise this screen makes per item.
+ * persistent epoch cache's doing, not a promise this screen makes per item.
  */
 const val SIGN_DISCLOSURE_SESSION_NOTE =
-    "Haven keeps this item's key on this device for this session, so reopening it won't ask you to sign again."
+    "Haven keeps this item's key encrypted on this device, so reopening it later won't ask you to sign again. Keys are wiped when you disconnect."
 
 /** The long answer, behind "Why am I signing?" — present, never in the way. */
 const val SIGN_DISCLOSURE_WHY_BODY =

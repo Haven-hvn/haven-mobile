@@ -338,7 +338,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "Content keys are unwrapped in memory only. Nothing is backed up off device.",
+                    text = "Content keys are stored encrypted on this device only. Nothing is backed up off device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -364,10 +364,10 @@ fun SettingsScreen(
         PendingAction.DISCONNECT -> ConfirmDialog(
             title = "Disconnect wallet?",
             body = if (state.clearOnDisconnect) {
-                "In-memory keys are wiped, and this wallet's cached content and local library are " +
+                "Keys are wiped, and this wallet's cached content and local library are " +
                     "deleted. You will need to reconnect and re-fetch."
             } else {
-                "In-memory keys are wiped and the session ends. Cached content is kept because " +
+                "Keys are wiped and the session ends. Cached content is kept because " +
                     "\u201cWipe on disconnect\u201d is off."
             },
             confirmLabel = "Disconnect",

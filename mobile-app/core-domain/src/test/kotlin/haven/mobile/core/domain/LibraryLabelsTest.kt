@@ -83,8 +83,9 @@ class LibraryLabelsTest {
 
     @Test
     fun `disclosure session note promises reopening will not ask again`() {
-        assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("session", ignoreCase = true))
+        assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("reopening it later", ignoreCase = true))
         assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("won't ask", ignoreCase = true))
+        assertTrue(SIGN_DISCLOSURE_SESSION_NOTE.contains("disconnect", ignoreCase = true))
     }
 
     @Test

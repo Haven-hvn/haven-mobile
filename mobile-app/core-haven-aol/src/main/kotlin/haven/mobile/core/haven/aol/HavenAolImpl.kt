@@ -25,6 +25,12 @@ open class HavenAolImpl @Inject constructor(
     private val gateRequestBuilder: GateRequestBuilder,
     private val vetKdUnwrap: haven.mobile.core.haven.aol.vetkeys.VetKdUnwrap,
     /**
+     * Durable copy of the v3/v4 epoch unlocks (see [EpochKeyStore]). The
+     * default keeps JVM test subclasses compiling without a store; production
+     * injects the Keystore-backed one via [HavenAolDiModule].
+     */
+    private val epochKeyStore: EpochKeyStore = NoOpEpochKeyStore(),
+    /**
      * One pooled client for every IC call this singleton makes. A fresh client per
      * request re-pays TLS to `ic0.app` on each unlock; the pool amortises it.
      * Bound in [HavenAolDiModule]; the default keeps test subclasses compiling.
@@ -64,7 +70,7 @@ open class HavenAolImpl @Inject constructor(
             )
         }
         val address = session.address.value ?: return Result.failure(HavenError.WalletNotConnected("No wallet connected"))
-        // Check in-memory AES key cache first (FR-ACL-2) — gate key survives for session until disconnect
+        // Check in-memory AES key cache first (FR-ACL-2) — gate key survives until disconnect
         val cacheKey = cacheKeyFor(item)
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
         val gate = item.gate
@@ -246,26 +252,12 @@ open class HavenAolImpl @Inject constructor(
     // `encryptedAesKey` on device.
 
     /**
-     * Everything that identifies one epoch-bucket VetKey on the canister side, plus the wallet
-     * whose access was checked. [epoch] is the *effective* epoch (0 when threshold is 0), so
-     * records the canister collapses together share one entry. [marketCapTarget] is null for
-     * v3 and set for v4 — different stages of one drip are different keys.
-     */
-    internal data class EpochGateKey(
-        val protocol: Long,
-        val chainVariant: String,
-        val tokenAddress: String,
-        val threshold: java.math.BigInteger,
-        val epoch: java.math.BigInteger,
-        val marketCapTarget: java.math.BigInteger?,
-        val walletLower: String,
-    )
-
-    /**
-     * A v3/v4 unlock kept for the rest of the session: the canister's transport-encrypted
-     * VetKey, the transport secret that opens it, and the bundled verification key. Holding
-     * these — rather than one AES key — lets every *other* item of the bucket open with no
-     * further signature or canister call. Memory only; zeroed on [clearFor].
+     * A v3/v4 unlock: the canister's transport-encrypted VetKey, the transport
+     * secret that opens it, and the bundled verification key. Holding these —
+     * rather than one AES key — lets every *other* item of the bucket open
+     * with no further signature or canister call. The memory copy is the fast
+     * path; an encrypted durable copy survives process restart (see
+     * [EpochKeyStore]). Both copies are zeroed/deleted on [clearFor].
      */
     private class EpochUnlock(
         val encryptedVetKey: ByteArray,
@@ -275,10 +267,16 @@ open class HavenAolImpl @Inject constructor(
         fun wipe() {
             encryptedVetKey.fill(0); transportSecret.fill(0); verificationKey.fill(0)
         }
+        fun toData(): EpochUnlockData =
+            EpochUnlockData(encryptedVetKey.copyOf(), transportSecret.copyOf(), verificationKey.copyOf())
     }
 
     private val epochUnlocks = mutableMapOf<EpochGateKey, EpochUnlock>()
     private val epochUnlocksMutex = Mutex()
+
+    /** Wallets whose durable unlocks have been loaded this process. */
+    private val loadedWallets = mutableSetOf<String>()
+    private val loadMutex = Mutex()
 
     /** One in-flight canister request per bucket: concurrent opens share one signature. */
     private val epochLocks = mutableMapOf<EpochGateKey, Mutex>()
@@ -346,6 +344,40 @@ open class HavenAolImpl @Inject constructor(
     }
 
     /**
+     * Loads the wallet's durable epoch unlocks into memory on first use per
+     * process. A store failure degrades to empty (next unlock signs again) —
+     * persistence must never block an open.
+     */
+    internal suspend fun ensureEpochKeysLoaded(walletAddress: String) {
+        if (walletAddress.isBlank()) return
+        val lower = walletAddress.lowercase()
+        loadMutex.withLock {
+            if (lower in loadedWallets) return@withLock
+            loadedWallets += lower
+            val persisted = runCatching { epochKeyStore.loadFor(lower) }.getOrDefault(emptyMap())
+            if (persisted.isNotEmpty()) {
+                epochUnlocksMutex.withLock {
+                    persisted.forEach { (key, data) ->
+                        epochUnlocks.getOrPut(key) {
+                            EpochUnlock(data.encryptedVetKey.copyOf(), data.transportSecret.copyOf(), data.verificationKey.copyOf())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Persists the wallet's current in-memory unlocks. Failures are silent. */
+    private suspend fun persistEpochKeys(walletAddress: String) {
+        if (walletAddress.isBlank()) return
+        val snapshot = epochUnlocksMutex.withLock {
+            epochUnlocks.filterKeys { it.walletLower == walletAddress.lowercase() }
+                .mapValues { (_, unlock) -> unlock.toData() }
+        }
+        runCatching { epochKeyStore.saveFor(walletAddress, snapshot) }
+    }
+
+    /**
      * VetKD v3/v4 unlock — parity with the canister's `requestDecryptionKeyV3` /
      * `requestDecryptionKeyV4`: transport keypair, versioned signature, canister call, then the
      * device unwrap of the record's `encryptedAesKey` with the versioned derivation input as IBE
@@ -368,6 +400,7 @@ open class HavenAolImpl @Inject constructor(
             )
         }
         val inputs = epochInputsOrError(sealed, address).getOrElse { return Result.failure(it) }
+        ensureEpochKeysLoaded(address)
         val lock = epochUnlocksMutex.withLock { epochLocks.getOrPut(inputs.key) { Mutex() } }
         val unlock = lock.withLock {
             epochUnlocksMutex.withLock { epochUnlocks[inputs.key] }
@@ -376,7 +409,10 @@ open class HavenAolImpl @Inject constructor(
                         marketCapGate(inputs, target)?.let { return Result.failure(it) }
                     }
                     requestEpochUnlock(inputs, session, address).getOrElse { return Result.failure(it) }
-                        .also { fresh -> epochUnlocksMutex.withLock { epochUnlocks[inputs.key] = fresh } }
+                        .also { fresh ->
+                            epochUnlocksMutex.withLock { epochUnlocks[inputs.key] = fresh }
+                            persistEpochKeys(address)
+                        }
                 }
         }
         return unwrapWithEpochUnlock(item, sealed, inputs, unlock, cacheKey)
@@ -613,14 +649,17 @@ open class HavenAolImpl @Inject constructor(
         if (!sealed.isMarketCapDrip || sealed.gateTypeConflict) return null
         // The market cap is wallet-independent; with no wallet the session-cache lookup simply
         // misses and the cap check still runs.
-        val inputs = epochInputsOrError(sealed, walletSession.address.value ?: "").getOrNull() ?: return null
+        val address = walletSession.address.value ?: ""
+        ensureEpochKeysLoaded(address)
+        val inputs = epochInputsOrError(sealed, address).getOrNull() ?: return null
         if (epochUnlocksMutex.withLock { epochUnlocks.containsKey(inputs.key) }) return null
         val target = inputs.key.marketCapTarget ?: return null
         return marketCapGate(inputs, target)
     }
 
-    /** Session already holds the bucket unlock for this sealed v3/v4 item. */
+    /** Device already holds the bucket unlock for this sealed v3/v4 item. */
     private suspend fun hasEpochUnlock(item: MediaItem): Boolean {
+        ensureEpochKeysLoaded(walletSession.address.value ?: "")
         val key = epochKeyOrNull(item, walletSession.address.value) ?: return false
         return epochUnlocksMutex.withLock { epochUnlocks.containsKey(key) }
     }
@@ -1134,10 +1173,17 @@ open class HavenAolImpl @Inject constructor(
 
     override suspend fun clearFor(walletAddress: String) {
         aesKeyCache.clearAll()
+        // Durable copy goes first and must not fail closed: a disconnect that
+        // only wiped memory would leave the persisted unlock resumable on the
+        // next connect.
+        runCatching { epochKeyStore.clearFor(walletAddress) }
         epochUnlocksMutex.withLock {
             epochUnlocks.values.forEach { it.wipe() }
             epochUnlocks.clear()
             epochLocks.clear()
+        }
+        loadMutex.withLock {
+            loadedWallets.remove(walletAddress.lowercase())
         }
         // NonceManager is per-canister; entry clears nothing — real impl would iterate keys
     }

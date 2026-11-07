@@ -20,6 +20,10 @@ abstract class HavenAolDiModule {
     @Binds
     @Singleton
     abstract fun bindVetKdUnwrap(impl: JniVetKdUnwrap): VetKdUnwrap
+
+    @Binds
+    @Singleton
+    abstract fun bindEpochKeyStore(impl: KeystoreEpochStore): EpochKeyStore
 }
 
 @Module
