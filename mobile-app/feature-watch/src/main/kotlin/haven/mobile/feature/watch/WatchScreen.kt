@@ -95,6 +95,7 @@ import haven.mobile.core.domain.signDisclosureHeadline
 import haven.mobile.core.domain.UNAVAILABLE_AUTO_RETURN_MILLIS
 import haven.mobile.core.domain.unavailableReturnNotice
 import haven.mobile.core.domain.WATCH_UNAVAILABLE_NOTICE_KEY
+import haven.mobile.core.domain.artworkFileFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -248,14 +249,12 @@ fun WatchScreen(
                             MediaKind.VIDEO -> PlayerViewer(
                                 media = media,
                                 file = content.file,
-                                aspect = 16f / 9f,
                                 walletAddress = walletAddress,
                                 diagnostics = diagnostics,
                             )
-                            MediaKind.AUDIO -> PlayerViewer(
+                            MediaKind.AUDIO -> AudioViewer(
                                 media = media,
                                 file = content.file,
-                                aspect = null,
                                 walletAddress = walletAddress,
                                 diagnostics = diagnostics,
                                 chapters = chapters,
@@ -295,52 +294,29 @@ fun WatchScreen(
 /* ── Video / audio ─────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Media3, playing the staged file through [HavenPlaybackService].
+ * Video: Media3's stock [PlayerView] playing the staged file through [HavenPlaybackService].
  *
  * A file URI is the cheapest possible source: ExoPlayer memory-maps and seeks it, so scrubbing a
- * two-hour video costs a few hundred KB of buffers. Feeding the player from memory instead (an earlier
- * `ByteArrayDataSource` approach) needed the whole file resident and made seeking a re-allocation.
+ * two-hour video costs a few hundred KB of buffers. The full 16:9 surface is the video-native
+ * controller — its play/pause, seekbar and PiP belong here. Audio does not use this view; it has
+ * a purpose-built now-playing screen in [AudioViewer].
  *
- * The player itself lives in the service rather than here, which is what lets audio keep going when
- * the app is backgrounded and gives video somewhere to continue from in picture-in-picture.
+ * The player itself lives in the service rather than here, which is what lets audio keep going
+ * when the app is backgrounded and gives video somewhere to continue from in picture-in-picture.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun PlayerViewer(
     media: MediaItem,
     file: File,
-    aspect: Float?,
     walletAddress: String? = null,
     diagnostics: List<String> = emptyList(),
-    chapters: List<AudioChapter> = emptyList(),
-    playQueue: List<QueueTrack> = emptyList(),
-    shuffleMode: WatchViewModel.ShuffleMode = WatchViewModel.ShuffleMode.OFF,
-    onToggleAlbumShuffle: () -> Unit = {},
-    onGlobalShuffle: () -> Unit = {},
 ) {
-    val useQueue = media.kind == MediaKind.AUDIO && playQueue.isNotEmpty()
     val controller by rememberPlaybackController(file)
-    // Queue replaces the single item once the controller is up; keyed on the queue so a
-    // shuffle toggle rebuilds the playlist instead of restarting the current file load.
-    var appliedQueue by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<QueueTrack>?>(null) }
-    LaunchedEffect(controller, useQueue, playQueue) {
-        val c = controller ?: return@LaunchedEffect
-        if (!useQueue || appliedQueue == playQueue) return@LaunchedEffect
-        appliedQueue = playQueue
-        c.setMediaItems(queueMediaItems(playQueue))
-        c.prepare()
-        c.playWhenReady = true
-    }
-    // The chapter highlight follows the same position snapshot as the mini bar's progress
-    // edge — one poll, two readers — so the list never disagrees with the bar.
-    val progress = rememberPlaybackProgress(controller)
-    val currentChapter = controller?.let { c ->
-        playQueue.getOrNull(c.currentMediaItemIndex)?.chapterIndex?.takeIf { it >= 0 }
-    } ?: chapterIndexAt(chapters, progress.positionMs)
 
     // Video floats over whatever the user opens next; audio does not need a window, it just keeps
     // playing through the service.
-    EnablePictureInPicture(player = controller, enabled = media.kind == MediaKind.VIDEO)
+    EnablePictureInPicture(player = controller, enabled = true)
 
     // Popping the viewer leaves the service player untouched, so playback continues
     // behind the mini bar. Swipe-down-to-collapse lives one level up in DismissableViewer,
@@ -354,7 +330,7 @@ private fun PlayerViewer(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.md)
-                .then(if (aspect != null) Modifier.aspectRatio(aspect) else Modifier.height(80.dp)),
+                .aspectRatio(16f / 9f),
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
         ) {
@@ -368,7 +344,7 @@ private fun PlayerViewer(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
                             useController = true
-                            controllerShowTimeoutMs = if (aspect != null) 3_000 else 0
+                            controllerShowTimeoutMs = 3_000
                             setShowNextButton(false)
                             setShowPreviousButton(false)
                         }
@@ -382,26 +358,100 @@ private fun PlayerViewer(
             }
         }
         MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
-        if (media.kind == MediaKind.AUDIO) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = HavenSpacing.gutter)) {
-                OutlinedButton(onClick = onToggleAlbumShuffle) {
-                    Text(if (shuffleMode == WatchViewModel.ShuffleMode.ALBUM) "Album shuffle: on" else "Shuffle album")
+    }
+}
+
+/**
+ * Audio's own viewer: a designed now-playing surface plus the album/shuffle tools and the
+ * chapter track list. Playback still lives entirely in [HavenPlaybackService]; this connects a
+ * [MediaController][androidx.media3.session.MediaController] to it (one owner), steers it, and
+ * renders [AudioPlayerScreen] instead of cramming the stock video controller into a short strip.
+ *
+ * A shuffle/album queue, when present, replaces the single item so previous/next skip between
+ * clipped chapter tracks rather than rewinding one long file.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun AudioViewer(
+    media: MediaItem,
+    file: File,
+    walletAddress: String? = null,
+    diagnostics: List<String> = emptyList(),
+    chapters: List<AudioChapter> = emptyList(),
+    playQueue: List<QueueTrack> = emptyList(),
+    shuffleMode: WatchViewModel.ShuffleMode = WatchViewModel.ShuffleMode.OFF,
+    onToggleAlbumShuffle: () -> Unit = {},
+    onGlobalShuffle: () -> Unit = {},
+) {
+    val useQueue = playQueue.isNotEmpty()
+    val controller by rememberPlaybackController(file)
+
+    var appliedQueue by remember { mutableStateOf<List<QueueTrack>?>(null) }
+    LaunchedEffect(controller, useQueue, playQueue) {
+        val c = controller ?: return@LaunchedEffect
+        if (!useQueue || appliedQueue == playQueue) return@LaunchedEffect
+        appliedQueue = playQueue
+        c.setMediaItems(queueMediaItems(playQueue))
+        c.prepare()
+        c.playWhenReady = true
+    }
+
+    val progress = rememberPlaybackProgress(controller)
+    val isPlaying = rememberIsPlaying(controller)
+    val wave = remember(media.id) { waveformBuckets(media.id) }
+    val context = LocalContext.current
+    val artworkFile = remember(media.id) { artworkFileFor(context.cacheDir, media.id) }
+    val currentChapter = controller?.let { c ->
+        playQueue.getOrNull(c.currentMediaItemIndex)?.chapterIndex?.takeIf { it >= 0 }
+    } ?: chapterIndexAt(chapters, progress.positionMs)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        AudioPlayerScreen(
+            media = media,
+            controller = controller,
+            progress = progress,
+            isPlaying = isPlaying,
+            isBuffering = progress.isBuffering,
+            wave = wave,
+            artworkFile = artworkFile,
+            onSeek = { ms -> controller?.seekTo(ms) },
+            onSkipPrevious = {
+                controller?.let { c ->
+                    if (useQueue && c.hasPreviousMediaItem()) c.seekToPreviousMediaItem()
+                    else c.seekTo(0L)
                 }
+            },
+            onSkipNext = {
+                controller?.let { c ->
+                    if (useQueue && c.hasNextMediaItem()) c.seekToNextMediaItem()
+                }
+            },
+        )
+
+        MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
+
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = HavenSpacing.gutter)) {
+            OutlinedButton(onClick = onToggleAlbumShuffle) {
+                Text(if (shuffleMode == WatchViewModel.ShuffleMode.ALBUM) "Album shuffle: on" else "Shuffle album")
+            }
+            Spacer(Modifier.width(HavenSpacing.sm))
+            OutlinedButton(onClick = onGlobalShuffle) {
+                Text(if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) "Global shuffle: on" else "Shuffle all")
+            }
+            if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) {
                 Spacer(Modifier.width(HavenSpacing.sm))
-                OutlinedButton(onClick = onGlobalShuffle) {
-                    Text(if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) "Global shuffle: on" else "Shuffle all")
-                }
-                if (shuffleMode == WatchViewModel.ShuffleMode.GLOBAL) {
-                    Spacer(Modifier.width(HavenSpacing.sm))
-                    Text(
-                        text = "${playQueue.size} tracks",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    text = "${playQueue.size} tracks",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-        if (media.kind == MediaKind.AUDIO && chapters.isNotEmpty()) {
+        if (chapters.isNotEmpty()) {
             ChapterList(
                 chapters = chapters,
                 currentIndex = currentChapter,

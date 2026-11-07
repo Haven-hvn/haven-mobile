@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -151,24 +153,36 @@ fun MiniPlayerBar(
                 // Nested tap target: consumed here, so it never bubbles up into the expand tap.
                 if (progress.isBuffering && controller != null) {
                     Box(
-                        modifier = Modifier.size(PLAY_BUTTON_SIZE),
+                        modifier = Modifier.size(MINI_PLAY_BUTTON_SIZE),
                         contentAlignment = Alignment.Center,
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.5.dp,
+                        )
                     }
                 } else {
-                    IconButton(
+                    // Filled ember button — the same visual language as the full player's large
+                    // transport control, so play/pause reads as the primary action even here.
+                    FilledIconButton(
                         onClick = {
-                            val player = controller ?: return@IconButton
+                            val player = controller ?: return@FilledIconButton
                             if (player.isPlaying) player.pause() else player.play()
                         },
                         enabled = controller != null,
-                        modifier = Modifier.size(PLAY_BUTTON_SIZE),
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
+                        modifier = Modifier.size(MINI_PLAY_BUTTON_SIZE),
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 }
@@ -262,7 +276,7 @@ private fun persistPlayerArtwork(cacheDir: File, itemId: String, bytes: ByteArra
     }.getOrNull()
 
 private val MINI_PLAYER_HEIGHT = 64.dp
-private val PLAY_BUTTON_SIZE = 48.dp
+private val MINI_PLAY_BUTTON_SIZE = 40.dp
 private val PROGRESS_EDGE_HEIGHT = 3.dp
 /** Short pull: the bar is a 64dp strip, and a full thumb-length here feels broken. */
 private val EXPAND_SWIPE_DISTANCE = 48.dp
