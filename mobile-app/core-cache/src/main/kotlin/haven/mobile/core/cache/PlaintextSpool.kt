@@ -75,8 +75,7 @@ class PlaintextSpoolImpl @Inject constructor(
         val partial = File(target.parentFile, "${target.name}$PARTIAL_SUFFIX")
 
         var written = 0L
-        var attempt = 0
-        while (true) {
+        for (attempt in 0..1) {
             try {
                 target.parentFile?.mkdirs()
                 if (partial.exists()) partial.delete()
@@ -114,10 +113,9 @@ class PlaintextSpoolImpl @Inject constructor(
                 // which re-materializes from the local piece. Only when
                 // nothing was written and the failure is a plain missing
                 // file, never for a decrypt HavenError.
-                val isMissingFile = generateSequence(e) { it.cause }
+                val isMissingFile = generateSequence<Throwable>(e) { it.cause }
                     .any { it is java.io.FileNotFoundException }
                 if (attempt == 0 && written == 0L && e !is HavenError && isMissingFile) {
-                    attempt++
                     runCatching { partial.delete() }
                     continue
                 }
@@ -132,6 +130,9 @@ class PlaintextSpoolImpl @Inject constructor(
                 )
             }
         }
+        return@withContext Result.failure(
+            HavenError.CacheWriteFailed("Staging failed for $pieceCid"),
+        )
     }
 
     override suspend fun evict(pieceCid: String) {
