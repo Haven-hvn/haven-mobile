@@ -26,7 +26,7 @@ import javax.inject.Inject
  * `EpochUnlock`, made explicit so the store can encode it without depending
  * on the `@Singleton` holder class.
  */
-internal data class EpochUnlockData(
+data class EpochUnlockData(
     val encryptedVetKey: ByteArray,
     val transportSecret: ByteArray,
     val verificationKey: ByteArray,
@@ -42,7 +42,7 @@ internal data class EpochUnlockData(
  * Top-level (was nested in `HavenAolImpl`) so the persistence layer can
  * encode it without reaching inside the holder.
  */
-internal data class EpochGateKey(
+data class EpochGateKey(
     val protocol: Long,
     val chainVariant: String,
     val tokenAddress: String,
@@ -60,7 +60,7 @@ internal data class EpochGateKey(
  * `clearFor` deletes the wallet's file — disconnect wipes keys just like
  * before, only now it must wipe disk as well.
  */
-internal interface EpochKeyStore {
+interface EpochKeyStore {
     suspend fun loadFor(walletAddress: String): Map<EpochGateKey, EpochUnlockData>
     suspend fun saveFor(walletAddress: String, entries: Map<EpochGateKey, EpochUnlockData>)
     suspend fun clearFor(walletAddress: String)
@@ -116,7 +116,7 @@ internal class InMemoryEpochKeyStore : EpochKeyStore {
  * A corrupt or unreadable file degrades to “no keys” rather than failing
  * opens — the next unlock just signs again.
  */
-internal class KeystoreEpochStore @Inject constructor(
+class KeystoreEpochStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : EpochKeyStore {
 
