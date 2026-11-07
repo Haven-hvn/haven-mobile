@@ -687,16 +687,33 @@ class WatchViewModel @Inject constructor(
         const val COPY_BUFFER_BYTES = 64 * 1024
         /** How many pipeline lines the failure screen can show. */
         const val DIAGNOSTICS_CAP = 12
+        const val DIAG_PERSIST_CAP_BYTES = 256_000L
+        const val DIAG_PERSIST_KEEP_LINES = 300
     }
 
     /**
-     * One line per pipeline transition, to logcat (`adb logcat -s HavenWatch`)
-     * and to the in-app [diagnostics] trail. Timber is a no-op on the JVM
+     * One line per pipeline transition, to logcat (`adb logcat -s HavenWatch`),
+     * to the in-app [diagnostics] trail, and to a capped file so a repro
+     * survives process restart. Timber is a no-op on the JVM
      * without a planted tree, so unit tests stay green.
      */
     private fun logStage(msg: String) {
         timber.log.Timber.tag("HavenWatch").i(msg)
         _diagnostics.value = (_diagnostics.value + msg).takeLast(DIAGNOSTICS_CAP)
+        // In-memory only strands the reporter when the process dies before they open
+        // the failure: persist the same lines so the next wipe is diagnosable after restart.
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val base = appContext.noBackupFilesDir ?: appContext.filesDir
+                base.mkdirs()
+                val file = File(base, "haven-watch.log")
+                file.appendText(msg + "\n")
+                if (file.length() > DIAG_PERSIST_CAP_BYTES) {
+                    val keep = file.readLines().takeLast(DIAG_PERSIST_KEEP_LINES)
+                    file.writeText(keep.joinToString("\n") + "\n")
+                }
+            }
+        }
     }
 }
 

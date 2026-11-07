@@ -60,10 +60,11 @@ class MediaRepositoryImpl @Inject constructor(
     private fun getDatabase(): HavenMirrorDatabase {
         val walletAddress = walletSession.address.value
             ?: throw HavenError.WalletNotConnected("No wallet connected")
-        if (walletAddress != currentWalletAddress) {
+        if (walletAddress.lowercase() != currentWalletAddress) {
             database?.close()
             database = null
             val dbName = HavenMirrorDatabase.databaseName(walletAddress)
+            migrateLegacyDatabase(dbName)
             database = Room.databaseBuilder(
                 context,
                 HavenMirrorDatabase::class.java,
@@ -73,9 +74,24 @@ class MediaRepositoryImpl @Inject constructor(
                 // rebuilds it. See HavenMirrorDatabase for why there are no migrations.
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
-            currentWalletAddress = walletAddress
+            currentWalletAddress = walletAddress.lowercase()
         }
         return database!!
+    }
+
+    /** Rename a legacy checksummed mirror file to the canonical lowercase name, if any. */
+    private fun migrateLegacyDatabase(canonicalName: String) {
+        runCatching {
+            val dbDir = File(context.filesDir.parent, "databases")
+            val canonical = File(dbDir, canonicalName)
+            if (canonical.exists()) return
+            val legacy = dbDir.listFiles()?.firstOrNull {
+                it.name.equals(canonicalName, ignoreCase = true) && it.name != canonicalName
+            } ?: return
+            legacy.renameTo(canonical)
+            File(dbDir, legacy.name + "-wal").renameTo(File(dbDir, canonicalName + "-wal"))
+            File(dbDir, legacy.name + "-shm").renameTo(File(dbDir, canonicalName + "-shm"))
+        }
     }
 
     private companion object {
@@ -357,13 +373,21 @@ class MediaRepositoryImpl @Inject constructor(
                 // wallets (the feed), and owner-scoped deletion would leave those behind.
                 getDatabase().mediaDao().deleteAll()
                 runCatching { getDatabase().chapterDao().deleteAll() }
-                if (currentWalletAddress == walletAddress) {
+                if (currentWalletAddress == walletAddress.lowercase()) {
                     database?.close()
                     database = null
                     currentWalletAddress = null
                 }
-                val dbFile = File(context.filesDir.parent, "databases/haven-mirror-$walletAddress.db")
-                dbFile.deleteRecursively()
+                val dbDir = File(context.filesDir.parent, "databases")
+                val canonicalName = HavenMirrorDatabase.databaseName(walletAddress)
+                dbDir.listFiles()?.filter {
+                    it.name.equals(canonicalName, ignoreCase = true) ||
+                        it.name.equals("$canonicalName-wal", ignoreCase = true) ||
+                        it.name.equals("$canonicalName-shm", ignoreCase = true)
+                }?.forEach { it.deleteRecursively() }
+                File(dbDir, canonicalName).deleteRecursively()
+                File(dbDir, "$canonicalName-wal").deleteRecursively()
+                File(dbDir, "$canonicalName-shm").deleteRecursively()
             } catch (_: Exception) {
             }
         }

@@ -70,7 +70,7 @@ class HavenCacheImpl @Inject constructor(
             ?: throw HavenError.WalletNotConnected("No wallet connected")
 
         val desired = CacheKey(
-            walletAddress = walletAddress,
+            walletAddress = walletAddress.lowercase(),
             quotaBytes = settings.quotaBytes.first(),
             ttlDays = settings.ttlDays.first(),
             keepUnlocked = settings.keepUnlocked.first(),
@@ -84,7 +84,7 @@ class HavenCacheImpl @Inject constructor(
             // share a name. Switching mode deletes the other directory: gated content re-downloads
             // on next open, and turning "keep unlocked" off leaves no decrypted file behind.
             val cacheDir = dirFor(walletAddress, desired.keepUnlocked)
-            dirFor(walletAddress, !desired.keepUnlocked).deleteRecursively()
+            deleteModeDir(walletAddress, !desired.keepUnlocked)
             cacheDir.mkdirs()
             val automatic = desired.quotaBytes == AUTOMATIC_QUOTA
             val created = FocCache(
@@ -164,9 +164,9 @@ class HavenCacheImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             lock.withLock {
                 runCatching {
-                    dirFor(walletAddress, keepUnlocked = false).deleteRecursively()
-                    dirFor(walletAddress, keepUnlocked = true).deleteRecursively()
-                    if (key?.walletAddress == walletAddress) {
+                    deleteModeDir(walletAddress, keepUnlocked = false)
+                    deleteModeDir(walletAddress, keepUnlocked = true)
+                    if (key?.walletAddress == walletAddress.lowercase()) {
                         focCache = null
                         key = null
                     }
@@ -179,8 +179,8 @@ class HavenCacheImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             lock.withLock {
                 runCatching {
-                    dirFor(walletAddress, keepUnlocked = true).deleteRecursively()
-                    if (key?.walletAddress == walletAddress && key?.keepUnlocked == true) {
+                    deleteModeDir(walletAddress, keepUnlocked = true)
+                    if (key?.walletAddress == walletAddress.lowercase() && key?.keepUnlocked == true) {
                         focCache = null
                         key = null
                     }
@@ -194,9 +194,37 @@ class HavenCacheImpl @Inject constructor(
      * something the user chose to keep, so it lives in `filesDir`, which the OS doesn't purge.
      * Neither is backed up or transferred (`data_extraction_rules.xml`, `allowBackup=false`).
      */
-    private fun dirFor(walletAddress: String, keepUnlocked: Boolean): File =
-        if (keepUnlocked) File(context.filesDir, "foc-unlocked/$walletAddress")
-        else File(context.cacheDir, "foc/$walletAddress")
+    private fun dirFor(walletAddress: String, keepUnlocked: Boolean): File {
+        val root = if (keepUnlocked) context.filesDir else context.cacheDir
+        val base = if (keepUnlocked) "foc-unlocked" else "foc"
+        val parent = File(root, base)
+        val lower = walletAddress.lowercase()
+        val canonical = File(parent, lower)
+        if (canonical.isDirectory) return canonical
+        // WalletConnect restores do not preserve EIP-55 casing: the same
+        // account arrives checksummed on one launch and lowercase on the
+        // next. A raw-cased path would orphan every cached piece whenever
+        // the case flips (epoch keys already lowercase, so no sign prompt
+        // explains the empty cache). Reuse a legacy cased dir if one
+        // already holds data instead of opening a fresh empty one.
+        parent.listFiles()?.firstOrNull {
+            it.isDirectory && it.name.equals(lower, ignoreCase = true)
+        }?.let { return it }
+        return canonical
+    }
+
+    /** Delete every cased variant of one mode dir, not just the current one. */
+    private fun deleteModeDir(walletAddress: String, keepUnlocked: Boolean) {
+        val root = if (keepUnlocked) context.filesDir else context.cacheDir
+        val base = if (keepUnlocked) "foc-unlocked" else "foc"
+        val parent = File(root, base)
+        val lower = walletAddress.lowercase()
+        parent.listFiles()?.filter {
+            it.isDirectory && it.name.equals(lower, ignoreCase = true)
+        }?.forEach { it.deleteRecursively() }
+        // Parent may not exist yet / listFiles was null: still try canonical.
+        if (parent.listFiles() == null) File(parent, lower).deleteRecursively()
+    }
 }
 
 private const val FALLBACK_QUOTA_BYTES = 2L * 1024 * 1024 * 1024

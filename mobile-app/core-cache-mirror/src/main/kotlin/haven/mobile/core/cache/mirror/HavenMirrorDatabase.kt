@@ -23,6 +23,6 @@ abstract class HavenMirrorDatabase : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
 
     companion object {
-        fun databaseName(walletAddress: String): String = "haven-mirror-$walletAddress.db"
+        fun databaseName(walletAddress: String): String = "haven-mirror-${walletAddress.lowercase()}.db"
     }
 }

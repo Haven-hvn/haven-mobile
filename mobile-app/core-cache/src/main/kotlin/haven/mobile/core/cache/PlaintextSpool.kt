@@ -74,45 +74,63 @@ class PlaintextSpoolImpl @Inject constructor(
             )
         val partial = File(target.parentFile, "${target.name}$PARTIAL_SUFFIX")
 
-        try {
-            target.parentFile?.mkdirs()
-            if (partial.exists()) partial.delete()
+        var written = 0L
+        var attempt = 0
+        while (true) {
+            try {
+                target.parentFile?.mkdirs()
+                if (partial.exists()) partial.delete()
 
-            var written = 0L
-            partial.outputStream().buffered(BUFFER_BYTES).use { sink ->
-                chunks.collect { chunk ->
-                    sink.write(chunk)
-                    written += chunk.size
-                    onBytesWritten(written)
+                written = 0L
+                partial.outputStream().buffered(BUFFER_BYTES).use { sink ->
+                    chunks.collect { chunk ->
+                        sink.write(chunk)
+                        written += chunk.size
+                        onBytesWritten(written)
+                    }
+                    sink.flush()
                 }
-                sink.flush()
-            }
 
-            if (written == 0L) {
-                partial.delete()
-                return@withContext Result.failure(HavenError.CacheMiss("Decrypt produced no bytes"))
-            }
+                if (written == 0L) {
+                    partial.delete()
+                    return@withContext Result.failure(HavenError.CacheMiss("Decrypt produced no bytes"))
+                }
 
-            if (target.exists()) target.delete()
-            if (!partial.renameTo(target)) {
-                partial.delete()
+                if (target.exists()) target.delete()
+                if (!partial.renameTo(target)) {
+                    partial.delete()
+                    return@withContext Result.failure(
+                        HavenError.CacheWriteFailed("Could not finalise staged content for $pieceCid"),
+                    )
+                }
+
+                trimToBudget(target)
+                return@withContext Result.success(target)
+            } catch (e: Exception) {
+                // One retry for the transient ENOENT where the cache dir
+                // vanished between materialize and open (a concurrent
+                // opposite-mode delete, or the OS reclaiming cacheDir
+                // under pressure). The retry re-collects the cold flow,
+                // which re-materializes from the local piece. Only when
+                // nothing was written and the failure is a plain missing
+                // file, never for a decrypt HavenError.
+                val isMissingFile = generateSequence(e) { it.cause }
+                    .any { it is java.io.FileNotFoundException }
+                if (attempt == 0 && written == 0L && e !is HavenError && isMissingFile) {
+                    attempt++
+                    runCatching { partial.delete() }
+                    continue
+                }
+                // Never leave a partial behind: it would be indistinguishable from a short file and
+                // would fail later inside a decoder, where the cause is much harder to see.
+                runCatching { partial.delete() }
                 return@withContext Result.failure(
-                    HavenError.CacheWriteFailed("Could not finalise staged content for $pieceCid"),
+                    when (e) {
+                        is HavenError -> e
+                        else -> HavenError.CacheWriteFailed(e.message ?: "Staging failed for $pieceCid", e)
+                    },
                 )
             }
-
-            trimToBudget(target)
-            Result.success(target)
-        } catch (e: Exception) {
-            // Never leave a partial behind: it would be indistinguishable from a short file and
-            // would fail later inside a decoder, where the cause is much harder to see.
-            runCatching { partial.delete() }
-            Result.failure(
-                when (e) {
-                    is HavenError -> e
-                    else -> HavenError.CacheWriteFailed(e.message ?: "Staging failed for $pieceCid", e)
-                },
-            )
         }
     }
 
@@ -124,7 +142,16 @@ class PlaintextSpoolImpl @Inject constructor(
 
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
-            runCatching { directoryFor(walletAddress).deleteRecursively() }
+            runCatching {
+                // Delete every cased variant so a disconnect cannot leave
+                // a legacy checksummed dir behind an invisible orphan.
+                val parent = File(context.cacheDir, "plaintext")
+                val lower = sanitise(walletAddress).lowercase()
+                parent.listFiles()?.filter {
+                    it.isDirectory && it.name.equals(lower, ignoreCase = true)
+                }?.forEach { it.deleteRecursively() }
+                File(parent, lower).deleteRecursively()
+            }
         }
     }
 
@@ -133,8 +160,18 @@ class PlaintextSpoolImpl @Inject constructor(
         return File(directoryFor(wallet), "${sanitise(pieceCid)}$STAGED_SUFFIX")
     }
 
-    private fun directoryFor(walletAddress: String): File =
-        File(context.cacheDir, "plaintext/${sanitise(walletAddress)}")
+    private fun directoryFor(walletAddress: String): File {
+        val parent = File(context.cacheDir, "plaintext")
+        val lower = sanitise(walletAddress).lowercase()
+        val canonical = File(parent, lower)
+        if (canonical.isDirectory) return canonical
+        // Same casing trap as the foc dir: reuse a legacy checksummed
+        // spool dir rather than staging fresh under lowercase.
+        parent.listFiles()?.firstOrNull {
+            it.isDirectory && it.name.equals(lower, ignoreCase = true)
+        }?.let { return it }
+        return canonical
+    }
 
     /**
      * A piece CID is base32/base58 in practice, but it arrives from a remote entity, so it is
