@@ -384,16 +384,17 @@ private fun AudioViewer(
     onGlobalShuffle: () -> Unit = {},
 ) {
     val useQueue = playQueue.isNotEmpty()
-    val controller by rememberPlaybackController(file)
+    val controller by rememberPlaybackController(file, playQueue)
 
-    var appliedQueue by remember { mutableStateOf<List<QueueTrack>?>(null) }
-    LaunchedEffect(controller, useQueue, playQueue) {
+    // Reconnecting to the service must never restart the album. `ensurePlayQueue` compares the
+    // player's *actual* timeline to the desired queue: on a cold start it differs and the clipped
+    // tracks are installed, but after a collapse/expand the service still holds the same queue, so
+    // this is a no-op and the current track and position survive. Driving it from the player state
+    // (which lives in the service) rather than a composition-local "already applied" flag is what
+    // makes it survive the viewer being popped and rebuilt.
+    LaunchedEffect(controller, playQueue) {
         val c = controller ?: return@LaunchedEffect
-        if (!useQueue || appliedQueue == playQueue) return@LaunchedEffect
-        appliedQueue = playQueue
-        c.setMediaItems(queueMediaItems(playQueue))
-        c.prepare()
-        c.playWhenReady = true
+        if (useQueue) ensurePlayQueue(c, playQueue)
     }
 
     val progress = rememberPlaybackProgress(controller)
@@ -432,8 +433,9 @@ private fun AudioViewer(
             },
         )
 
-        MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
-
+        // Controls and the track list lead. Provenance/diagnostics are reference material, so they
+        // sit at the very bottom — a listener should never have to scroll past them to reach the
+        // tracks, which was the whole complaint about the old oversized header.
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = HavenSpacing.gutter)) {
             OutlinedButton(onClick = onToggleAlbumShuffle) {
                 Text(if (shuffleMode == WatchViewModel.ShuffleMode.ALBUM) "Album shuffle: on" else "Shuffle album")
@@ -464,6 +466,8 @@ private fun AudioViewer(
                 },
             )
         }
+
+        MediaMeta(media = media, walletAddress = walletAddress, diagnostics = diagnostics)
     }
 }
 

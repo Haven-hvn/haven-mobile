@@ -58,7 +58,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
@@ -81,10 +80,12 @@ import java.io.File
  * plain and unfinished — which is exactly the problem this screen replaces. Audio gets its own
  * composable instead, built around what actually matters for a track:
  *
- *  - [AudioArtwork] is a big, square, cropped cover with an [ambientGround] gradient pulled
- *    from the cover's own dominant color (the design system already ships the extractor), so
- *    there are no white edges and the whole screen belongs to the track. No embedded picture
- *    falls back to a designed plate, not a blank box.
+ *  - [AudioArtwork] is a compact, square, cropped cover sitting beside the title in a bounded
+ *    header row, over an [ambientGround] gradient pulled from the cover's own dominant color
+ *    (the design system already ships the extractor). There are no white edges, and the cover is
+ *    deliberately kept small so the waveform, transport, and the album's track list below all
+ *    fit on screen without scrolling. No embedded picture falls back to a designed plate, not a
+ *    blank box.
  *  - [WaveformSeekBar] is a real, draggable seek control: a rounded waveform, ember for the
  *    played portion, with elapsed/remaining clocks. It mirrors the service player's position
  *    and seeks it on drag/tap — the full player is where scrubbing belongs, the mini bar is
@@ -123,40 +124,42 @@ internal fun AudioPlayerScreen(
         modifier = modifier
             .fillMaxWidth()
             .background(ground)
-            .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.lg),
+            .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.md),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            AudioArtwork(
-                artwork = visual?.bitmap,
-                playerArt = controller,
-                itemId = media.id,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // A compact now-playing header: a bounded square cover beside the title, not a
+            // full-width square. The old hero cover ate most of the viewport and pushed the track
+            // list off-screen; this keeps the artwork present but proportionate, so the controls
+            // and the tracks below are visible together without scrolling.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AudioArtwork(
+                    artwork = visual?.bitmap,
+                    playerArt = controller,
+                    itemId = media.id,
+                    modifier = Modifier.size(ARTWORK_HEADER_SIZE),
+                )
 
-            Spacer(Modifier.height(HavenSpacing.xl))
+                Spacer(Modifier.width(HavenSpacing.md))
 
-            Text(
-                text = media.title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(HavenSpacing.xs))
-            Text(
-                text = media.kind.label(),
-                style = HavenTheme.text.overline,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = media.kind.label(),
+                        style = HavenTheme.text.overline,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(HavenSpacing.xs))
+                    Text(
+                        text = media.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
 
-            Spacer(Modifier.height(HavenSpacing.xl))
+            Spacer(Modifier.height(HavenSpacing.lg))
 
             WaveformSeekBar(
                 progress = progress,
@@ -165,7 +168,7 @@ internal fun AudioPlayerScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(Modifier.height(HavenSpacing.lg))
+            Spacer(Modifier.height(HavenSpacing.md))
 
             TransportControls(
                 isPlaying = isPlaying,
@@ -287,7 +290,7 @@ private fun AudioArtworkPlaceholder() {
             imageVector = Icons.Default.AudioFile,
             contentDescription = "No album artwork",
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-            modifier = Modifier.size(88.dp),
+            modifier = Modifier.size(44.dp),
         )
     }
 }
@@ -613,6 +616,8 @@ private val WAVEFORM_HEIGHT = 56.dp
 private val WAVE_BAR_GAP = 3.dp
 private val WAVE_HEAD_WIDTH = 3.dp
 private val PLAY_BUTTON_SIZE = 72.dp
+/** Compact cover in the now-playing header — proportionate, not a full-viewport hero. */
+private val ARTWORK_HEADER_SIZE = 116.dp
 private val HavenElevationOverlay = 8.dp
 private const val WAVEFORM_BUCKETS = 48
 private const val SEEK_NUDGE_MS = 10_000L

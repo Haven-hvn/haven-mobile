@@ -131,6 +131,7 @@ class WatchViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val gateAccessChecker: GateAccessChecker,
     private val nowPlaying: NowPlayingRepository,
+    private val playbackSession: PlaybackSession,
     /** Exposed so the drip sheet can offer in-app trading when a wallet is connected. */
     val walletSession: WalletSession,
     @ApplicationContext private val appContext: Context,
@@ -187,11 +188,24 @@ class WatchViewModel @Inject constructor(
         itemId.value = id
         content.value = ContentState.Idle
         _chapters.value = emptyList()
-        _shuffleMode.value = ShuffleMode.OFF
-        _playQueue.value = emptyList()
         currentMedia = null
         currentFile = null
+        // The nav entry (and this ViewModel) is rebuilt on a mini-bar re-expand, but the listening
+        // session is not. Restore the queue/shuffle that belongs to this item so the viewer reconnects
+        // to the exact queue already loaded in the service player instead of rebuilding a fresh,
+        // unshuffled one from track one. Opening a different item starts a clean session.
+        val restored = playbackSession.stateFor(id)
+        _shuffleMode.value = restored.shuffleMode
+        _playQueue.value = restored.playQueue
+        playbackSession.attach(id, restored.shuffleMode, restored.playQueue)
         viewModelScope.launch { mediaRepository.refreshItem(id) }
+    }
+
+    /** Publish a queue/shuffle change to both the UI state flows and the session singleton. */
+    private fun publishQueue(mode: ShuffleMode, queue: List<QueueTrack>) {
+        _shuffleMode.value = mode
+        _playQueue.value = queue
+        playbackSession.update(mode, queue)
     }
 
     /**
@@ -525,11 +539,15 @@ class WatchViewModel @Inject constructor(
         val media = currentMedia ?: return
         val file = currentFile ?: return
         if (_shuffleMode.value == ShuffleMode.ALBUM) {
-            _shuffleMode.value = ShuffleMode.OFF
-            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false)
+            publishQueue(
+                ShuffleMode.OFF,
+                buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false),
+            )
         } else {
-            _shuffleMode.value = ShuffleMode.ALBUM
-            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = true)
+            publishQueue(
+                ShuffleMode.ALBUM,
+                buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = true),
+            )
         }
     }
 
@@ -544,8 +562,7 @@ class WatchViewModel @Inject constructor(
                 albums += albumTracks(item, file, resolveChapters(item, file))
             }
             if (albums.isEmpty()) return@launch
-            _shuffleMode.value = ShuffleMode.GLOBAL
-            _playQueue.value = buildGlobalQueue(albums)
+            publishQueue(ShuffleMode.GLOBAL, buildGlobalQueue(albums))
             logStage("global shuffle albums=${albums.size} tracks=${_playQueue.value.size}")
         }
     }
@@ -567,7 +584,12 @@ class WatchViewModel @Inject constructor(
             emptyList()
         }
         if (media.kind == MediaKind.AUDIO && _shuffleMode.value == ShuffleMode.OFF) {
-            _playQueue.value = buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false)
+            // A cold open builds the album's natural queue. Publish it so a later collapse/expand
+            // reconnects to this exact queue rather than rebuilding (and re-applying) it.
+            publishQueue(
+                ShuffleMode.OFF,
+                buildAlbumQueue(albumTracks(media, file, _chapters.value), shuffled = false),
+            )
         }
         if (media.kind == MediaKind.VIDEO || media.kind == MediaKind.AUDIO) {
             // Cover art comes out of the media itself: an MP3 with an embedded picture

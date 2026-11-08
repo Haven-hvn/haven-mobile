@@ -45,10 +45,18 @@ import kotlin.coroutines.resumeWithException
  * A `MediaController` *is* a `Player`, so `PlayerView` accepts it directly — the UI does not care that
  * the actual player lives in a service. Released on dispose; the service keeps playing if the user
  * left with something playing, which is the entire point.
+ *
+ * [queue] is the session's play queue, when there is one. It is used only to decide whether the
+ * player is *already* playing something that belongs to this item: a global shuffle may currently
+ * sit on a track from a different album file, so comparing against the single [file] alone would
+ * wrongly conclude "different item" and reset a playing shuffle to its start on a re-expand.
  */
 @OptIn(UnstableApi::class)
 @Composable
-internal fun rememberPlaybackController(file: File): State<MediaController?> {
+internal fun rememberPlaybackController(
+    file: File,
+    queue: List<QueueTrack> = emptyList(),
+): State<MediaController?> {
     val context = LocalContext.current
 
     return produceState<MediaController?>(initialValue = null, file.absolutePath) {
@@ -59,10 +67,16 @@ internal fun rememberPlaybackController(file: File): State<MediaController?> {
 
         if (controller != null) {
             // The service owns the player, so re-expanding the viewer reconnects to the same
-            // playlist and position. Only queue the file when it is not already loaded — setting
-            // it unconditionally would restart playback from zero on every expand.
-            val uri = android.net.Uri.fromFile(file)
-            if (controller.currentMediaItem?.localConfiguration?.uri != uri) {
+            // playlist and position. Only load the file when the player is not already playing
+            // something from this item — re-setting unconditionally would restart from zero on
+            // every expand. The desired paths cover the whole queue (global shuffle spans albums),
+            // not just the single file this screen was opened for.
+            val desiredPaths = (queue.map { it.filePath }.takeIf { it.isNotEmpty() }
+                ?: listOf(file.absolutePath)).toSet()
+            val currentPath = controller.currentMediaItem?.localConfiguration?.uri?.path
+            val alreadyPlayingThisItem = controller.mediaItemCount > 0 && currentPath in desiredPaths
+            if (!alreadyPlayingThisItem) {
+                val uri = android.net.Uri.fromFile(file)
                 controller.setMediaItem(ExoMediaItem.fromUri(uri))
                 controller.prepare()
                 controller.playWhenReady = true
@@ -89,6 +103,44 @@ internal fun queueMediaItems(queue: List<QueueTrack>): List<ExoMediaItem> = queu
                 .build(),
         )
         .build()
+}
+
+/**
+ * Identity of a play queue: each track's file path plus its clip start. Two queues are the same
+ * playback session when these line up in order — a shuffle reorder changes the sequence, and a
+ * different album changes the paths. Kept as plain data (no [android.net.Uri]) so the comparison
+ * is unit-testable on the JVM without Robolectric.
+ */
+fun queueFingerprint(queue: List<QueueTrack>): List<Pair<String, Long>> =
+    queue.map { it.filePath to it.startMs }
+
+/**
+ * Pure answer to "has this queue already been applied to the player?" [timeline] is the player's
+ * current timeline reduced to the same (path, clip start) shape. A match means we are reconnecting
+ * to an existing session — re-running `setMediaItems` + `prepare()` there would reset the whole
+ * album to track one, which is exactly the collapse/expand bug this guards against.
+ */
+fun queueAlreadyLoaded(timeline: List<Pair<String, Long>>, queue: List<QueueTrack>): Boolean =
+    timeline == queueFingerprint(queue)
+
+/**
+ * Apply [queue] to the service player only when its timeline does not already match it. On a cold
+ * start the player holds a single whole-file item, so the fingerprint differs and the clipped queue
+ * is installed. On a reconnect (mini bar expand) the player still holds the same clipped queue, so
+ * this is a no-op and the current track and position survive untouched. An explicit shuffle change
+ * produces a different fingerprint and is applied, as intended.
+ */
+@OptIn(UnstableApi::class)
+internal fun ensurePlayQueue(controller: MediaController, queue: List<QueueTrack>) {
+    if (queue.isEmpty()) return
+    val timeline = (0 until controller.mediaItemCount).map { i ->
+        val item = controller.getMediaItemAt(i)
+        (item.localConfiguration?.uri?.path.orEmpty()) to item.clippingConfiguration.startPositionMs
+    }
+    if (queueAlreadyLoaded(timeline, queue)) return
+    controller.setMediaItems(queueMediaItems(queue))
+    controller.prepare()
+    controller.playWhenReady = true
 }
 
 /**
