@@ -74,6 +74,9 @@ import haven.mobile.core.domain.captionLine
 import haven.mobile.core.domain.signDisclosureBatchBody
 import haven.mobile.core.domain.UNAVAILABLE_NOTICE_MILLIS
 import haven.mobile.core.domain.unavailableReturnMessage
+import haven.mobile.feature.identity.IdentityChip
+import haven.mobile.feature.identity.IdentitySwitcherSheet
+import haven.mobile.feature.identity.IdentityViewModel
 import kotlinx.coroutines.delay
 
 /**
@@ -91,9 +94,12 @@ import kotlinx.coroutines.delay
 fun LibraryScreen(
     navController: NavController,
     viewModel: LibraryViewModel = hiltViewModel(),
+    identityViewModel: IdentityViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val walletAddress by viewModel.walletAddress.collectAsState()
+    val identityState by identityViewModel.uiState.collectAsState()
+    var showIdentitySwitcher by remember { mutableStateOf(false) }
     val unavailableNotice by viewModel.unavailableNotice.collectAsState()
     val currentEntry by navController.currentBackStackEntryAsState()
     val savedStateHandle = currentEntry?.savedStateHandle
@@ -134,6 +140,11 @@ fun LibraryScreen(
                 }
             },
             actions = {
+                IdentityChip(
+                    identity = identityState.active,
+                    isLive = identityState.isLive,
+                    onClick = { showIdentitySwitcher = true },
+                )
                 val ready = uiState as? LibraryUiState.Ready
                 if (ready != null) {
                     if (selecting) {
@@ -203,6 +214,33 @@ fun LibraryScreen(
                 }
             },
         )
+
+        if (showIdentitySwitcher) {
+            IdentitySwitcherSheet(
+                state = identityState,
+                viewModel = identityViewModel,
+                onDismiss = { showIdentitySwitcher = false },
+            )
+        }
+
+        if (identityState.active != null && !identityState.isLive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = HavenSpacing.gutter, vertical = HavenSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Viewing ${identityState.active?.displayLabel} — reconnect to sign or unlock.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { identityViewModel.reconnect() }, enabled = !identityState.working) {
+                    Text("Reconnect")
+                }
+            }
+        }
 
         unavailableNotice?.let { notice ->
             UnavailableNotice(

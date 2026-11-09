@@ -5,84 +5,110 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import haven.mobile.core.domain.HavenChain
+import haven.mobile.core.wallet.WalletSession
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val Context.settingsDataStore by preferencesDataStore(name = "haven-settings")
 
+/** DataStore key for [base] under [walletLower]'s namespace; the plain base key when no wallet. */
+internal fun scopedSettingsKey(walletLower: String?, base: String): String =
+    if (walletLower.isNullOrBlank()) base else "id/$walletLower/$base"
+
+/** Per-identity value wins, then the legacy global value, then the default. */
+internal fun <T> resolveScoped(scoped: T?, legacy: T?, default: T): T = scoped ?: legacy ?: default
+
+@OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
+    private val walletSession: WalletSession,
 ) : SettingsRepository {
 
     companion object {
-        private val QUOTA_BYTES_KEY = stringPreferencesKey("cache.quota_bytes")
-        private val TTL_DAYS_KEY = stringPreferencesKey("cache.ttl_days")
-        private val CLEAR_ON_DISCONNECT_KEY = stringPreferencesKey("cache.clear_on_disconnect")
-        private val ENABLED_CHAINS_KEY = stringPreferencesKey("access.enabled_chains")
-        private val KEEP_UNLOCKED_KEY = stringPreferencesKey("cache.keep_unlocked")
+        private const val QUOTA_BASE = "cache.quota_bytes"
+        private const val TTL_BASE = "cache.ttl_days"
+        private const val CLEAR_BASE = "cache.clear_on_disconnect"
+        private const val CHAINS_BASE = "access.enabled_chains"
+        private const val KEEP_BASE = "cache.keep_unlocked"
         private const val SEPARATOR = ","
         /** Automatic (`AUTOMATIC_QUOTA`): foc sizes the cache from free space. */
-        private val DEFAULT_QUOTA_BYTES = 0L
-        private val DEFAULT_TTL_DAYS = 30
-        private val DEFAULT_CLEAR_ON_DISCONNECT = true
+        private const val DEFAULT_QUOTA_BYTES = 0L
+        private const val DEFAULT_TTL_DAYS = 30
+        private const val DEFAULT_CLEAR_ON_DISCONNECT = true
     }
 
-    override val cacheQuotaBytes: Flow<Long> = context.settingsDataStore.data.map { prefs ->
-        prefs[QUOTA_BYTES_KEY]?.toLongOrNull() ?: DEFAULT_QUOTA_BYTES
-    }
+    private fun walletLower(): String? = walletSession.address.value?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
 
-    override val cacheTtlDays: Flow<Int> = context.settingsDataStore.data.map { prefs ->
-        prefs[TTL_DAYS_KEY]?.toIntOrNull() ?: DEFAULT_TTL_DAYS
-    }
+    private fun keyFor(base: String, walletLower: String?) = stringPreferencesKey(scopedSettingsKey(walletLower, base))
+    private fun legacyKeyFor(base: String) = stringPreferencesKey(base)
 
-    override val clearOnDisconnect: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
-        prefs[CLEAR_ON_DISCONNECT_KEY]?.toBoolean() ?: DEFAULT_CLEAR_ON_DISCONNECT
-    }
+    private fun <T> scopedFlow(base: String, default: T, parse: (String) -> T?): Flow<T> =
+        walletSession.address.flatMapLatest { address ->
+            val lower = address?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+            context.settingsDataStore.data.map { prefs ->
+                resolveScoped(
+                    prefs[keyFor(base, lower)]?.let(parse),
+                    prefs[legacyKeyFor(base)]?.let(parse),
+                    default,
+                )
+            }
+        }
 
-    override val keepUnlocked: Flow<Boolean> = context.settingsDataStore.data.map { prefs ->
-        prefs[KEEP_UNLOCKED_KEY]?.toBoolean() ?: false
-    }
+    override val cacheQuotaBytes: Flow<Long> =
+        scopedFlow(QUOTA_BASE, DEFAULT_QUOTA_BYTES) { it.toLongOrNull() }
 
-    override val enabledChains: Flow<Set<HavenChain>> = context.settingsDataStore.data.map { prefs ->
-        val stored = prefs[ENABLED_CHAINS_KEY]
-            ?.split(SEPARATOR)
-            ?.mapNotNull { name -> HavenChain.entries.firstOrNull { it.name == name } }
-            ?.toSet()
-        // Empty or unreadable falls back to the defaults: a stored value that no longer parses (a chain
-        // removed from the enum, say) must not leave a reader with nothing checked and no explanation.
-        stored?.takeIf { it.isNotEmpty() } ?: HavenChain.mainnets.toSet()
+    override val cacheTtlDays: Flow<Int> =
+        scopedFlow(TTL_BASE, DEFAULT_TTL_DAYS) { it.toIntOrNull() }
+
+    override val clearOnDisconnect: Flow<Boolean> =
+        scopedFlow(CLEAR_BASE, DEFAULT_CLEAR_ON_DISCONNECT) { it.toBooleanStrictOrNull() }
+
+    override val keepUnlocked: Flow<Boolean> =
+        scopedFlow(KEEP_BASE, false) { it.toBooleanStrictOrNull() }
+
+    override val enabledChains: Flow<Set<HavenChain>> =
+        walletSession.address.flatMapLatest { address ->
+            val lower = address?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+            context.settingsDataStore.data.map { prefs ->
+                val raw = prefs[keyFor(CHAINS_BASE, lower)] ?: prefs[legacyKeyFor(CHAINS_BASE)]
+                val stored = raw
+                    ?.split(SEPARATOR)
+                    ?.mapNotNull { name -> HavenChain.entries.firstOrNull { it.name == name } }
+                    ?.toSet()
+                // Empty or unreadable falls back to the defaults: a stored value that no longer
+                // parses must not leave a reader with nothing checked and no explanation.
+                stored?.takeIf { it.isNotEmpty() } ?: HavenChain.mainnets.toSet()
+            }
+        }
+
+    private suspend fun write(base: String, value: String) {
+        val key = keyFor(base, walletLower())
+        context.settingsDataStore.edit { prefs -> prefs[key] = value }
     }
 
     override suspend fun setEnabledChains(chains: Set<HavenChain>) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[ENABLED_CHAINS_KEY] = chains.joinToString(SEPARATOR) { it.name }
-        }
+        write(CHAINS_BASE, chains.joinToString(SEPARATOR) { it.name })
     }
 
-    override suspend fun setCacheQuotaBytes(bytes: Long) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[QUOTA_BYTES_KEY] = bytes.toString()
-        }
-    }
+    override suspend fun setCacheQuotaBytes(bytes: Long) = write(QUOTA_BASE, bytes.toString())
 
-    override suspend fun setCacheTtlDays(days: Int) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[TTL_DAYS_KEY] = days.toString()
-        }
-    }
+    override suspend fun setCacheTtlDays(days: Int) = write(TTL_BASE, days.toString())
 
-    override suspend fun setKeepUnlocked(enabled: Boolean) {
-        context.settingsDataStore.edit { prefs ->
-            prefs[KEEP_UNLOCKED_KEY] = enabled.toString()
-        }
-    }
+    override suspend fun setKeepUnlocked(enabled: Boolean) = write(KEEP_BASE, enabled.toString())
 
-    override suspend fun setClearOnDisconnect(enabled: Boolean) {
+    override suspend fun setClearOnDisconnect(enabled: Boolean) = write(CLEAR_BASE, enabled.toString())
+
+    override suspend fun clearFor(walletAddress: String) {
+        val prefix = "id/${walletAddress.trim().lowercase()}/"
         context.settingsDataStore.edit { prefs ->
-            prefs[CLEAR_ON_DISCONNECT_KEY] = enabled.toString()
+            prefs.asMap().keys
+                .filter { it.name.startsWith(prefix) }
+                .forEach { prefs.remove(it) }
         }
     }
 }

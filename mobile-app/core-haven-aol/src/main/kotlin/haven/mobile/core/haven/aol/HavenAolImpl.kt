@@ -71,7 +71,7 @@ open class HavenAolImpl @Inject constructor(
         }
         val address = session.address.value ?: return Result.failure(HavenError.WalletNotConnected("No wallet connected"))
         // Check in-memory AES key cache first (FR-ACL-2) — gate key survives until disconnect
-        val cacheKey = cacheKeyFor(item)
+        val cacheKey = cacheKeyFor(item, address)
         aesKeyCache.get(cacheKey)?.let { return Result.success(it) }
         val gate = item.gate
         // Pre-seal V4 shapes (`wrappedKey` + `marketCapTarget`, no `encryptedAesKey`): no writer
@@ -976,7 +976,7 @@ open class HavenAolImpl @Inject constructor(
             if (aesKey.size != 32) {
                 return@map Result.failure<ByteArray>(HavenError.PlaybackDecryptFailed("The sealed key unwrapped to the wrong size."))
             }
-            aesKeyCache.put(cacheKeyFor(item), aesKey)
+            aesKeyCache.put(cacheKeyFor(item, address), aesKey)
             Result.success(aesKey)
         }
     }
@@ -1048,11 +1048,15 @@ open class HavenAolImpl @Inject constructor(
     }
 
     override suspend fun hasCachedKey(item: MediaItem): Boolean =
-        aesKeyCache.getSuspend(cacheKeyFor(item)) != null || hasEpochUnlock(item)
+        aesKeyCache.getSuspend(cacheKeyFor(item, walletSession.address.value)) != null || hasEpochUnlock(item)
 
-    /** Session cache identity for an item's key — one formula for lookup and store. */
-    private fun cacheKeyFor(item: MediaItem): String =
-        "${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
+    /**
+     * Session cache identity for an item's key — one formula for lookup and store.
+     * Wallet-prefixed: a key unlocked by one identity must never be served to
+     * another, even for the same item and gate.
+     */
+    private fun cacheKeyFor(item: MediaItem, walletAddress: String?): String =
+        "${walletAddress?.trim()?.lowercase() ?: "none"}:${item.id}:${item.gate?.tokenAddress}:${item.encryptionMetadata?.let { it::class.simpleName } ?: "v1"}"
 
     /**
      * Batch unlock: sealed-v1 items sharing a gate go out as ONE
@@ -1172,20 +1176,22 @@ open class HavenAolImpl @Inject constructor(
     }
 
     override suspend fun clearFor(walletAddress: String) {
-        aesKeyCache.clearAll()
+        // Only this wallet's keys: clearing one identity must not evict another's.
+        aesKeyCache.clearForWallet(walletAddress)
         // Durable copy goes first and must not fail closed: a disconnect that
         // only wiped memory would leave the persisted unlock resumable on the
         // next connect.
         runCatching { epochKeyStore.clearFor(walletAddress) }
+        val lower = walletAddress.lowercase()
         epochUnlocksMutex.withLock {
-            epochUnlocks.values.forEach { it.wipe() }
-            epochUnlocks.clear()
-            epochLocks.clear()
+            val doomed = epochUnlocks.keys.filter { it.walletLower == lower }
+            doomed.forEach { key -> epochUnlocks.remove(key)?.wipe() }
+            epochLocks.keys.removeAll { it.walletLower == lower }
         }
         loadMutex.withLock {
-            loadedWallets.remove(walletAddress.lowercase())
+            loadedWallets.remove(lower)
         }
-        // NonceManager is per-canister; entry clears nothing — real impl would iterate keys
+        // NonceManager entries are keyed by wallet; another wallet's nonces survive.
     }
 }
 

@@ -369,11 +369,12 @@ class MediaRepositoryImpl @Inject constructor(
     override suspend fun clearFor(walletAddress: String) {
         withContext(Dispatchers.IO) {
             try {
-                // deleteAll, not deleteForOwner: the mirror now also holds items published by other
-                // wallets (the feed), and owner-scoped deletion would leave those behind.
-                getDatabase().mediaDao().deleteAll()
-                runCatching { getDatabase().chapterDao().deleteAll() }
+                // Only drain/close the DB if it is this wallet's: opening another wallet's
+                // mirror here would swap (or, with no wallet connected, fail) the live one.
+                // The files are deleted by name either way.
                 if (currentWalletAddress == walletAddress.lowercase()) {
+                    runCatching { getDatabase().mediaDao().deleteAll() }
+                    runCatching { getDatabase().chapterDao().deleteAll() }
                     database?.close()
                     database = null
                     currentWalletAddress = null

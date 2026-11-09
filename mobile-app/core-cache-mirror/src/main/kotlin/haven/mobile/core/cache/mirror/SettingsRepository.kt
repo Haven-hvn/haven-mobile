@@ -29,4 +29,7 @@ interface SettingsRepository {
     suspend fun setClearOnDisconnect(enabled: Boolean)
     suspend fun setKeepUnlocked(enabled: Boolean)
     suspend fun setEnabledChains(chains: Set<HavenChain>)
+
+    /** Deletes every preference stored under [walletAddress]'s identity namespace. */
+    suspend fun clearFor(walletAddress: String)
 }

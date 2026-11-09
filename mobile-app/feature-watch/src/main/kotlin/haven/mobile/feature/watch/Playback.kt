@@ -215,6 +215,24 @@ internal fun EnablePictureInPicture(player: Player?, enabled: Boolean) {
 }
 
 /**
+ * Stops whatever the playback service is playing and empties it. Used on identity switch:
+ * the service player would otherwise keep playing the previous identity's staged plaintext.
+ */
+@OptIn(UnstableApi::class)
+suspend fun stopServicePlayback(context: Context) {
+    runCatching {
+        val token = SessionToken(context, ComponentName(context, HavenPlaybackService::class.java))
+        val controller = MediaController.Builder(context, token).buildAsync().await()
+        try {
+            controller.stop()
+            controller.clearMediaItems()
+        } finally {
+            controller.release()
+        }
+    }
+}
+
+/**
  * Connects to [HavenPlaybackService] without queuing anything, for UI that observes or steers
  * playback from outside the viewer — the shell's mini bar. Multiple controllers on one session
  * are cheap; each is just a connection, released on dispose.

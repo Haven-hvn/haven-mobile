@@ -41,6 +41,11 @@ class PlaybackSession @Inject constructor() {
         _state.value = State(itemId = itemId, shuffleMode = shuffleMode, playQueue = queue)
     }
 
+    /** Drops the session entirely (identity switch: the queue belongs to the previous wallet). */
+    fun clear() {
+        _state.value = State()
+    }
+
     /** Mirror a queue/shuffle change made in a viewer into the session. */
     fun update(shuffleMode: WatchViewModel.ShuffleMode, queue: List<QueueTrack>) {
         _state.value = _state.value.copy(shuffleMode = shuffleMode, playQueue = queue)

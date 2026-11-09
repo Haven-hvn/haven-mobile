@@ -74,6 +74,29 @@ class SecurityCleanupImpl @Inject constructor(
         return DisconnectReport(steps = steps, overallOk = steps.all { it.ok })
     }
 
+    override suspend fun removeIdentity(walletAddress: String): DisconnectReport {
+        val steps = mutableListOf<DisconnectReport.StepResult>()
+        val isActive = walletSession.address.value?.equals(walletAddress, ignoreCase = true) == true
+
+        steps += runStep("work_manager") {
+            withContext(Dispatchers.IO) {
+                WorkManager.getInstance(context).cancelAllWorkByTag("wallet:$walletAddress")
+            }
+        }
+        steps += runStep("haven_aol_keys") { havenAol.clearFor(walletAddress) }
+        steps += runStep("plaintext_spool") { plaintextSpool.clearFor(walletAddress) }
+        steps += runStep("unlocked_content") { havenCache.clearUnlockedFor(walletAddress) }
+        steps += runStep("content_cache") { havenCache.clearFor(walletAddress) }
+        steps += runStep("media_mirror") { mediaRepository.clearFor(walletAddress) }
+        steps += runStep("identity_settings") { settingsRepository.clearFor(walletAddress) }
+        if (isActive) {
+            steps += runStep("wallet_session") { walletSession.disconnect() }
+        }
+        steps += runStep("identity_record") { walletSession.forgetIdentity(walletAddress).getOrThrow() }
+
+        return DisconnectReport(steps = steps, overallOk = steps.all { it.ok })
+    }
+
     private suspend fun runStep(name: String, block: suspend () -> Unit): DisconnectReport.StepResult {
         return try {
             block()

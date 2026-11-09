@@ -245,7 +245,7 @@ class WatchViewModel @Inject constructor(
                 // only appears when signing can actually open something.
                 val verdict = gateKeyAcquisition(
                     items = listOf(media),
-                    isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                    isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache, walletSession.address.value) },
                     isAvailable = havenCache::isAvailable,
                 ).single().second
                 logStage("pre-disclosure gate id=${media.id} verdict=$verdict")
@@ -304,7 +304,7 @@ class WatchViewModel @Inject constructor(
         val cid = media.pieceRef?.pieceCid ?: return false
         if (plaintextSpool.find(cid) != null) return true
         if (havenCache.storesUnlocked() && havenCache.exists(cid)) return true
-        if (aesKeyCache.getSuspend(cid) != null) return true
+        if (aesKeyCache.getSuspend(haven.mobile.core.haven.aol.walletPieceKey(walletSession.address.value, cid)) != null) return true
         return havenAol.hasCachedKey(media)
     }
 
@@ -348,7 +348,7 @@ class WatchViewModel @Inject constructor(
             // anymore. A cached session key costs no cycles, so skip the probe then.
             val verdict = gateKeyAcquisition(
                 items = listOf(media),
-                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache, walletSession.address.value) },
                 isAvailable = havenCache::isAvailable,
             ).single().second
             // Point-in-time only — the fetch below can still fail, and surfaces it.
@@ -480,7 +480,7 @@ class WatchViewModel @Inject constructor(
     private suspend fun acquireKey(media: MediaItem, piece: cloud.filecoin.foc.cache.PieceRef): Result<ByteArray> {
         var key: ByteArray?
         content.value = ContentState.Working(UnlockStage.UNLOCKING)
-        key = aesKeyCache.getSuspend(piece.pieceCid)
+        key = aesKeyCache.getSuspend(haven.mobile.core.haven.aol.walletPieceKey(walletSession.address.value, piece.pieceCid))
         logStage("key id=${media.id} cached=${key != null}")
         if (key == null) {
             val unlocked = havenAol.decrypt(media, walletSession)
@@ -512,7 +512,7 @@ class WatchViewModel @Inject constructor(
             }
             key = unlocked.getOrNull()
                 ?: return fail("NO_KEY_AVAILABLE", "The gate returned no key material.").map { ByteArray(0) }
-            aesKeyCache.putSuspend(piece.pieceCid, key)
+            aesKeyCache.putSuspend(haven.mobile.core.haven.aol.walletPieceKey(walletSession.address.value, piece.pieceCid), key)
         }
         return Result.success(checkNotNull(key))
     }
@@ -607,6 +607,7 @@ class WatchViewModel @Inject constructor(
                     title = media.title,
                     kind = media.kind,
                     artworkPath = artwork?.absolutePath,
+                    walletAddress = walletSession.address.value,
                 ),
             )
         }

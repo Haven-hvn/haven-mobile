@@ -23,6 +23,8 @@ data class NowPlayingTrack(
     val title: String,
     val kind: MediaKind,
     val artworkPath: String? = null,
+    /** Identity that staged this track; playback must not leak into another identity on switch. */
+    val walletAddress: String? = null,
 )
 
 /**

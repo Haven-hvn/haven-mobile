@@ -55,6 +55,19 @@ class AesKeyCache(private val capacity: Int = 256) {
         }
     }
 
+    /**
+     * Drops only [walletAddress]'s keys. Wallet-scoped keys are stored as
+     * `<walletLower>:<rest>`; unprefixed entries (canister verification keys)
+     * are identity-independent and survive.
+     */
+    suspend fun clearForWallet(walletAddress: String) {
+        val prefix = walletAddress.trim().lowercase() + ":"
+        mutex.withLock {
+            val doomed = cache.keys.filter { it.startsWith(prefix) }
+            doomed.forEach { key -> cache.remove(key)?.let { zeroize(it) } }
+        }
+    }
+
     suspend fun clearAllSuspend() {
         mutex.withLock {
             for (entry in cache.entries) {

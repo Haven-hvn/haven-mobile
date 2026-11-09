@@ -188,7 +188,7 @@ class CommunityViewModel @Inject constructor(
             // fail now; the batch only spends on pieces that can open.
             val open = gateKeyAcquisition(
                 items = targets,
-                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+                isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache, walletSession.address.value) },
                 isAvailable = havenCache::isAvailable,
             ).map { it.second != KeyGateVerdict.UNAVAILABLE }
             val skipped = open.count { !it }

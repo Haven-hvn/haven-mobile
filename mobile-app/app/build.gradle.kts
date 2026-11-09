@@ -84,6 +84,7 @@ dependencies {
     implementation(project(":feature-collections"))
     implementation(project(":feature-launches"))
     implementation(project(":feature-settings"))
+    implementation(project(":feature-identity"))
     implementation(platform("com.reown:android-bom:1.6.14"))
     implementation("com.reown:android-core")
     implementation("com.reown:appkit")

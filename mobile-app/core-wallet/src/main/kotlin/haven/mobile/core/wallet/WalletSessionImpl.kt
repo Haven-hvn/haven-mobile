@@ -39,6 +39,54 @@ class WalletSessionImpl @Inject constructor(
     private val _address = MutableStateFlow<String?>(null)
     override val address: StateFlow<String?> = _address.asStateFlow()
 
+    private val _identities = MutableStateFlow<List<WalletIdentity>>(emptyList())
+    override val identities: StateFlow<List<WalletIdentity>> = _identities.asStateFlow()
+
+    private val _activeIdentity = MutableStateFlow<WalletIdentity?>(null)
+    override val activeIdentity: StateFlow<WalletIdentity?> = _activeIdentity.asStateFlow()
+
+    private val _isLive = MutableStateFlow(false)
+    override val isLive: StateFlow<Boolean> = _isLive.asStateFlow()
+
+    private fun liveAccountAddress(): String? =
+        try { if (isInitialized) AppKit.getAccount()?.address else null } catch (_: Exception) { null }
+
+    private fun refreshLive() {
+        _isLive.value = IdentityAddress.same(liveAccountAddress(), _address.value) && _address.value != null
+    }
+
+    /** Points the browsing flows at [address] (already in [_identities]) and persists the registry. */
+    private suspend fun activate(address: String, connector: String = "") {
+        val now = System.currentTimeMillis()
+        _identities.value = IdentityRegistry.upsert(_identities.value, address, connector, now)
+        val identity = _identities.value.firstOrNull { IdentityAddress.same(it.address, address) }
+        _address.value = identity?.address ?: address
+        _activeIdentity.value = identity
+        refreshLive()
+        walletDataStore.saveIdentityState(IdentityState(_identities.value, _address.value))
+    }
+
+    /** Ends the live WalletConnect session, if any. Stored identities and data are untouched. */
+    private suspend fun endLiveSession() {
+        try {
+            if (isInitialized && liveAccountAddress() != null) {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    try {
+                        AppKit.disconnect(
+                            onSuccess = { cont.resume(Unit) },
+                            onError = { cont.resume(Unit) },
+                        )
+                    } catch (_: Exception) {
+                        cont.resume(Unit)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        _isLive.value = false
+        _pairingUri.value = null
+    }
+
     private val _pairingUri = MutableStateFlow<String?>(null)
     override val pairingUri: StateFlow<String?> = _pairingUri.asStateFlow()
 
@@ -110,28 +158,31 @@ class WalletSessionImpl @Inject constructor(
 
     private fun restoreSession() {
         scope.launch {
-            // Load persisted address synchronously then reconcile with AppKit
-            val persisted = try { walletDataStore.loadPersistedAddress() } catch (_: Exception) { null }
+            // Load the identity registry (migrating the legacy single wallet), then reconcile
+            // with AppKit. A stored identity whose WalletConnect session is gone is NOT cleared:
+            // it stays active for browsing and shows as not-live until reconnected.
+            val state = try { walletDataStore.loadIdentityState() } catch (_: Exception) { IdentityState() }
+            _identities.value = state.identities
             val account: Account? = try { if (isInitialized) AppKit.getAccount() else null } catch (_: Exception) { null }
-            diag("RESTORE: persisted=${persisted ?: "null"} liveAccount=${account?.address ?: "null"}")
-            val reconciled = when {
+            diag("RESTORE: identities=${state.identities.size} active=${state.activeAddress ?: "null"} liveAccount=${account?.address ?: "null"}")
+            when {
                 account != null -> {
-                    // AppKit has live session — persist it
-                    walletDataStore.saveAddress(account.address)
                     val connector = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
-                    walletDataStore.saveLastConnector(connector)
-                    account.address
+                    activate(account.address, connector)
                 }
-                persisted != null && account == null -> {
-                    // Persisted but AppKit session gone — clear (per spec)
-                    diag("RESTORE: persisted address exists but AppKit session gone — clearing")
-                    walletDataStore.clearAll()
-                    null
+                state.activeAddress != null -> {
+                    val identity = state.identities.firstOrNull { IdentityAddress.same(it.address, state.activeAddress) }
+                    _address.value = identity?.address ?: state.activeAddress
+                    _activeIdentity.value = identity
+                    _isLive.value = false
                 }
-                else -> persisted
+                else -> {
+                    _address.value = null
+                    _activeIdentity.value = null
+                    _isLive.value = false
+                }
             }
-            _address.value = reconciled
-            diag("RESTORE: reconciled address=${reconciled ?: "null"}")
+            diag("RESTORE: reconciled address=${_address.value ?: "null"} live=${_isLive.value}")
         }
     }
 
@@ -158,10 +209,8 @@ class WalletSessionImpl @Inject constructor(
                         }
                         if (addr != null) {
                             scope.launch {
-                                walletDataStore.saveAddress(addr)
                                 val conn = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
-                                walletDataStore.saveLastConnector(conn)
-                                _address.value = addr
+                                activate(addr, conn)
                                 diag("DELEGATE: approved → address emitted: $addr")
                             }
                         } else {
@@ -174,7 +223,7 @@ class WalletSessionImpl @Inject constructor(
                     override fun onSessionUpdate(updatedSession: Modal.Model.UpdatedSession) {
                         Timber.i("[WS][DELEGATE] onSessionUpdate: %s", updatedSession)
                         val addr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
-                        scope.launch { _address.value = addr; if (addr != null) walletDataStore.saveAddress(addr) }
+                        scope.launch { if (addr != null) activate(addr) else _isLive.value = false }
                     }
                     override fun onSessionEvent(sessionEvent: Modal.Model.SessionEvent) {
                         Timber.d("[WS][DELEGATE] onSessionEvent: %s", sessionEvent)
@@ -185,8 +234,8 @@ class WalletSessionImpl @Inject constructor(
                     override fun onSessionDelete(deletedSession: Modal.Model.DeletedSession) {
                         diag("DELEGATE: onSessionDelete — clearing")
                         scope.launch {
-                            walletDataStore.clearAll()
-                            _address.value = null
+                            _isLive.value = false
+                            diag("DELEGATE: session deleted — identity kept, reconnect to sign")
                         }
                     }
                     override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {}
@@ -221,9 +270,7 @@ class WalletSessionImpl @Inject constructor(
             val existing = AppKit.getAccount()
             if (existing != null) {
                 diag("CONNECT: already connected as ${existing.address}")
-                walletDataStore.saveAddress(existing.address)
-                walletDataStore.saveLastConnector("WalletConnect")
-                _address.value = existing.address
+                activate(existing.address, "WalletConnect")
                 return Result.success(existing.address)
             }
         } catch (e: Exception) {
@@ -293,10 +340,8 @@ class WalletSessionImpl @Inject constructor(
                 val acc = AppKit.getAccount()
                 if (acc != null) {
                     diag("CONNECT: poll ${waited / 2}s — account appeared ${acc.address}")
-                    walletDataStore.saveAddress(acc.address)
                     val connector = try { AppKit.getConnectorType()?.name ?: "WalletConnect" } catch (_: Exception) { "WalletConnect" }
-                    walletDataStore.saveLastConnector(connector)
-                    _address.value = acc.address
+                    activate(acc.address, connector)
                     _pairingUri.value = null
                     return Result.success(acc.address)
                 }
@@ -311,31 +356,73 @@ class WalletSessionImpl @Inject constructor(
     }
 
     override suspend fun disconnect() {
-        try {
-            if (isInitialized) {
-                suspendCancellableCoroutine<Unit> { cont ->
-                    try {
-                        AppKit.disconnect(
-                            onSuccess = { cont.resume(Unit) },
-                            onError = { cont.resume(Unit) }
-                        )
-                    } catch (e: Exception) {
-                        cont.resume(Unit)
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        walletDataStore.clearAll()
-        _address.value = null
+        endLiveSession()
+        diag("DISCONNECT: live session ended — identity and its data kept")
+    }
+
+    override suspend fun switchTo(address: String): Result<Unit> {
+        val target = _identities.value.firstOrNull { IdentityAddress.same(it.address, address) }
+            ?: return Result.failure(WalletError.UnknownIdentity(address))
+        if (IdentityAddress.same(_address.value, target.address)) {
+            refreshLive()
+            return Result.success(Unit)
+        }
+        val live = liveAccountAddress()
+        if (live != null && !IdentityAddress.same(live, target.address)) endLiveSession()
+        _identities.value = IdentityRegistry.touch(_identities.value, target.address, System.currentTimeMillis())
+        val touched = _identities.value.firstOrNull { it.id == target.id } ?: target
+        _address.value = touched.address
+        _activeIdentity.value = touched
         _pairingUri.value = null
+        refreshLive()
+        walletDataStore.saveIdentityState(IdentityState(_identities.value, _address.value))
+        diag("SWITCH: active identity now ${touched.address} live=${_isLive.value} (nothing cleared)")
+        return Result.success(Unit)
+    }
+
+    override suspend fun connectNewIdentity(): Result<String> {
+        if (liveAccountAddress() != null) endLiveSession()
+        return connect()
+    }
+
+    override suspend fun reconnect(): Result<String> = connect()
+
+    override suspend fun renameIdentity(address: String, label: String): Result<Unit> {
+        if (_identities.value.none { IdentityAddress.same(it.address, address) }) {
+            return Result.failure(WalletError.UnknownIdentity(address))
+        }
+        _identities.value = IdentityRegistry.rename(_identities.value, address, label)
+        _activeIdentity.value = _identities.value.firstOrNull { IdentityAddress.same(it.address, _address.value) }
+        walletDataStore.saveIdentityState(IdentityState(_identities.value, _address.value))
+        return Result.success(Unit)
+    }
+
+    override suspend fun forgetIdentity(address: String): Result<Unit> {
+        val wasActive = IdentityAddress.same(_address.value, address)
+        if (wasActive && IdentityAddress.same(liveAccountAddress(), address)) endLiveSession()
+        val (remaining, nextActiveId) = IdentityRegistry.forget(_identities.value, _activeIdentity.value?.id, address)
+        _identities.value = remaining
+        if (wasActive) {
+            val next = remaining.firstOrNull { it.id == nextActiveId }
+            _address.value = next?.address
+            _activeIdentity.value = next
+        }
+        refreshLive()
+        walletDataStore.saveIdentityState(IdentityState(_identities.value, _address.value))
+        diag("FORGET: identity $address removed; active=${_address.value ?: "none"}")
+        return Result.success(Unit)
     }
 
     override suspend fun signTypedDataV4(json: String, chainId: Long): Result<String> = withContext(ioDispatcher) {
         if (config.projectId.isBlank()) {
             return@withContext Result.failure(WalletError.AppKitNotInitialized)
         }
-        val addr = address.value ?: try { AppKit.getAccount()?.address } catch (_: Exception) { null }
-            ?: return@withContext Result.failure(WalletError.NoAddressReturned)
+        val activeAddr = address.value
+        val liveAddr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
+        if (activeAddr == null || !IdentityAddress.same(liveAddr, activeAddr)) {
+            return@withContext Result.failure(WalletError.NotLive)
+        }
+        val addr = liveAddr ?: return@withContext Result.failure(WalletError.NotLive)
         if (json.isBlank()) return@withContext Result.failure(WalletError.InvalidSignatureFormat)
 
         // EIP-712 / WalletConnect: eth_signTypedData_v4 params MUST be [address, typedDataObject].
@@ -378,23 +465,21 @@ class WalletSessionImpl @Inject constructor(
                                 }
                                 if (approvedAddr != null) {
                                     scope.launch {
-                                        walletDataStore.saveAddress(approvedAddr)
-                                        _address.value = approvedAddr
+                                        activate(approvedAddr)
                                     }
                                 }
                             }
                             override fun onSessionRejected(s: Modal.Model.RejectedSession) { diag("SIGN DELEGATE: onSessionRejected") }
                             override fun onSessionUpdate(s: Modal.Model.UpdatedSession) {
                                 val updatedAddr = try { AppKit.getAccount()?.address } catch (_: Exception) { null }
-                                scope.launch { _address.value = updatedAddr; if (updatedAddr != null) walletDataStore.saveAddress(updatedAddr) }
+                                scope.launch { if (updatedAddr != null) activate(updatedAddr) else _isLive.value = false }
                             }
                             override fun onSessionEvent(s: Modal.Model.SessionEvent) {}
                             override fun onSessionExtend(s: Modal.Model.Session) {}
                             override fun onSessionDelete(s: Modal.Model.DeletedSession) {
                                 diag("SIGN DELEGATE: onSessionDelete — clearing")
                                 scope.launch {
-                                    walletDataStore.clearAll()
-                                    _address.value = null
+                                    _isLive.value = false
                                 }
                             }
                             override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
@@ -488,6 +573,10 @@ class WalletSessionImpl @Inject constructor(
                 return@withContext Result.failure(WalletError.NoAddressReturned)
             }
             if (addr.isNullOrBlank()) return@withContext Result.failure(WalletError.NoAddressReturned)
+            val activeTx = _address.value
+            if (activeTx != null && !IdentityAddress.same(addr, activeTx)) {
+                return@withContext Result.failure(WalletError.NotLive)
+            }
 
             val tx = org.json.JSONObject().apply {
                 put("from", addr)
@@ -514,8 +603,7 @@ class WalletSessionImpl @Inject constructor(
                             override fun onSessionExtend(s: Modal.Model.Session) {}
                             override fun onSessionDelete(s: Modal.Model.DeletedSession) {
                                 scope.launch {
-                                    walletDataStore.clearAll()
-                                    _address.value = null
+                                    _isLive.value = false
                                 }
                             }
                             override fun onSessionRequestResponse(response: Modal.Model.SessionRequestResponse) {
@@ -587,6 +675,12 @@ class WalletSessionImpl @Inject constructor(
 sealed class WalletError : Exception() {
     object AppKitNotInitialized : WalletError() {
         override val message: String get() = "AppKit not initialized — set wallet.projectId in local.properties"
+    }
+    data class UnknownIdentity(val address: String) : WalletError() {
+        override val message: String get() = "Unknown identity: $address"
+    }
+    object NotLive : WalletError() {
+        override val message: String get() = "This identity is not connected right now — reconnect it to sign"
     }
     object NoAddressReturned : WalletError() {
         override val message: String get() = "No wallet address — connect a wallet first"

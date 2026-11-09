@@ -548,7 +548,7 @@ class LibraryViewModel @Inject constructor(
     private suspend fun probeTargets(targets: List<MediaItem>): List<Boolean> =
         gateKeyAcquisition(
             items = targets,
-            isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache) },
+            isKeyCached = { havenAol.hasSessionKey(it, aesKeyCache, walletSession.address.value) },
             isAvailable = havenCache::isAvailable,
         ).map { it.second != KeyGateVerdict.UNAVAILABLE }
 

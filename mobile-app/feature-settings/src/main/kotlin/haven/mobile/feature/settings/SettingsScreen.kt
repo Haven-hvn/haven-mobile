@@ -48,6 +48,8 @@ import haven.mobile.core.design.component.SettingSliderRow
 import haven.mobile.core.design.component.SettingSwitchRow
 import haven.mobile.core.design.component.formatBytes
 import haven.mobile.core.domain.HavenChain
+import haven.mobile.feature.identity.IdentityRow
+import haven.mobile.feature.identity.IdentityViewModel
 
 /** Which destructive confirmation is open, if any. Hoisted so scrolling cannot lose it. */
 private enum class PendingAction { NONE, CLEAR_CACHE, DISCONNECT }
@@ -69,8 +71,10 @@ fun SettingsScreen(
     navController: NavController,
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
+    identityViewModel: IdentityViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    val identityState by identityViewModel.uiState.collectAsState()
     val clipboard = LocalClipboardManager.current
 
     var pending by rememberSaveable { mutableStateOf(PendingAction.NONE) }
@@ -112,6 +116,55 @@ fun SettingsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(HavenSpacing.lg),
         ) {
+            item {
+                SectionHeader(label = "Identities")
+                Spacer(Modifier.height(HavenSpacing.md))
+                if (identityState.identities.isEmpty()) {
+                    Text(
+                        text = "No wallet connected yet. Connect one to create your first identity.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    identityState.identities.forEach { identity ->
+                        IdentityRow(
+                            identity = identity,
+                            isActive = identity.id == identityState.active?.id,
+                            isLive = identityState.isLive,
+                            onSwitch = { identityViewModel.switchTo(identity.address) },
+                            onRename = { label -> identityViewModel.rename(identity.address, label) },
+                            onRemove = { identityViewModel.removeIdentity(identity.address) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(HavenSpacing.sm))
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = { identityViewModel.addIdentity() },
+                    enabled = !identityState.working,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (identityState.working) "Waiting for wallet…" else "Add identity")
+                }
+                if (identityState.active != null && !identityState.isLive) {
+                    Spacer(Modifier.height(HavenSpacing.sm))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { identityViewModel.reconnect() },
+                        enabled = !identityState.working,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Reconnect ${identityState.active?.displayLabel} to sign")
+                    }
+                }
+                identityState.message?.let { msg ->
+                    Spacer(Modifier.height(HavenSpacing.sm))
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             item {
                 SectionHeader(label = "Wallet")
                 Spacer(Modifier.height(HavenSpacing.md))

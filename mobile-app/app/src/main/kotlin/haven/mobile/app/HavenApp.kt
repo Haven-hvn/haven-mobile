@@ -21,6 +21,8 @@ import haven.mobile.core.design.component.HavenDestination
 import haven.mobile.core.design.component.HavenNavigationBar
 import haven.mobile.core.design.component.HavenScreen
 import haven.mobile.feature.watch.MiniPlayerBar
+import androidx.compose.runtime.LaunchedEffect
+import haven.mobile.feature.identity.IdentityViewModel
 import haven.mobile.feature.watch.NowPlayingViewModel
 import haven.mobile.feature.watch.shouldShowMiniPlayer
 
@@ -45,6 +47,21 @@ fun HavenApp(
         if (isDebugBuild) bottomDestinations + debugDestination else bottomDestinations
     }
     val showNavigationBar = destinations.any { it.route == currentRoute }
+
+    val identityViewModel: IdentityViewModel = hiltViewModel()
+    val identityState by identityViewModel.uiState.collectAsState()
+    LaunchedEffect(identityState.active, identityState.identities) {
+        // Last identity removed while inside the app: back to the gate.
+        if (identityState.active == null && identityState.identities.isEmpty() &&
+            currentRoute != null && currentRoute != AppRoute.Onboarding.route() &&
+            currentRoute in destinations.map { it.route }
+        ) {
+            navController.navigate(AppRoute.Onboarding.route()) {
+                popUpTo(AppRoute.Library.route()) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
 
     // Session playback, read at the activity scope so the bar survives every navigation. The bar
     // hides on the viewer itself, where the full player is already visible.

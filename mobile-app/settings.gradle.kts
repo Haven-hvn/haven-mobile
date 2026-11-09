@@ -45,5 +45,6 @@ include(":feature-community")
 include(":feature-collections")
 include(":feature-launches")
 include(":feature-settings")
+include(":feature-identity")
 
 includeBuild("build-logic")

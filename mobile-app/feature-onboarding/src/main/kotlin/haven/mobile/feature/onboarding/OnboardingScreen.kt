@@ -45,6 +45,9 @@ import haven.mobile.core.design.HavenSpacing
 import haven.mobile.core.design.HavenTheme
 import haven.mobile.core.design.component.Explain
 import haven.mobile.core.design.component.MonoIdentifier
+import androidx.compose.foundation.clickable
+import haven.mobile.feature.identity.IdentityAvatar
+import haven.mobile.feature.identity.IdentityViewModel
 
 /**
  * Absences, not features. Every line is something a reader has been trained to expect from an app
@@ -75,9 +78,11 @@ fun OnboardingScreen(
     navController: NavController,
     onNavigate: () -> Unit,
     viewModel: OnboardingViewModel = hiltViewModel(),
+    identityViewModel: IdentityViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val identityState by identityViewModel.uiState.collectAsState()
 
     LaunchedEffect(uiState) {
         if (uiState is OnboardingUiState.Connected) onNavigate()
@@ -254,6 +259,40 @@ fun OnboardingScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+
+        if (identityState.identities.isNotEmpty()) {
+            Spacer(Modifier.height(HavenSpacing.lg))
+            Text(
+                text = "Your identities on this device",
+                style = HavenTheme.text.overline,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(HavenSpacing.sm))
+            identityState.identities.forEach { identity ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { identityViewModel.switchTo(identity.address) }
+                        .padding(vertical = HavenSpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IdentityAvatar(identity)
+                    Spacer(Modifier.width(HavenSpacing.md))
+                    Column {
+                        Text(
+                            text = identity.displayLabel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Tap to continue — nothing is cleared",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
 
