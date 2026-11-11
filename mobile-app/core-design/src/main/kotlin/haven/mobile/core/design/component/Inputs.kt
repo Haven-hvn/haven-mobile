@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -169,6 +170,20 @@ fun SettingSwitchRow(
 ) {
     SettingRow(title = title, supporting = supporting, modifier = modifier) {
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** Radio row for a three-way-or-fewer choice. The radio is the target; the row label is not. */
+@Composable
+fun SettingChoiceRow(
+    title: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier,
+    supporting: String? = null,
+) {
+    SettingRow(title = title, supporting = supporting, modifier = modifier) {
+        RadioButton(selected = selected, onClick = onSelect)
     }
 }
 

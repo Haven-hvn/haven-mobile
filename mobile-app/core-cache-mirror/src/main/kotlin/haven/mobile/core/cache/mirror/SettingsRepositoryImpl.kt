@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import cloud.filecoin.foc.cache.FocChain
 import haven.mobile.core.domain.HavenChain
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -35,6 +36,9 @@ class SettingsRepositoryImpl @Inject constructor(
         private const val CLEAR_BASE = "cache.clear_on_disconnect"
         private const val CHAINS_BASE = "access.enabled_chains"
         private const val KEEP_BASE = "cache.keep_unlocked"
+        private const val FOC_NETWORK_KEY = "foc.network"
+        private const val FOC_NETWORK_CALIBRATION = "calibration"
+        private const val FOC_NETWORK_MAINNET = "mainnet"
         private const val SEPARATOR = ","
         /** Automatic (`AUTOMATIC_QUOTA`): foc sizes the cache from free space. */
         private const val DEFAULT_QUOTA_BYTES = 0L
@@ -61,6 +65,16 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val cacheQuotaBytes: Flow<Long> =
         scopedFlow(QUOTA_BASE, DEFAULT_QUOTA_BYTES) { it.toLongOrNull() }
+
+    // Application-wide, not per identity: plain unscoped key, and clearFor() below must not remove it.
+    override val focNetwork: Flow<FocChain?> =
+        context.settingsDataStore.data.map { prefs ->
+            when (prefs[stringPreferencesKey(FOC_NETWORK_KEY)]) {
+                FOC_NETWORK_CALIBRATION -> FocChain.CALIBRATION
+                FOC_NETWORK_MAINNET -> FocChain.MAINNET
+                else -> null
+            }
+        }
 
     override val cacheTtlDays: Flow<Int> =
         scopedFlow(TTL_BASE, DEFAULT_TTL_DAYS) { it.toIntOrNull() }
@@ -93,6 +107,16 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun setEnabledChains(chains: Set<HavenChain>) {
         write(CHAINS_BASE, chains.joinToString(SEPARATOR) { it.name })
+    }
+
+    override suspend fun setFocNetwork(network: FocChain?) {
+        context.settingsDataStore.edit { prefs ->
+            when (network) {
+                FocChain.CALIBRATION -> prefs[stringPreferencesKey(FOC_NETWORK_KEY)] = FOC_NETWORK_CALIBRATION
+                FocChain.MAINNET -> prefs[stringPreferencesKey(FOC_NETWORK_KEY)] = FOC_NETWORK_MAINNET
+                null -> prefs.remove(stringPreferencesKey(FOC_NETWORK_KEY))
+            }
+        }
     }
 
     override suspend fun setCacheQuotaBytes(bytes: Long) = write(QUOTA_BASE, bytes.toString())

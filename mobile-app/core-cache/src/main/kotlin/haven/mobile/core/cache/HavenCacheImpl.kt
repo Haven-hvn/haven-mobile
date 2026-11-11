@@ -3,7 +3,9 @@ package haven.mobile.core.cache
 import android.content.Context
 import cloud.filecoin.foc.cache.AutoQuota
 import cloud.filecoin.foc.cache.Config
+import cloud.filecoin.foc.cache.FocChain
 import cloud.filecoin.foc.cache.PieceTransform
+import timber.log.Timber
 import cloud.filecoin.foc.cache.FocCache
 import cloud.filecoin.foc.cache.PieceRef
 import cloud.filecoin.foc.cache.SpaceInfo
@@ -87,6 +89,9 @@ class HavenCacheImpl @Inject constructor(
             deleteModeDir(walletAddress, !desired.keepUnlocked)
             cacheDir.mkdirs()
             val automatic = desired.quotaBytes == AUTOMATIC_QUOTA
+            // The SP registry listing changes slowly and the HEAD probe below still runs per
+            // piece, so letting the process-lifetime cache live forever costs nothing worth
+            // bounding — it dies with the app process.
             val created = FocCache(
                 context,
                 Config(
@@ -97,12 +102,25 @@ class HavenCacheImpl @Inject constructor(
                     chunkSize = defaults.chunkSize,
                     maxParallelFetches = defaults.maxParallelFetches,
                     hedgeDelay = Duration.ofMillis(defaults.hedgeDelayMillis),
+                    // java.time.Duration has no INFINITE; ~1000 years is longer than any process lives.
+                    registryCacheTtl = Duration.ofDays(365_000),
                 ),
             )
             focCache = created
             key = desired
             return created
         }
+    }
+
+    /**
+     * Registry warm needs a session to have been established (the cache is wallet-scoped), so
+     * until then this is a no-op — the first miss pays for the read, as before.
+     */
+    override suspend fun warmupProviders(chains: List<FocChain>) = withContext(Dispatchers.IO) {
+        if (walletSession.address.value == null) return@withContext
+        runCatching { requireFocCache().warmupProviders(chains) }
+            .onFailure { Timber.w(it, "foc registry warmup failed — first miss pays for the read") }
+        Unit
     }
 
     override suspend fun get(ref: PieceRef): Result<ByteArray> = withContext(Dispatchers.IO) {

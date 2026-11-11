@@ -8,6 +8,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import haven.mobile.core.arkiv.FocNetworkSource
 import haven.mobile.core.cache.CacheSettingsSource
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -34,6 +35,14 @@ abstract class CacheMirrorDiModule {
     @Binds
     @Singleton
     abstract fun bindCacheSettingsSource(impl: SettingsBackedCacheSettings): CacheSettingsSource
+
+    /**
+     * Supplies `:core-arkiv` with the user's Filecoin network preference. Same inversion as
+     * [bindCacheSettingsSource]: `:core-arkiv` declares [FocNetworkSource], this module fulfils it.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindFocNetworkSource(impl: SettingsBackedFocNetworkSource): FocNetworkSource
 }
 
 /** Adapter: the preferences store, seen through the cache's much smaller interface. */
@@ -44,6 +53,14 @@ class SettingsBackedCacheSettings @Inject constructor(
     override val quotaBytes: Flow<Long> get() = settingsRepository.cacheQuotaBytes
     override val ttlDays: Flow<Int> get() = settingsRepository.cacheTtlDays
     override val keepUnlocked: Flow<Boolean> get() = settingsRepository.keepUnlocked
+}
+
+/** Adapter: the application-wide Filecoin network preference, seen as a nullable override. */
+@Singleton
+class SettingsBackedFocNetworkSource @Inject constructor(
+    private val settingsRepository: SettingsRepository,
+) : FocNetworkSource {
+    override val focNetworkOverride: Flow<cloud.filecoin.foc.cache.FocChain?> get() = settingsRepository.focNetwork
 }
 
 @Module

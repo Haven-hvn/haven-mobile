@@ -100,8 +100,9 @@ class MediaRepositoryImpl @Inject constructor(
     }
 
     override fun observeLibrary(owner: String): Flow<List<MediaItem>> {
-        return getDatabase().mediaDao().observeLibrary(owner).map { entities ->
-            entities.map { it.toMediaItem() }
+        return getDatabase().mediaDao().observeLibrary(owner).mapLatest { entities ->
+            val focOverride = settingsRepository.focNetwork.first()
+            entities.map { it.toMediaItem(focOverride) }
         }
     }
 
@@ -145,8 +146,9 @@ class MediaRepositoryImpl @Inject constructor(
      */
     override fun observeAccessible(): Flow<List<MediaItem>> {
         return getDatabase().mediaDao().observeAccessible().mapLatest { entities ->
+            val focOverride = settingsRepository.focNetwork.first()
             entities.map { entity ->
-                val item = entity.toMediaItem()
+                val item = entity.toMediaItem(focOverride)
                 item.copy(contentCacheStatus = resolveCacheStatus(item))
             }
         }
@@ -296,7 +298,8 @@ class MediaRepositoryImpl @Inject constructor(
         // Same live residency as observeAccessible: the watch screen stages content
         // without a mirror write, and must not show a stale label for its own item.
         return getDatabase().mediaDao().observeItem(id).mapLatest { entity ->
-            entity?.toMediaItem()?.let { item ->
+            val focOverride = settingsRepository.focNetwork.first()
+            entity?.toMediaItem(focOverride)?.let { item ->
                 item.copy(contentCacheStatus = resolveCacheStatus(item))
             }
         }
@@ -446,7 +449,9 @@ class MediaRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun MediaMirrorEntity.toMediaItem(): MediaItem {
+    private fun MediaMirrorEntity.toMediaItem(
+        focOverride: cloud.filecoin.foc.cache.FocChain? = null,
+    ): MediaItem {
         return MediaItem(
             id = id,
             kind = MediaKind.valueOf(kind),
@@ -466,7 +471,12 @@ class MediaRepositoryImpl @Inject constructor(
                 providerServiceUrls = parseJsonStringList(providerServiceUrls) ?: emptyList(),
                 walletAddress = walletAddress,
                 cdnEnabled = cdnEnabled,
-                chain = if (chain != null) cloud.filecoin.foc.cache.FocChain.valueOf(chain) else cloud.filecoin.foc.cache.FocChain.MAINNET,
+                // Aligned with the arkiv-side default ("no signal means calibration —
+                // every record published to date is testnet content").
+                // A user-set network in application settings wins over whatever the row stored.
+                chain = focOverride
+                    ?: chain?.let { cloud.filecoin.foc.cache.FocChain.valueOf(it) }
+                    ?: cloud.filecoin.foc.cache.FocChain.CALIBRATION,
                 ipfsIndexed = ipfsIndexed,
                 unixFsRoot = unixFsRoot,
                 trustlessGateways = parseJsonStringList(trustlessGateways) ?: emptyList(),

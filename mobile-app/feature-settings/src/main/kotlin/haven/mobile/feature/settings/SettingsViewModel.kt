@@ -7,6 +7,7 @@ import haven.mobile.core.cache.AUTOMATIC_QUOTA
 import haven.mobile.core.cache.HavenCache
 import haven.mobile.core.cache.mirror.SettingsRepository
 import haven.mobile.core.domain.HavenChain
+import cloud.filecoin.foc.cache.FocChain
 import haven.mobile.core.security.SecurityCleanup
 import haven.mobile.core.wallet.WalletSession
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,12 @@ data class CacheUsage(
     val itemCount: Int,
 )
 
+/**
+ * Which Filecoin Onchain Cloud network to fetch pieces from.
+ * [AUTOMATIC] keeps the per-record inference (gate chain, then the Arkiv endpoint).
+ */
+enum class FocNetworkChoice { AUTOMATIC, CALIBRATION, MAINNET }
+
 data class SettingsUiState(
     val walletAddress: String?,
     val quotaBytes: Long,
@@ -32,6 +39,8 @@ data class SettingsUiState(
     val keepUnlocked: Boolean = false,
     /** Which of Haven-AOL's chains are checked for access. */
     val enabledChains: Set<HavenChain>,
+    /** Application-wide Filecoin network for piece retrieval. */
+    val focNetwork: FocNetworkChoice = FocNetworkChoice.AUTOMATIC,
     val usage: CacheUsage?,
     val recentEvents: List<String>,
     val isWorking: Boolean = false,
@@ -78,8 +87,12 @@ class SettingsViewModel @Inject constructor(
         TransientState(u, isWorking, msg, log)
     }
 
+    private val withFocNetwork = combine(preferences, settingsRepository.focNetwork) { prefs, foc ->
+        prefs to foc
+    }
+
     val uiState: StateFlow<SettingsUiState> =
-        combine(preferences, walletSession.address, transient) { prefs, address, t ->
+        combine(withFocNetwork, walletSession.address, transient) { (prefs, foc), address, t ->
             SettingsUiState(
                 walletAddress = address,
                 quotaBytes = prefs.quotaBytes,
@@ -87,6 +100,11 @@ class SettingsViewModel @Inject constructor(
                 clearOnDisconnect = prefs.clearOnDisconnect,
                 keepUnlocked = prefs.keepUnlocked,
                 enabledChains = prefs.chains,
+                focNetwork = when (foc) {
+                    FocChain.CALIBRATION -> FocNetworkChoice.CALIBRATION
+                    FocChain.MAINNET -> FocNetworkChoice.MAINNET
+                    null -> FocNetworkChoice.AUTOMATIC
+                },
                 usage = t.usage,
                 recentEvents = t.events,
                 isWorking = t.working,
@@ -101,6 +119,7 @@ class SettingsViewModel @Inject constructor(
                 ttlDays = DEFAULT_TTL_DAYS,
                 clearOnDisconnect = true,
                 enabledChains = HavenChain.mainnets.toSet(),
+                focNetwork = FocNetworkChoice.AUTOMATIC,
                 usage = null,
                 recentEvents = emptyList(),
             ),
@@ -158,6 +177,19 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setCacheTtlDays(days)
             record("cache.ttl_days = $days")
+        }
+    }
+
+    fun setFocNetwork(choice: FocNetworkChoice) {
+        viewModelScope.launch {
+            settingsRepository.setFocNetwork(
+                when (choice) {
+                    FocNetworkChoice.AUTOMATIC -> null
+                    FocNetworkChoice.CALIBRATION -> FocChain.CALIBRATION
+                    FocNetworkChoice.MAINNET -> FocChain.MAINNET
+                },
+            )
+            record("foc.network = ${choice.name.lowercase()}")
         }
     }
 

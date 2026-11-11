@@ -44,6 +44,7 @@ import haven.mobile.core.design.component.ConfirmDialog
 import haven.mobile.core.design.component.HavenTopBar
 import haven.mobile.core.design.component.MonoIdentifier
 import haven.mobile.core.design.component.SectionHeader
+import haven.mobile.core.design.component.SettingChoiceRow
 import haven.mobile.core.design.component.SettingSliderRow
 import haven.mobile.core.design.component.SettingSwitchRow
 import haven.mobile.core.design.component.formatBytes
@@ -293,6 +294,37 @@ fun SettingsScreen(
                     text = "Expired pieces are evicted automatically once past the limit above.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            item {
+                SectionHeader(label = "Filecoin network")
+                Spacer(Modifier.height(HavenSpacing.sm))
+                Text(
+                    text = "Which Filecoin Onchain Cloud network your content is fetched from. " +
+                        "Automatic matches each record to its gate chain, falling back to the " +
+                        "server's network.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(HavenSpacing.md))
+                SettingChoiceRow(
+                    title = "Automatic",
+                    supporting = "Per record: gate chain, then the server default",
+                    selected = state.focNetwork == FocNetworkChoice.AUTOMATIC,
+                    onSelect = { viewModel.setFocNetwork(FocNetworkChoice.AUTOMATIC) },
+                )
+                SettingChoiceRow(
+                    title = "Calibration",
+                    supporting = "Filecoin test network",
+                    selected = state.focNetwork == FocNetworkChoice.CALIBRATION,
+                    onSelect = { viewModel.setFocNetwork(FocNetworkChoice.CALIBRATION) },
+                )
+                SettingChoiceRow(
+                    title = "Mainnet",
+                    supporting = "Filecoin mainnet",
+                    selected = state.focNetwork == FocNetworkChoice.MAINNET,
+                    onSelect = { viewModel.setFocNetwork(FocNetworkChoice.MAINNET) },
                 )
             }
 

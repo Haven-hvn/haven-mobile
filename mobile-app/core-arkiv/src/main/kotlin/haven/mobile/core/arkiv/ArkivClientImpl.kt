@@ -7,6 +7,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -48,12 +50,31 @@ internal const val HAVEN_GROUPS_QUERY =
 @Singleton
 class ArkivClientImpl @Inject constructor(
     private val config: ArkivConfig,
+    private val focNetworkSource: FocNetworkSource = FocNetworkSource.Automatic,
 ) : ArkivClient {
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(config.timeoutMillis, TimeUnit.MILLISECONDS)
         .readTimeout(config.timeoutMillis, TimeUnit.MILLISECONDS)
         .build()
+
+    /**
+     * Latest user-forced network, refreshed from [focNetworkSource] as it emits. Read synchronously
+     * from the (non-suspending) entity parser, so the parser does not need to become suspending;
+     * the flow emits the current DataStore value to every new collector, so this is populated as
+     * soon as Hilt constructs the singleton.
+     */
+    private val focNetworkOverride = java.util.concurrent.atomic.AtomicReference<FocChain?>(null)
+
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO,
+    )
+
+    init {
+        scope.launch {
+            focNetworkSource.focNetworkOverride.collect { focNetworkOverride.set(it) }
+        }
+    }
 
     /**
      * Block height -> header timestamp. Block timestamps are immutable, so entries never
@@ -702,11 +723,10 @@ class ArkivClientImpl @Inject constructor(
         val cidGateMetadata = parseGateMetadata("cid_gate", "cidGate")
         val tokenGate = toTokenGate()
 
-        // Network selection (writer-independent). The gate chain is a per-record
-        // override; otherwise the network comes from the Arkiv endpoint the app is
-        // pointed at — testnet Tiramisu means Filecoin calibration, a mainnet
-        // endpoint means Filecoin mainnet. This is app-wide, so it does not depend
-        // on any uploader stamping a network into their entity.
+        // Network selection (writer-independent). The application setting wins when set;
+        // otherwise the gate chain is a per-record override, and records with no gate
+        // signal follow the Arkiv endpoint (testnet Tiramisu means calibration, a mainnet
+        // endpoint means mainnet). Writer-independent: no uploader needs to stamp a network.
         val focChain = resolveFocChain(tokenGate?.chain)
         val beamWallet = (firstString("owner") ?: "").lowercase()
             .takeIf { it.matches(Regex("^0x[0-9a-f]{40}$")) }
@@ -930,16 +950,15 @@ class ArkivClientImpl @Inject constructor(
     /**
      * Which Filecoin network a record's piece lives on.
      *
-     * Writer-independent: the reader never trusts a provider list baked into an
-     * entity, and likewise does not require the uploader to stamp a network. The
-     * gate chain is a *per-record override* when present (a Sepolia gate implies
-     * calibration, a mainnet gate implies mainnet); otherwise the network follows
-     * the Arkiv endpoint the app is pointed at — testnet Tiramisu means Filecoin
-     * calibration, a mainnet Arkiv endpoint means Filecoin mainnet. With no signal
-     * at all we default to calibration (every record published to date is testnet
-     * content).
+     * Network selection (writer-independent). A user-set override (application settings)
+     * wins for every record; otherwise the gate chain is a per-record override (a Sepolia
+     * gate implies calibration, a mainnet gate implies mainnet), and records with no gate
+     * signal follow the Arkiv endpoint the app is pointed at — testnet Tiramisu means
+     * Filecoin calibration, a mainnet endpoint means Filecoin mainnet. App-wide, so it
+     * does not depend on any uploader stamping a network into their entity.
      */
     internal fun resolveFocChain(gateChain: String?): FocChain {
+        focNetworkOverride.get()?.let { return it }
         HavenChain.parse(gateChain)?.let { return if (it.isTestnet) FocChain.CALIBRATION else FocChain.MAINNET }
         return config.resolvedFocChain
     }

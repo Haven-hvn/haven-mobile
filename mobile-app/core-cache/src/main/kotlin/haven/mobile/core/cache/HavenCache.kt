@@ -1,11 +1,19 @@
 package haven.mobile.core.cache
 
+import cloud.filecoin.foc.cache.FocChain
 import cloud.filecoin.foc.cache.PieceRef
 import cloud.filecoin.foc.cache.PieceTransform
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
 interface HavenCache {
+    /**
+     * Best-effort pre-fill of the on-chain SP registry for [chains], at session start, so the
+     * first piece miss is not the call that pays for the registry read. No per-piece probes;
+     * never throws. Default no-op so fakes and tests need not implement it.
+     */
+    suspend fun warmupProviders(chains: List<FocChain>) {}
+
     suspend fun get(ref: PieceRef): Result<ByteArray>
     fun stream(ref: PieceRef): Flow<ByteArray>
 

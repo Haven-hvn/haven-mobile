@@ -1,5 +1,6 @@
 package haven.mobile.core.cache.mirror
 
+import cloud.filecoin.foc.cache.FocChain
 import haven.mobile.core.domain.HavenChain
 import kotlinx.coroutines.flow.Flow
 
@@ -29,6 +30,22 @@ interface SettingsRepository {
     suspend fun setClearOnDisconnect(enabled: Boolean)
     suspend fun setKeepUnlocked(enabled: Boolean)
     suspend fun setEnabledChains(chains: Set<HavenChain>)
+
+    /**
+     * Which Filecoin Onchain Cloud network pieces are fetched from — application-wide, not
+     * per wallet, because the network is a property of the deployment being read, not of the
+     * identity reading it.
+     *
+     * `null` (the default) means automatic: per-record gate chain when present, otherwise
+     * inferred from the Arkiv endpoint (testnet means calibration, anything else mainnet).
+     * A non-null value forces that network for every record.
+     *
+     * Unlike the cache preferences this is stored under a plain (unscoped) DataStore key —
+     * it is not per identity, and [clearFor] deliberately leaves it alone.
+     */
+    val focNetwork: Flow<FocChain?>
+
+    suspend fun setFocNetwork(network: FocChain?)
 
     /** Deletes every preference stored under [walletAddress]'s identity namespace. */
     suspend fun clearFor(walletAddress: String)

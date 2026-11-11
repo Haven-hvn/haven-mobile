@@ -63,6 +63,11 @@ fun HavenApp(
         }
     }
 
+    // Fire-and-forget registry warm: instantiating the viewmodel is the trigger. It waits for a
+    // wallet session and warms only the configured Filecoin network.
+    @Suppress("unused")
+    val providerWarmupViewModel: ProviderWarmupViewModel = hiltViewModel()
+
     // Session playback, read at the activity scope so the bar survives every navigation. The bar
     // hides on the viewer itself, where the full player is already visible.
     val playerViewModel: NowPlayingViewModel = hiltViewModel()
