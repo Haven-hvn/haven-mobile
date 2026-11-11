@@ -702,20 +702,12 @@ class ArkivClientImpl @Inject constructor(
         val cidGateMetadata = parseGateMetadata("cid_gate", "cidGate")
         val tokenGate = toTokenGate()
 
-        // Retrieval scoping the record does not carry: the 2.0 payload holds only the
-        // `piece` locator. foc-cache builds /piece candidates solely from this ref
-        // (RemoteStore throws "No candidate endpoints" on an empty one), so supply
-        // what the writer guarantees by convention: haven-cli uploads withCDN
-        // (Filecoin Beam) on the gate's network, and the Beam per-account subdomain
-        // is keyed by the uploader wallet (the record owner).
-        val focChain = tokenGate?.chain
-            ?.let { HavenChain.parse(it) }
-            ?.let { if (it.isTestnet) FocChain.CALIBRATION else FocChain.MAINNET }
-            // Ungated records carry no chain signal at all (no gate, no network).
-            // Default to CALIBRATION: every record published to date is testnet
-            // content, and Beam hosts are per-network — guessing MAINNET 404s on
-            // calibration pieces. Revisit if mainnet-ungated records appear.
-            ?: FocChain.CALIBRATION
+        // Network selection (writer-independent). The gate chain is a per-record
+        // override; otherwise the network comes from the Arkiv endpoint the app is
+        // pointed at — testnet Tiramisu means Filecoin calibration, a mainnet
+        // endpoint means Filecoin mainnet. This is app-wide, so it does not depend
+        // on any uploader stamping a network into their entity.
+        val focChain = resolveFocChain(tokenGate?.chain)
         val beamWallet = (firstString("owner") ?: "").lowercase()
             .takeIf { it.matches(Regex("^0x[0-9a-f]{40}$")) }
 
@@ -933,6 +925,23 @@ class ArkivClientImpl @Inject constructor(
             threshold = threshold,
             tokenStandard = standard,
         )
+    }
+
+    /**
+     * Which Filecoin network a record's piece lives on.
+     *
+     * Writer-independent: the reader never trusts a provider list baked into an
+     * entity, and likewise does not require the uploader to stamp a network. The
+     * gate chain is a *per-record override* when present (a Sepolia gate implies
+     * calibration, a mainnet gate implies mainnet); otherwise the network follows
+     * the Arkiv endpoint the app is pointed at — testnet Tiramisu means Filecoin
+     * calibration, a mainnet Arkiv endpoint means Filecoin mainnet. With no signal
+     * at all we default to calibration (every record published to date is testnet
+     * content).
+     */
+    internal fun resolveFocChain(gateChain: String?): FocChain {
+        HavenChain.parse(gateChain)?.let { return if (it.isTestnet) FocChain.CALIBRATION else FocChain.MAINNET }
+        return config.resolvedFocChain
     }
 
     /**

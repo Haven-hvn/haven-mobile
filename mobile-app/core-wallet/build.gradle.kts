@@ -26,7 +26,7 @@ android {
 
 dependencies {
     implementation(project(":core-domain"))
-    implementation("io.github.haven-hvn:foc-cache:0.3.1")
+    implementation("io.github.haven-hvn:foc-cache:0.4.0")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.androidx.datastore.preferences)
     implementation("com.google.dagger:hilt-android:2.60.1")

@@ -11,15 +11,16 @@ import org.junit.jupiter.api.Test
 
 /**
  * Retrieval scoping for Arkiv-sourced items: the 2.0 record carries only the
- * `piece` locator, so the ref must supply what the writer guarantees —
- * haven-cli uploads withCDN (Filecoin Beam) on the gate's network, with the
- * Beam subdomain keyed by the uploader wallet. foc-cache builds /piece
- * candidates solely from the ref and throws "No candidate endpoints" on an
- * empty one, so a bare locator must still become a Beam candidate.
+ * `piece` locator. The ref supplies the Beam candidate (keyed by the uploader
+ * wallet, on the gate's network) and the network for foc-cache's writer-independent
+ * on-chain provider resolution. The network comes from the gate chain when present,
+ * otherwise from the Arkiv endpoint the app is pointed at.
  */
 class PieceRefScopingTest {
 
-    private val client = ArkivClientImpl(ArkivConfig(endpointUrl = "https://example.com"))
+    private val client = ArkivClientImpl(
+        ArkivConfig(endpointUrl = "https://example.com", focChain = FocChain.CALIBRATION),
+    )
 
     private fun hexPayload(json: String): String =
         "0x" + json.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
@@ -67,6 +68,16 @@ class PieceRefScopingTest {
     }
 
     @Test
+    fun `ref carries no provider list so foc resolves providers from chain`() {
+        // The 2.0 record has only the piece locator. The ref must leave
+        // providerServiceUrls empty (writer-independent) and set the network, so
+        // foc-cache resolves the SPs from the on-chain registry at fetch/probe time.
+        val ref = refOf("0x5C32469325d4093AB142dDDC1305F91d76e45141", 11155111)
+        assertTrue(ref.providerServiceUrls.isEmpty())
+        assertEquals(FocChain.CALIBRATION, ref.chain)
+    }
+
+    @Test
     fun `mainnet gate resolves to mainnet beam`() {
         val ref = refOf("0x5C32469325d4093AB142dDDC1305F91d76e45141", 1)
         assertEquals(FocChain.MAINNET, ref.chain)
@@ -84,13 +95,42 @@ class PieceRefScopingTest {
     }
 
     @Test
-    fun `missing gate falls back to calibration`() {
-        // Ungated records carry no chain signal; every record published to
-        // date is testnet content, and the mainnet Beam host 404s on
-        // calibration pieces (proven live: same piece 200 on calibration,
-        // 404 without the infix).
-        val ref = refOf("0x5C32469325d4093AB142dDDC1305F91d76e45141", null)
+    fun `missing gate infers calibration from a testnet arkiv endpoint`() {
+        // Ungated records carry no gate signal. The network follows the Arkiv
+        // endpoint: Tiramisu (testnet) means Filecoin calibration.
+        val testnetClient = ArkivClientImpl(
+            ArkivConfig(endpointUrl = "https://rpc.tiramisu.db-chain.testnet.arkiv.network"),
+        )
+        val ref = with(testnetClient) {
+            normalizeRpcEntity(row("0x5C32469325d4093AB142dDDC1305F91d76e45141", null, payload()))
+                .toMediaItem().pieceRef!!
+        }
         assertEquals(FocChain.CALIBRATION, ref.chain)
         assertTrue(ref.cdnEnabled)
+    }
+
+    @Test
+    fun `mainnet arkiv endpoint scopes ungated records to mainnet`() {
+        val mainnetClient = ArkivClientImpl(
+            ArkivConfig(endpointUrl = "https://rpc.mainnet.arkiv.network"),
+        )
+        val ref = with(mainnetClient) {
+            normalizeRpcEntity(row("0x5C32469325d4093AB142dDDC1305F91d76e45141", null, payload()))
+                .toMediaItem().pieceRef!!
+        }
+        assertEquals(FocChain.MAINNET, ref.chain)
+    }
+
+    @Test
+    fun `gate chain overrides the endpoint network`() {
+        // A Sepolia gate on a mainnet endpoint still resolves to calibration.
+        val mainnetClient = ArkivClientImpl(
+            ArkivConfig(endpointUrl = "https://rpc.mainnet.arkiv.network"),
+        )
+        val ref = with(mainnetClient) {
+            normalizeRpcEntity(row("0x5C32469325d4093AB142dDDC1305F91d76e45141", 11155111, payload()))
+                .toMediaItem().pieceRef!!
+        }
+        assertEquals(FocChain.CALIBRATION, ref.chain)
     }
 }
