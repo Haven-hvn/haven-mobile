@@ -33,7 +33,7 @@ android {
 
 dependencies {
     implementation(project(":core-domain"))
-    implementation("io.github.haven-hvn:foc-cache:0.4.0")
+    implementation("io.github.haven-hvn:foc-cache:0.4.1")
     implementation(libs.kotlinx.serialization)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.datetime)
