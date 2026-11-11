@@ -261,7 +261,20 @@ class WatchViewModel @Inject constructor(
                 // (no signature, nothing stored) that can tell the reader
                 // "this wallet already qualifies" before they are asked for
                 // anything. Only a proven hold is claimed; see NeedsSignature.
-                content.value = ContentState.NeedsSignature(gateHeld = readGateHeld(media))
+                //
+                // Publish the disclosure first and fill in the balance verdict when it
+                // lands. The RPC check can take seconds on a slow network, and making
+                // the reader wait for it before they can even read what they are signing
+                // is exactly the "Preparing…" stall this screen must not have. The signed
+                // unlock remains the authority, so a late or absent verdict is safe.
+                content.value = ContentState.NeedsSignature(gateHeld = null)
+                viewModelScope.launch {
+                    val held = readGateHeld(media)
+                    val current = content.value
+                    if (current is ContentState.NeedsSignature && current.gateHeld == null) {
+                        content.value = current.copy(gateHeld = held)
+                    }
+                }
             } else if (media.kind == MediaKind.FILE) {
                 // The file viewer owns its explicit save action; staging here
                 // would decrypt a file nobody asked to export yet. Stay Idle —

@@ -11,7 +11,7 @@ android {
 dependencies {
     implementation(project(":core-domain"))
     implementation(project(":core-wallet"))
-    implementation("io.github.haven-hvn:foc-cache:0.4.2")
+    implementation("io.github.haven-hvn:foc-cache:0.4.5")
     implementation("com.google.dagger:hilt-android:2.60.1")
     implementation("com.jakewharton.timber:timber:5.0.1")
     ksp("com.google.dagger:hilt-compiler:2.60.1")

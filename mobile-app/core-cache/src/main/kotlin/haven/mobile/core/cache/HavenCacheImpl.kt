@@ -102,6 +102,11 @@ class HavenCacheImpl @Inject constructor(
                     chunkSize = defaults.chunkSize,
                     maxParallelFetches = defaults.maxParallelFetches,
                     hedgeDelay = Duration.ofMillis(defaults.hedgeDelayMillis),
+                    // The registry has ~50 active PDPs; fan out availability probes so a
+                    // serving provider is found in the first wave instead of waiting
+                    // behind a batch of dead hosts for the timeout.
+                    probeConcurrency = 64,
+                    probeTimeout = Duration.ofSeconds(5),
                     // java.time.Duration has no INFINITE; ~1000 years is longer than any process lives.
                     registryCacheTtl = Duration.ofDays(365_000),
                 ),
