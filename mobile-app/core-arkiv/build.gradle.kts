@@ -28,6 +28,12 @@ android {
             "ARKIV_ENDPOINT_URL",
             "\"${localProps.getProperty("arkiv.endpointUrl", "")}\"",
         )
+        // Optional read-quota key (X-API-KEY).
+        buildConfigField(
+            "String",
+            "ARKIV_API_KEY",
+            "\"${localProps.getProperty("arkiv.apiKey", "")}\"",
+        )
     }
 }
 

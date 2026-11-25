@@ -30,5 +30,6 @@ object ArkivConfigModule {
     fun provideArkivConfig(): ArkivConfig = ArkivConfig(
         endpointUrl = BuildConfig.ARKIV_ENDPOINT_URL
             .ifBlank { "https://rpc.rabdi.db-chain.testnet.arkiv.network" },
+        apiKey = BuildConfig.ARKIV_API_KEY.trim(),
     )
 }

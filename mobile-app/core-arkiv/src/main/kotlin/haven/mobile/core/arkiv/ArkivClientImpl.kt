@@ -123,7 +123,7 @@ class ArkivClientImpl @Inject constructor(
         val body = buildArkivQueryBody(query, limit, cursor)
             .toString()
             .toRequestBody("application/json".toMediaType())
-        httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).build()).execute().use { response ->
+        httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).apply { if (config.apiKey.isNotBlank()) header("X-API-KEY", config.apiKey) }.build()).execute().use { response ->
             // Feed the budget layer before reading the body: a 429 or a high quota reading starts a
             // cooldown so the next call fails fast instead of spending more of the hour's budget.
             callGate.noteResponse(
@@ -448,7 +448,7 @@ class ArkivClientImpl @Inject constructor(
                 .put("params", JSONArray().put("0x" + block.toString(16)).put(false))
                 .toString()
                 .toRequestBody("application/json".toMediaType())
-            httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).build())
+            httpClient.newCall(Request.Builder().url(config.endpointUrl).post(body).apply { if (config.apiKey.isNotBlank()) header("X-API-KEY", config.apiKey) }.build())
                 .execute().use { response ->
                     if (!response.isSuccessful) return@runCatching null
                     val text = response.body?.string() ?: return@runCatching null

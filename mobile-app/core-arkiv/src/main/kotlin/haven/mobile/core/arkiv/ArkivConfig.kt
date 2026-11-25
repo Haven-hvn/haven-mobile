@@ -21,6 +21,10 @@ data class ArkivConfig(
     /** Server page size. 20 matches the web dApp so paging behaviour stays comparable. */
     val pageSize: Int = 20,
     val focChain: FocChain? = null,
+    /**
+     * Optional Arkiv access key, sent as `X-API-KEY` on reads. Blank means anonymous tier.
+     */
+    val apiKey: String = "",
 ) {
     val isConfigured: Boolean get() = endpointUrl.isNotBlank()
 
