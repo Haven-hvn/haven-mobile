@@ -63,7 +63,7 @@ class IdentityIsolationTest {
     )
 
     private class Recorder(session: MutableSession, store: EpochKeyStore, aes: AesKeyCache) : HavenAolImpl(
-        HavenAolConfig(canisterId = "gny6k-fqaaa-aaaab-ag3ra-cai", icHost = "https://ic0.app"),
+        HavenAolConfig(canisterId = "3gzy3-kaaaa-aaaan-q6y6q-cai", icHost = "https://ic0.app"),
         session,
         aes,
         NonceManager(),

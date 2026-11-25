@@ -115,7 +115,7 @@ class EpochKeyPersistenceTest {
     )
 
     private class RestartRecorder(session: MutableSession, store: EpochKeyStore) : HavenAolImpl(
-        HavenAolConfig(canisterId = "gny6k-fqaaa-aaaab-ag3ra-cai", icHost = "https://ic0.app"),
+        HavenAolConfig(canisterId = "3gzy3-kaaaa-aaaan-q6y6q-cai", icHost = "https://ic0.app"),
         session,
         haven.mobile.core.crypto.AesKeyCache(),
         NonceManager(),

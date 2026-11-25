@@ -107,7 +107,7 @@ class SealedV4UnlockTest {
         val session: Session = Session(),
         val unwrap: Unwrap = Unwrap(),
     ) : HavenAolImpl(
-        HavenAolConfig(canisterId = "gny6k-fqaaa-aaaab-ag3ra-cai", icHost = "https://ic0.app"),
+        HavenAolConfig(canisterId = "3gzy3-kaaaa-aaaan-q6y6q-cai", icHost = "https://ic0.app"),
         session,
         AesKeyCache(),
         NonceManager(),

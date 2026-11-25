@@ -33,7 +33,7 @@ class DecryptAllBatchTest {
         unwrap: VetKdUnwrap,
         private val cids: List<String>,
     ) : HavenAolImpl(
-        HavenAolConfig(canisterId = "gny6k-fqaaa-aaaab-ag3ra-cai", icHost = "https://ic0.app"),
+        HavenAolConfig(canisterId = "3gzy3-kaaaa-aaaan-q6y6q-cai", icHost = "https://ic0.app"),
         session,
         AesKeyCache(),
         NonceManager(),

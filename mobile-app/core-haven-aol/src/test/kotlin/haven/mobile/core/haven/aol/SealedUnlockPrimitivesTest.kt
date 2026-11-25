@@ -22,7 +22,7 @@ import org.junit.Assert.*
 class SealedUnlockPrimitivesTest {
 
     private fun impl(unwrap: VetKdUnwrap = unavailableUnwrap()) = HavenAolImpl(
-        HavenAolConfig(canisterId = "gny6k-fqaaa-aaaab-ag3ra-cai", icHost = "https://ic0.app"),
+        HavenAolConfig(canisterId = "3gzy3-kaaaa-aaaan-q6y6q-cai", icHost = "https://ic0.app"),
         fakeSession(),
         AesKeyCache(),
         NonceManager(),
