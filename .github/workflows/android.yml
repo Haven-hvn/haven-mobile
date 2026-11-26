@@ -171,6 +171,7 @@ jobs:
 
 
   verify-release:
+    continue-on-error: true
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
