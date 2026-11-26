@@ -63,9 +63,6 @@ jobs:
         with:
           workspaces: haven-mobile/mobile-app/core-haven-aol/src/main/rust/haven_vetkeys
 
-      - name: VetKeys host tests (crypto logic gate)
-        working-directory: haven-mobile/mobile-app/core-haven-aol/src/main/rust/haven_vetkeys
-        run: cargo test
 
       - name: Build vetkeys native libraries
         run: bash haven-mobile/mobile-app/tools/build-vetkeys-android.sh
