@@ -16,10 +16,11 @@ use ic_vetkeys::{
     DerivedPublicKey, EncryptedVetKey, IbeCiphertext, TransportSecretKey,
     is_valid_transport_public_key_encoding,
 };
-use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JObject};
-use jni::sys::{jbyteArray, jobjectArray};
-use rand::RngCore;
+use jni::errors::ErrorPolicy;
+use jni::objects::{JByteArray, JClass, JObject, JObjectArray};
+use jni::strings::JNIString;
+use jni::{Env, EnvUnowned, jni_str};
+use rand::Rng;
 use zeroize::Zeroize;
 
 /// 48-byte G1-compressed transport public key + 32-byte secret scalar.
@@ -66,75 +67,76 @@ pub fn unwrap_content_key(
     ibe.decrypt(&vet_key).map_err(|e| e.to_string())
 }
 
-/// Runs `f`, converting panics and errors into a thrown Java exception.
-///
-/// Returns the JNI null on failure so callers can `return` straight through. Fallible JNI
-/// calls inside map to strings first — there is no message-carrying JNI error variant, and
-/// the Java side only ever sees the thrown text.
-fn guard<'local>(
-    env: &mut JNIEnv<'local>,
-    f: impl FnOnce(&mut JNIEnv<'local>) -> Result<jbyteArray, String> + std::panic::UnwindSafe,
-) -> jbyteArray {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(env))) {
-        Ok(Ok(value)) => value,
-        Ok(Err(message)) => {
-            throw(env, &message);
-            std::ptr::null_mut()
-        }
-        Err(_) => {
-            throw(env, "vetkeys internal failure");
-            std::ptr::null_mut()
-        }
+#[derive(Debug)]
+struct VetKeysError(String);
+
+impl std::fmt::Display for VetKeysError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
-fn guard_array<'local>(
-    env: &mut JNIEnv<'local>,
-    f: impl FnOnce(&mut JNIEnv<'local>) -> Result<jobjectArray, String> + std::panic::UnwindSafe,
-) -> jobjectArray {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(env))) {
-        Ok(Ok(value)) => value,
-        Ok(Err(message)) => {
-            throw(env, &message);
-            std::ptr::null_mut()
-        }
-        Err(_) => {
-            throw(env, "vetkeys internal failure");
-            std::ptr::null_mut()
-        }
+impl std::error::Error for VetKeysError {}
+
+impl From<jni::errors::Error> for VetKeysError {
+    fn from(err: jni::errors::Error) -> Self {
+        Self(format!("vetkeys JNI error: {err}"))
+    }
+}
+
+impl From<String> for VetKeysError {
+    fn from(msg: String) -> Self {
+        Self(msg)
     }
 }
 
 /// Fallible JNI calls map to strings: the Java side only ever sees thrown text.
 trait IntoStringError<T> {
-    fn or_throw(self, what: &str) -> Result<T, String>;
+    fn or_throw(self, what: &str) -> Result<T, VetKeysError>;
 }
 
 impl<T> IntoStringError<T> for jni::errors::Result<T> {
-    fn or_throw(self, what: &str) -> Result<T, String> {
-        self.map_err(|e| format!("vetkeys JNI error during {what}: {e}"))
+    fn or_throw(self, what: &str) -> Result<T, VetKeysError> {
+        self.map_err(|e| VetKeysError(format!("vetkeys JNI error during {what}: {e}")))
     }
 }
 
-fn throw(env: &mut JNIEnv, message: &str) {
-    // Error strings here come from vetkeys' static messages plus our own decode failures —
-    // never key material — so they are safe to surface for diagnostics.
-    let _ = env.throw_new("java/lang/IllegalStateException", message);
-}
+/// Converts errors and panics into a thrown `java.lang.IllegalStateException` and returns null.
+///
+/// Error strings here come from vetkeys' static messages plus our own decode failures —
+/// never key material — so they are safe to surface for diagnostics.
+struct ThrowIllegalStateAndDefault;
 
-fn to_byte_array<'a>(env: &'a JNIEnv<'a>, bytes: &[u8]) -> jni::errors::Result<JByteArray<'a>> {
-    let arr = env.new_byte_array(bytes.len() as i32)?;
-    env.set_byte_array_region(&arr, 0, unsafe {
-        std::slice::from_raw_parts(bytes.as_ptr() as *const i8, bytes.len())
-    })?;
-    Ok(arr)
-}
+impl<T: Default> ErrorPolicy<T, VetKeysError> for ThrowIllegalStateAndDefault {
+    type Captures<'unowned_env_local: 'native_method, 'native_method> = ();
 
-fn from_byte_array(env: &mut JNIEnv, arr: &JByteArray) -> jni::errors::Result<Vec<u8>> {
-    let len = env.get_array_length(arr)? as usize;
-    let mut buf = vec![0i8; len];
-    env.get_byte_array_region(arr, 0, &mut buf)?;
-    Ok(buf.into_iter().map(|b| b as u8).collect())
+    fn on_error<'unowned_env_local: 'native_method, 'native_method>(
+        env: &mut Env<'unowned_env_local>,
+        _cap: &mut Self::Captures<'unowned_env_local, 'native_method>,
+        err: VetKeysError,
+    ) -> jni::errors::Result<T> {
+        if !env.exception_check() {
+            let _ = env.throw_new(
+                jni_str!("java/lang/IllegalStateException"),
+                JNIString::from(err.0),
+            );
+        }
+        Ok(T::default())
+    }
+
+    fn on_panic<'unowned_env_local: 'native_method, 'native_method>(
+        env: &mut Env<'unowned_env_local>,
+        _cap: &mut Self::Captures<'unowned_env_local, 'native_method>,
+        _payload: Box<dyn std::any::Any + Send + 'static>,
+    ) -> jni::errors::Result<T> {
+        if !env.exception_check() {
+            let _ = env.throw_new(
+                jni_str!("java/lang/IllegalStateException"),
+                jni_str!("vetkeys internal failure"),
+            );
+        }
+        Ok(T::default())
+    }
 }
 
 /// `VetKeysNative.nativeTransportKeypair`: `[transportPublicKey, transportSecret]`.
@@ -142,20 +144,29 @@ fn from_byte_array(env: &mut JNIEnv, arr: &JByteArray) -> jni::errors::Result<Ve
 pub extern "system" fn Java_haven_mobile_core_haven_aol_vetkeys_VetKeysNative_nativeTransportKeypair<
     'local,
 >(
-    mut env: JNIEnv<'local>,
+    mut unowned_env: EnvUnowned<'local>,
     _cls: JClass<'local>,
-) -> jobjectArray {
-    guard_array(&mut env, |env| {
-        let (public, secret) = transport_keypair()?;
-        let out = env
-            .new_object_array(2, "[B", JObject::null())
-            .or_throw("allocating keypair array")?;
-        env.set_object_array_element(&out, 0, to_byte_array(env, &public).or_throw("copying public key")?)
-            .or_throw("storing public key")?;
-        env.set_object_array_element(&out, 1, to_byte_array(env, &secret).or_throw("copying secret")?)
-            .or_throw("storing secret")?;
-        Ok(out.into_raw())
-    })
+) -> JObjectArray<'local> {
+    unowned_env
+        .with_env(|env| -> Result<JObjectArray<'local>, VetKeysError> {
+            let (public, mut secret) = transport_keypair()?;
+            let out = env
+                .new_object_array(2, jni_str!("[B"), JObject::null())
+                .or_throw("allocating keypair array")?;
+            let pub_arr = env
+                .byte_array_from_slice(&public)
+                .or_throw("copying public key")?;
+            env.set_object_array_element(&out, 0, &pub_arr)
+                .or_throw("storing public key")?;
+            let sec_arr = env
+                .byte_array_from_slice(&secret)
+                .or_throw("copying secret")?;
+            secret.zeroize();
+            env.set_object_array_element(&out, 1, &sec_arr)
+                .or_throw("storing secret")?;
+            Ok(out)
+        })
+        .resolve::<ThrowIllegalStateAndDefault>()
 }
 
 /// `VetKeysNative.nativeUnwrapContentKey`: sealed record + canister outputs -> AES key.
@@ -163,34 +174,48 @@ pub extern "system" fn Java_haven_mobile_core_haven_aol_vetkeys_VetKeysNative_na
 pub extern "system" fn Java_haven_mobile_core_haven_aol_vetkeys_VetKeysNative_nativeUnwrapContentKey<
     'local,
 >(
-    mut env: JNIEnv<'local>,
+    mut unowned_env: EnvUnowned<'local>,
     _cls: JClass<'local>,
     enc_vet_key: JByteArray<'local>,
     transport_secret: JByteArray<'local>,
     verification_key: JByteArray<'local>,
     derivation_input: JByteArray<'local>,
     encrypted_aes_key_b64: JByteArray<'local>,
-) -> jbyteArray {
-    guard(&mut env, |env| {
-        let enc_vet_key = from_byte_array(env, &enc_vet_key).or_throw("reading encrypted key")?;
-        let mut secret = from_byte_array(env, &transport_secret).or_throw("reading transport secret")?;
-        let verification_key =
-            from_byte_array(env, &verification_key).or_throw("reading verification key")?;
-        let derivation_input =
-            from_byte_array(env, &derivation_input).or_throw("reading derivation input")?;
-        let sealed_b64 =
-            from_byte_array(env, &encrypted_aes_key_b64).or_throw("reading sealed key")?;
-        let aes = unwrap_content_key(
-            &enc_vet_key,
-            &secret,
-            &verification_key,
-            &derivation_input,
-            &sealed_b64,
-        )?;
-        // The secret's JVM copy is zeroed Kotlin-side; wipe the native copy too.
-        secret.zeroize();
-        Ok(to_byte_array(env, &aes).or_throw("returning AES key")?.into_raw())
-    })
+) -> JByteArray<'local> {
+    unowned_env
+        .with_env(|env| -> Result<JByteArray<'local>, VetKeysError> {
+            let enc_vet_key = env
+                .convert_byte_array(&enc_vet_key)
+                .or_throw("reading encrypted key")?;
+            let mut secret = env
+                .convert_byte_array(&transport_secret)
+                .or_throw("reading transport secret")?;
+            let verification_key = env
+                .convert_byte_array(&verification_key)
+                .or_throw("reading verification key")?;
+            let derivation_input = env
+                .convert_byte_array(&derivation_input)
+                .or_throw("reading derivation input")?;
+            let sealed_b64 = env
+                .convert_byte_array(&encrypted_aes_key_b64)
+                .or_throw("reading sealed key")?;
+            let aes_res = unwrap_content_key(
+                &enc_vet_key,
+                &secret,
+                &verification_key,
+                &derivation_input,
+                &sealed_b64,
+            );
+            // The secret's JVM copy is zeroed Kotlin-side; wipe the native copy too.
+            secret.zeroize();
+            let mut aes = aes_res?;
+            let out = env
+                .byte_array_from_slice(&aes)
+                .or_throw("returning AES key")?;
+            aes.zeroize();
+            Ok(out)
+        })
+        .resolve::<ThrowIllegalStateAndDefault>()
 }
 
 #[cfg(test)]

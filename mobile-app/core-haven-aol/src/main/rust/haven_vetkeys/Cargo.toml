@@ -8,9 +8,7 @@ name = "haven_vetkeys"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Pinned exact: this is the audited VetKD client. @icp-sdk/vetkeys 0.5.0 (what the
-# dapp uses against this canister) shipped the same day as ic-vetkeys 0.8.0/0.8.1,
-# so the 0.8 line is the protocol match. Never float this casually.
+# Audited VetKD client matching @icp-sdk/vetkeys 0.7.0 in haven-dapp.
 ic-vetkeys = "0.9.0"
 jni = "0.22.4"
 base64 = "0.23.1"
