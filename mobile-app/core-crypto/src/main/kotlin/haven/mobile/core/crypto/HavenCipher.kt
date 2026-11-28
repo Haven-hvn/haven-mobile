@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.GeneralSecurityException
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -273,10 +274,17 @@ class HavenCipherImpl @javax.inject.Inject constructor() : HavenCipher {
         ciphertextAndTag: ByteArray,
         aad: ByteArray?,
     ): ByteArray {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
-        if (aad != null) cipher.updateAAD(aad)
-        return cipher.doFinal(ciphertextAndTag)
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, iv))
+            if (aad != null) cipher.updateAAD(aad)
+            cipher.doFinal(ciphertextAndTag)
+        } catch (e: GeneralSecurityException) {
+            throw HavenError.PlaybackDecryptFailed(
+                "${e::class.java.simpleName}: ${e.message ?: "AES-GCM decryption failed"}",
+                e,
+            )
+        }
     }
 }
 

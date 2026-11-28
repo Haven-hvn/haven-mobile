@@ -21,15 +21,16 @@ import java.io.ByteArrayOutputStream
  * Scope is deliberately narrow — the IPIP-499 UnixFS shape and nothing else:
  * - Non-CAR input (legacy raw ciphertext) passes through byte-identical.
  * - Raw-leaf blocks (`0x55`) stream through in arrival order.
- * - Exactly one dag-pb block (`0x70`) may follow: it must be the CAR header's root,
- *   and its links must name the raw blocks in the order they arrived. Then the
- *   stream was a faithful file and the bytes stand.
+ * - One or more dag-pb blocks (`0x70`) may form a single-root UnixFS tree (flat or
+ *   multi-level): the CAR header's root must be present, every buffered dag-pb node
+ *   must be reachable from it without cycles, and the depth-first leaf order must
+ *   name the raw blocks in the exact order they arrived.
  * - Anything else fails LOUD instead of decrypting frame headers as ciphertext:
- *   a second dag-pb node (nested/HAMT sharding), a root whose links disagree with
- *   arrival order, multiple raw blocks with no root to check them against, or an
- *   unknown codec. Truncated/ambiguous prefixes fail OPEN (pass through) so the
- *   decrypt layer — which already fails closed with framing/tag errors — stays the
- *   single judge of validity.
+ *   unreferenced or cyclic dag-pb nodes, a tree whose leaves disagree with arrival
+ *   order, multiple raw blocks with no root to check them against, or an unknown
+ *   codec. Truncated/ambiguous prefixes fail OPEN (pass through) so the decrypt
+ *   layer — which already fails closed with framing/tag errors — stays the single
+ *   judge of validity.
  *
  * @param onProgress reports cumulative `(carBytesReceived, payloadBytesEmitted)`
  * after each processed chunk so the UI can distinguish a slow fetch (received
@@ -197,8 +198,10 @@ fun Flow<ByteArray>.stripCarContainer(
 }
 
 /**
- * End-of-stream check: without a root nothing ordered multi-block data, with one
- * its links must name exactly the raw blocks we already emitted, in order.
+ * End-of-stream check: without a root nothing ordered multi-block data; with one,
+ * walking the dag-pb tree (flat or multi-level) depth-first from the CAR header's
+ * root must visit every buffered dag-pb node without cycles and name exactly the
+ * raw blocks we already emitted, in order.
  */
 private fun verifyRoot(
     rawCids: List<ByteArray>,
@@ -213,20 +216,64 @@ private fun verifyRoot(
         }
         return
     }
-    if (dagPb.size != 1 || headerRoots.size != 1) {
+    if (headerRoots.size != 1) {
         throw HavenError.PlaybackDecryptFailed(
-            "Nested CAR container: only flat raw-leaf pieces are supported",
+            "CAR container must declare a single root",
         )
     }
-    val (rootCidKey, rootData) = dagPb.entries.single()
-    if (rootCidKey != headerRoots.single().toHexKey()) {
+    val rootCidKey = headerRoots.single().toHexKey()
+    if (rootCidKey !in dagPb) {
         throw HavenError.PlaybackDecryptFailed(
-            "Nested CAR container: only flat raw-leaf pieces are supported",
+            "CAR root block is missing from dag-pb nodes",
         )
     }
-    val links = parseDagPbLinks(rootData)
-    val expected = links.map { leafCidFor(it).toHexKey() }
-    if (expected != rawCids.map { it.toHexKey() }) {
+
+    val expectedLeaves = mutableListOf<String>()
+    val visited = mutableSetOf<String>()
+    val visiting = mutableSetOf<String>()
+
+    fun walk(nodeKey: String, depth: Int) {
+        if (depth > MAX_DAG_PB_DEPTH) {
+            throw HavenError.PlaybackDecryptFailed("CAR dag-pb tree exceeds maximum depth ($MAX_DAG_PB_DEPTH)")
+        }
+        if (!visiting.add(nodeKey)) {
+            throw HavenError.PlaybackDecryptFailed("Cyclic CAR dag-pb graph")
+        }
+        val nodeData = dagPb[nodeKey]
+            ?: throw HavenError.PlaybackDecryptFailed("CAR dag-pb child node is missing")
+        visited.add(nodeKey)
+        for (link in parseDagPbLinks(nodeData)) {
+            val parsedCid = parseCid(link, 0)
+            if (parsedCid != null && parsedCid.second == link.size) {
+                // Full CIDv1 link (e.g., UnixFS cidVersion: 1).
+                when (parsedCid.first) {
+                    RAW_CODEC -> expectedLeaves += link.toHexKey()
+                    DAG_PB_CODEC -> walk(link.toHexKey(), depth + 1)
+                    else -> throw HavenError.PlaybackDecryptFailed(
+                        "Unsupported CAR link codec 0x${parsedCid.first.toString(16)}",
+                    )
+                }
+            } else {
+                // Bare multihash link (CIDv0 / legacy encoding): match a dag-pb child if present, else a raw leaf.
+                val dagPbChildKey = cidWithCodec(DAG_PB_CODEC, link).toHexKey()
+                if (dagPbChildKey in dagPb) {
+                    walk(dagPbChildKey, depth + 1)
+                } else {
+                    expectedLeaves += cidWithCodec(RAW_CODEC, link).toHexKey()
+                }
+            }
+        }
+        visiting.remove(nodeKey)
+    }
+
+    walk(rootCidKey, 0)
+
+    if (visited.size != dagPb.size) {
+        throw HavenError.PlaybackDecryptFailed(
+            "CAR container has unreferenced dag-pb nodes",
+        )
+    }
+    if (expectedLeaves != rawCids.map { it.toHexKey() }) {
         throw HavenError.PlaybackDecryptFailed(
             "CAR block order does not match the root links: refusing to reassemble",
         )
@@ -240,6 +287,9 @@ private const val MAX_PREFIX_BYTES = 4096
 
 /** Cap on buffered dag-pb directory data (roots are kilobytes). */
 private const val MAX_DAG_PB_BYTES = 4 * 1024 * 1024L
+
+/** Cap on dag-pb tree nesting depth to guard against pathological graphs. */
+private const val MAX_DAG_PB_DEPTH = 32
 
 private const val RAW_CODEC = 0x55L
 private const val DAG_PB_CODEC = 0x70L
@@ -501,11 +551,11 @@ private fun skipProtoField(node: ByteArray, tagPos: Int, end: Int): Int? {
     }
 }
 
-/** Rebuild the raw-leaf CID bytes for a link multihash (CIDv1 + raw codec). */
-private fun leafCidFor(multihash: ByteArray): ByteArray {
+/** Rebuild the CIDv1 bytes for a link multihash with the given codec. */
+private fun cidWithCodec(codec: Long, multihash: ByteArray): ByteArray {
     val out = ByteArrayOutputStream()
     out.write(0x01)
-    out.write(0x55)
+    out.write(codec.toInt())
     out.write(multihash, 0, multihash.size)
     return out.toByteArray()
 }

@@ -205,8 +205,29 @@ class CarContainerTest {
         assertTrue(error.message!!.contains("does not match"))
     }
 
+    /** Minimal dag-pb node linking full CIDv1 bytes, like CIDv1 UnixFS encoders emit. */
+    private fun dagPbNodeCidV1(childCids: List<ByteArray>): Pair<ByteArray, ByteArray> {
+        val out = mutableListOf<ByteArray>()
+        childCids.forEachIndexed { index, cid ->
+            val link = mutableListOf<Byte>()
+            link += 0x0A.toByte()
+            link.addAll(varint(cid.size.toLong()).toList())
+            link.addAll(cid.toList())
+            link += 0x18.toByte()
+            link.addAll(varint((100 + index).toLong()).toList())
+            val field = mutableListOf<Byte>()
+            field += 0x12.toByte()
+            field.addAll(varint(link.size.toLong()).toList())
+            field.addAll(link)
+            out += field.toByteArray()
+        }
+        val data = out.fold(ByteArray(0)) { acc, b -> acc + b }
+        val cid = byteArrayOf(0x01, 0x70, 0x12, 0x20) + sha256(data)
+        return cid to data
+    }
+
     @Test
-    fun `nested dag-pb node fails loud`() {
+    fun `unreferenced dag-pb node fails loud`() {
         val leaf = rawCid(0x22)
         val (rootCid, rootData) = dagPbRoot(listOf(leaf))
         val (otherCid, otherData) = dagPbRoot(listOf(rawCid(0x44)))
@@ -217,7 +238,62 @@ class CarContainerTest {
         val error = assertThrows(HavenError.PlaybackDecryptFailed::class.java) {
             runBlocking { flowOf(car).stripCarContainer().toList() }
         }
-        assertTrue(error.message!!.contains("Nested"))
+        assertTrue(error.message!!.contains("unreferenced"))
+    }
+
+    @Test
+    fun `multi-level dag-pb tree reassembles with bare multihash links`() = runBlocking {
+        val leafA = rawCid(0x21)
+        val leafB = rawCid(0x22)
+        val leafC = rawCid(0x23)
+        val (branch1Cid, branch1Data) = dagPbRoot(listOf(leafA, leafB))
+        val (branch2Cid, branch2Data) = dagPbRoot(listOf(leafC))
+        val (rootCid, rootData) = dagPbRoot(listOf(branch1Cid, branch2Cid))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leafA, byteArrayOf(1, 2)) +
+            carBlock(leafB, byteArrayOf(3, 4)) +
+            carBlock(branch1Cid, branch1Data) +
+            carBlock(leafC, byteArrayOf(5, 6)) +
+            carBlock(branch2Cid, branch2Data) +
+            carBlock(rootCid, rootData)
+        val out = flowOf(car).stripCarContainer().toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6), out)
+    }
+
+    @Test
+    fun `multi-level dag-pb tree with CIDv1 links decrypts end to end`() = runBlocking {
+        val plaintext = ByteArray(600) { (it * 11).toByte() }
+        val ct = chunkedCiphertext(plaintext)
+        val p1 = ct.size / 3
+        val p2 = (ct.size * 2) / 3
+        val leafA = rawCid(0x31)
+        val leafB = rawCid(0x32)
+        val leafC = rawCid(0x33)
+        val (branch1Cid, branch1Data) = dagPbNodeCidV1(listOf(leafA, leafB))
+        val (branch2Cid, branch2Data) = dagPbNodeCidV1(listOf(leafC))
+        val (rootCid, rootData) = dagPbNodeCidV1(listOf(branch1Cid, branch2Cid))
+        val car = carHeaderFor(rootCid) +
+            carBlock(leafA, ct.copyOfRange(0, p1)) +
+            carBlock(leafB, ct.copyOfRange(p1, p2)) +
+            carBlock(branch1Cid, branch1Data) +
+            carBlock(leafC, ct.copyOfRange(p2, ct.size)) +
+            carBlock(branch2Cid, branch2Data) +
+            carBlock(rootCid, rootData)
+        val stripped = flowOf(car).stripCarContainer()
+        val decrypted = cipher.decryptStream(key, stripped, null).toList()
+            .fold(ByteArray(0)) { acc, b -> acc + b }
+        assertArrayEquals(plaintext, decrypted)
+    }
+
+    @Test
+    fun `tampered ciphertext in decryptStream throws PlaybackDecryptFailed`() {
+        val ct = chunkedCiphertext(ByteArray(128) { it.toByte() })
+        ct[ct.lastIndex] = (ct[ct.lastIndex].toInt() xor 0xFF).toByte()
+        val error = assertThrows(HavenError.PlaybackDecryptFailed::class.java) {
+            runBlocking { cipher.decryptStream(key, flowOf(ct), null).toList() }
+        }
+        assertTrue(error.message!!.contains("AEADBadTagException"))
     }
 
     @Test
